@@ -25,7 +25,7 @@
   "author": "",
   "license": "ISC",
   "type": "module",
-  "dependencies": {
+  "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
     "@deepseek-ai/schemastery": "3.18.1-rc.4"

@@ -24,13 +24,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^12",
-      "onFail": "download"
-    }
-  },
   "type": "module",
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

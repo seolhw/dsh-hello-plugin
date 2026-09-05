@@ -2,18 +2,24 @@
   "name": "dsh-hello-plugin",
   "version": "0.0.1",
   "description": "hello plugin",
-  "main": "index.js",
+  "main": "lib/index.cjs",
+  "module": "lib/index.mjs",
   "files": [
-    "index.js",
+    "lib/index.cjs",
+    "lib/index.mjs",
     "cordis.patch.yml"
   ],
+  "exports": {
+    "import": "./lib/index.mjs",
+    "require": "./lib/index.cjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsdown"
   },
   "keywords": [],
   "author": "",
@@ -30,5 +36,9 @@
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
     "@deepseek-ai/schemastery": "3.18.1-rc.4"
+  },
+  "devDependencies": {
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2"
   }
 }

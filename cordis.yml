@@ -1,6 +1,6 @@
 - insert:
     - id: hello
-      name: 'file:///D:/scratch-plugin/src/my-plugin.ts'
+      name: "./src/index.ts"
       config:
-        greeting: 'Hi there'
+        greeting: "Hi there"
         maxRetries: 5

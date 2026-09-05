@@ -1,7 +1,7 @@
 import Schema from "@deepseek-ai/schemastery";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/index.d.ts
-export declare const name = "hello-plugin";
+export declare const name = "dsh-hello-plugin";
 export interface Config {
   greeting: string;
   maxRetries: number;

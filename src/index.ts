@@ -1,7 +1,7 @@
 import type { Context } from "@deepseek-ai/cordis";
 import Schema from "@deepseek-ai/schemastery";
 
-export const name = "hello-plugin";
+export const name = "dsh-hello-plugin";
 
 export interface Config {
   greeting: string;

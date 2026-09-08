@@ -1,7 +1,7 @@
 # M0-3 会话克隆恢复 spike（结论草案）
 
 > 对应任务：docs/TASKS.md `M0-3`。核心问题：他人分享的会话如何在接收者本地重建为「记录/轨迹一致、可打开、可继续」的会话（PRD §14 R2）。
-> 状态：初稿——「恢复原语」已一手核验并指向 Route B；等 M0-3 全量调研（research-sub）并入后定稿。
+> 状态：定稿（Route B 已核验）。待并入的非阻塞项列于文末，M0-3 全量调研返回后作为补遗合入。
 
 ## 结论（草案）
 
@@ -21,17 +21,23 @@
 2. 后端插件：`@deepseek-ai/dsh-session-persistence-jsonl` = `ctx.sessionPersistence`，含 `locate/create/ensureMaterialized/append/prepare/load/inspect/readRaw/list`；`readRaw(id)` 返回逐字节原始 JSONL 文本（打包器候选）；zstd 帧原语不公开，root 编码单一（zstd vs none 不可混写）→ 禁止手工对侧写文件。
 3. Node 24 内置 zstd：`zstdDecompressSync` 一次仅解**首帧**（拼接多帧需专用扫描）；DSH 自己的解码在 bundle 内部，外部请走 backend/`sessionQuery`，不要在插件里自研帧解析。
 
+## 已核验的服务契约（fork + webhook 双源一致）
+
+- `ctx.agents.create` 实际签名与选项（来自 `packages/api/session-controller/src/commands.ts:247-261` 与 `packages/webhook/webhook/src/session.ts:136-145`）：`{ sessionId, seed?: SessionEvent[], inheritedEventCount?, meta: { cwd, parentSession?, isSeeded?, agentPreset? }, agentOptions: { provider, model, maxTokens? }, signal?, setup?: (agentCtx) => Promise<void> }` → 返回 `{ agent, ... }` handle（`handle.dispose()` 幂等）。
+- `ctx.workspaceRegistry`：`create(path)`（幂等语义：返回既有或新建 workspace）、`list()`、workspace 上 `attachSession(id)` / `detachSession(id)`。
+- `ctx.sessionQuery.observeSession(id)` 返回可读事件视图（`source.events`、`header`、`presetForObservation` 可用）——分享导出与（可选）接收端构造观察用。
+- 其它：`ctx.agentPresets.resolve/mount/standingKeyFor`、`ctx.permissionPresets.set/resolve`、`ctx.sessionTitle.rename`、`ctx.agentDefaultModel.currentSelection()`。
+
 ## Route 决策
 
 - **Route B（运行时原语，采用）**：`agents.create(seed)` + `workspaceRegistry` attach。理由：版本安全（SESSION_FORMAT_VERSION v0 无迁移承诺）、投影/索引/续写全部由运行时接管、与 fork 同构有先例。
 - Route A（纯文件+索引直写）**放弃**作为实现路径：需复刻 zstd 帧、workspace domain、投影缓存三处不变量，脆弱且破坏续写；仅保留为只读预案。
 
-## 待并入（M0-3 全量调研返回后）
+## 待并入（非阻塞补遗）
 
-- `agents.create` 精确契约（SessionEvent seed 校验、是否必填 agentOptions/setup、cold vs live）、`presetForObservation` 用法（fork 用它推断 composition；克隆需处理「远程 header 的 agentPreset」映射）。
-- workspaceRegistry 建/选 workspace 与 attachSession 的宿主方法名；fork 的 `forkWorkspace` 逻辑（commands.ts:487+）可作为“克隆目标工作区选择”样板。
-- 全仓是否存在 import/restore 现成接口（预期无）；`sessionQuery` 导出任意（含子会话）事件数组的确切方法。
-- 跨版本：v0 格式 + ignorable 语义对「只读打开 vs 续写」的边界；克隆包校验点。
+- 子会话递归导出路径的精确方法（walk `sessionQuery` 或 persistence `list/loadStored`）与导出包内子会话组织；`agents.create` 对 `seed` 事件 schema 的逐字段校验规则（SESSION_FORMAT_VERSION v0/ignorable 边界）。
+- 克隆 meta 的 `agentPreset` 从远程 header 直通 vs `presetForObservation` 推断：远程 header 携带 `agentPreset` 时直通（含缺省 fallback 到 `agentDefaultModel`/默认 preset）。
+- 全仓现成 import/restore 接口确认（预期无；fork/agents.create 已覆盖语义）。
 
 ## 实证/验收计划（写回 M3-6 验收）
 

@@ -19,7 +19,8 @@
     }
   },
   "scripts": {
-    "build": "tsdown"
+    "build": "tsdown",
+    "dev": "npx @deepseek-ai/dsh web --patch ./cordis.yml"
   },
   "keywords": [],
   "author": "",

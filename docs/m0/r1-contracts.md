@@ -65,14 +65,16 @@ react, react/jsx-runtime, react-dom, react-dom/client,
 - `ctx.slots` 服务由 `ui-renderer` client 半提供（类型合并：`declare module '@deepseek-ai/dsh-client-ui-slots' { interface SlotMap … }` 由各包扩展，见 `ui-sidebar/src/client/contract/slots.ts`）。
 - SlotMap 条目：`{ kind: 'single'|'list'|'keyed'|'chain'; scope: 'root'|'session-maybe'|'session'; owner?: OwnerProps }`。
 - `ctx.slots.register(options, Component)`（返回 disposer）：
+  - 选项类型实为 `BaseOptions` + `KindOptions`（`ui-slots/src/index.ts:511-581`）：`{ name, children?, store?, locale?, registrant? }` + kind 专属（list→`id`、keyed→`key`、chain→`select`）；
   - `name` 槽名；`locale` 命名空间；`children`：本组件声明并会渲染的子孔表（`{[P in SlotMap]?: {kind, scope}}`）——**children = 声明 + 授权**，渲染未声明孔或声明他人已声明孔 → load 期失败；
   - `inject`：apply 闭包返回的 plain data/callback 工厂（注册方私有注入面）；
   - `store`（可选）：跨 entry/重挂载共享状态（handle 或工厂，来自 `dsh-client-store`）；
   - `hooks`（保留座位）：注册方私有裸 observable。
-  - list 槽占用者**必须带 `id`**（`slotName` 参数按 id/order/label 稳定排序）。
-- 顺序无关：占用他人孔用 `ctx.slots.inject('<孔名>', () => ctx.slots.register(...))` ——等待声明就位、声明消失即移除、重新声明后重挂。
+  - 约束（运行期校验）：list 槽占用**必须带 `id`**；同 cell 同 priority 二次注册抛错；children 声明重复抛错；list 排序 = priority 升序 → order 升序（`ui-slots/src/index.ts:830-899`）。
+- 顺序无关：占用他人孔用 `ctx.slots.inject('<孔名>', () => ctx.slots.register(...))` ——等待声明就位、声明消失即移除、重新声明后重挂；可用 generator 原子安装多个注册（`ui-renderer/src/client/registry.ts:172-234`）。
 - 组件 props = 四份共享（`PropsRuntime`/`PropsRenderSlots`/`PropsStore`/inject 面），业务组件不得接触 ctx。
-- 语言：`ctx.locale.register(NS, { zh, en })` 注册字典（每个字典走 `ctx.effect`），组件经 locale 座位取文案。
+- 语言：`ctx.locale.register(NS, { zh, en })` 注册字典（每个字典走 `ctx.effect`）；注册组件时带 `locale: NS` 即注入 `t` 座位；nav label 用 `() => t(...)` thunk 或在 locale 变更时重注册（`ui-settings-general/src/client/index.ts:175-182` 的 `GeneralSection` 为样板）。
+- client 侧可用服务（须列入插件 `inject`）：`slots`、`locale`、`layout`、`remote`（含 `remote.settings` 等子服务）、`settingsScope`、`theme`、`connection`、`sessions`、`uiWorkspace` 等。
 
 ### 5.1 已核验的注册样板（sidebar shell，`ui-sidebar/src/client/index.ts`）
 
@@ -112,10 +114,16 @@ export function apply(ctx: ClientContext): void {
 
 1. 入口：`ctx.slots.inject('sidebar.footer.action', …)` 注册一个 action（`id: 'talk'`，rail 态图标 + wide 态文字），点击切换 Talk 面板可见性。
 2. 面板本体：`ctx.slots.inject('shell.overlay', …)` 注册 `id: 'talk-overlay'` 全屏/浮层面板（自管 pointer-events、Esc/关闭、内部视图状态：社区抽屉→频道→消息）。
-3. 设置：`ctx.slots.inject('settings.section', …)` 注册 `{ id: 'talk', order, label }` 页面。
+3. 设置：`ctx.slots.inject('settings.section', …)` 注册 `{ id: 'talk', order, label: () => t('nav'), locale: NS, children: {...} }` 页面。
 4. 全部注册包在 `ctx.effect` 里（disposer 语义，HMR 安全）；语言包 `ctx.locale.register('talk', {zh, en})`。
 
-> 注：会话 header 内的「分享当前会话」快捷入口属 ui-session/ui-conversation 内部座位，M0-1 全量审计如找到合适加法孔则补充，否则 v1 把分享入口放在 Talk 面板内部（从会话操作区进入面板），避免侵入已整体占用的单孔。
+> 注：会话 header 快捷入口候选 `conversation.session.header.actions`（list/session，ui-conversation 声明，`ui-conversation/src/client/contract/slots.ts:105`）；v1 分享入口默认放 Talk 面板内部，该孔列为 P1 增强（需 session 作用域 props，占用前先读其 owner 契约）。
+
+### 6.2 client→host RPC（审计证据，M3 用）
+
+- client 侧：`ctx.remote` 是网关动态挂载子服务的客户端（`api/remotes/src/client/index.ts:143-162` 对每个 `/remote` 贡献 `ctx.remote.$mount(contribution)`）；判环回 `ctx.remote.$host`；事件 `ctx.remote.$on('settings/document-updated', cb)`。
+- 真实用例：`ui-settings-general/src/client/settings-document-store.ts:65` 调 `ctx.remote.settings.openSettingsDocument()`；host 侧 `api/settings-controller/src/index.ts:88-102` `SettingsController extends TypertRemoteService`，`super(ctx,'settingsController',{namespace:'settings'})`，方法标 `@Remote`。
+- 我方新增命名空间最小路径（官方文档 `docs/cookbook/adding-a-remote-api.md`）：① host 半 TypertRemoteService + `@Remote` 方法；② 包导出 `./remote`（生成物）；③ client 装配处 `ctx.remote.$mount(contribution)`；转发事件需入 allowlist（`api/remotes/src/index.ts:14,48`）。→ M3 克隆/运行走该通道。
 
 ## 7. 对本项目落地要点（M0-2/M2 直接采用）
 
@@ -140,5 +148,6 @@ export function apply(ctx: ClientContext): void {
 ## 9. Open items（并入点）
 
 - [x] settings 分区孔、全屏 overlay 定位、root 骨架声明关系（一手核验，见 §5.2/§6）
-- [ ] 会话 header 加法孔、store/hooks 座位用法、client→host RPC 实例（M0-1 审计子代理返回后并入；不阻塞 M0-2）
+- [x] M0-1 全量审计已并入：BaseOptions/KindOptions 命名、list 排序规则、settings.section 注册参数样板、RPC 最小路径（§6.2）、conversation header 候选孔
+- [ ] 非阻塞待补（审计未确认项）：`settings.section` 各页 id/order 明细、`conversation.session.header.actions/.utilities` 占用者与 owner 契约、`ctx.sessions`/remote-service-key/allowlist 细节、LocaleRuntime 精确签名
 - [ ] M0-2 双半骨架/打包配置 + 本地加载路径验证

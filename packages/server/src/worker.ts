@@ -35,6 +35,20 @@ const app = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
 applyGlobalMiddleware(app);
 app.use("*", logger());
 
+// ----------------- 首页 / 根路径提示（避免被当作 404 报错） -----------------
+app.get("/", (c) =>
+  c.json({
+    name: "dsh-talk-server",
+    message: "这是 dsh-talk 项目的 API 端口",
+    endpoints: {
+      healthz: "/healthz",
+      auth: "/api/auth/*",
+      api: "/api/communities|channels|messages|shares|r2",
+      ws: "/ws?token=<sessionToken>&channelId=<id>",
+    },
+  }),
+);
+
 // ----------------- 健康检查 -----------------
 app.get("/healthz", (c) =>
   c.json({

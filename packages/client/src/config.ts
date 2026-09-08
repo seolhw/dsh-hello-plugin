@@ -3,7 +3,7 @@
 // 由 host 的 /api/talk/config 提供（见 ../../src/index.ts）
 // ================================================================
 
-import type { TalkSettings } from "@dsh-talk/types/rpc";
+import type { HostCloneResult, HostClonesStatus, TalkSettings } from "@dsh-talk/types/rpc";
 
 export class HostConfigError extends Error {
   constructor(
@@ -42,4 +42,18 @@ export function hostConfigSet(patch: Partial<TalkSettings>): Promise<TalkSetting
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
   }) as Promise<TalkSettings>;
+}
+
+/** POST /api/talk/clone —— 让 host 把分享包下载直写本地 */
+export function hostClone(downloadUrl: string): Promise<HostCloneResult> {
+  return hostFetch("/api/talk/clone", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ downloadUrl }),
+  }) as Promise<HostCloneResult>;
+}
+
+/** GET /api/talk/clones —— host 本地克隆目录 */
+export function hostClones(): Promise<HostClonesStatus> {
+  return hostFetch("/api/talk/clones") as Promise<HostClonesStatus>;
 }

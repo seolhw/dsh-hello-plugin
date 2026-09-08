@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   backToCommunities,
   canModify,
+  cloneToLocal,
   createCommunity,
   deleteMessage,
   joinCommunityByCode,
@@ -904,6 +905,9 @@ function ShareSnapshotModal({
     if (busy) return;
     setBusy(true);
     const url = await snapshotChannel({ title, summary });
+    if (url) {
+      await cloneToLocal(url);
+    }
     setBusy(false);
     if (!url) return;
     if (navigator.clipboard) {
@@ -947,8 +951,8 @@ function ShareSnapshotModal({
           placeholder="一句话摘要（可选）"
         />
         <div style={{ ...smallText, fontSize: 12 }}>
-          把本频道最近最多 200 条消息打包成 JSON
-          会话快照；生成后链接自动复制到剪贴板，可分享给其它人。
+          把本频道最近最多 200 条消息打包成 JSON 快照，并让本机 host 流式下载到本地
+          `~/.dsh-talk/clones`；生成后链接也会复制到剪贴板，可分享给其它人。
         </div>
       </div>
     </Modal>

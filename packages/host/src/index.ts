@@ -5,7 +5,12 @@
 //     语义与 @dsh-talk/types/rpc 的 SettingsRpc 一致（get / set / watch）
 // ================================================================
 
+import { createWriteStream, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { Context } from "@deepseek-ai/cordis";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import type { SettingsScope } from "@deepseek-ai/dsh-settings";
@@ -79,9 +84,17 @@ function sanitizePatch(raw: unknown): Partial<TalkSettings> {
   return patch;
 }
 
-// ---------- /api/talk/config 路由（GET 读 / POST 写） ----------
+// ---------- 本地克隆：分享包流式下载直写本地 ----------
 
-function configRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
+function clonesDir(): string {
+  const dir = join(homedir(), ".dsh-talk", "clones");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+// ---------- /api/talk/config + /api/talk/clone(s) 路由 ----------
+
+function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
   return [
     {
       kind: "exact",
@@ -109,6 +122,73 @@ function configRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
         sendJson(res, 405, { code: "BAD_REQUEST", message: "method not allowed" });
       },
     },
+    {
+      kind: "exact",
+      path: "/api/talk/clones",
+      handler: async (_req, res) => {
+        try {
+          const dir = clonesDir();
+          const items = readdirSync(dir)
+            .filter((file) => file.endsWith(".json"))
+            .map((file) => {
+              const stat = statSync(join(dir, file));
+              return { file, bytes: stat.size, modifiedAt: stat.mtimeMs };
+            })
+            .sort((a, b) => b.modifiedAt - a.modifiedAt)
+            .slice(0, 50);
+          sendJson(res, 200, { dir, items });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          sendJson(res, 500, { code: "INTERNAL", message });
+        }
+      },
+    },
+    {
+      kind: "exact",
+      path: "/api/talk/clone",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          sendJson(res, 405, { code: "BAD_REQUEST", message: "method not allowed" });
+          return;
+        }
+        try {
+          const body = (await readJsonBody(req)) as { downloadUrl?: unknown };
+          const downloadUrl = typeof body.downloadUrl === "string" ? body.downloadUrl : "";
+          let url: URL;
+          try {
+            url = new URL(downloadUrl);
+          } catch {
+            sendJson(res, 400, { code: "BAD_REQUEST", message: "downloadUrl 无效" });
+            return;
+          }
+          // 只允许从配置的 serverUrl 同源下载，避免 host 被当成任意 URL 代理
+          const allowed = new URL(scope.get().serverUrl).host;
+          if (url.host !== allowed) {
+            sendJson(res, 400, { code: "BAD_REQUEST", message: `只允许从 ${allowed} 下载` });
+            return;
+          }
+
+          const started = Date.now();
+          const response = await fetch(downloadUrl);
+          if (!response.ok || !response.body) {
+            sendJson(res, 502, { code: "INTERNAL", message: `下载失败 HTTP ${response.status}` });
+            return;
+          }
+          const name = `snapshot-${Date.now()}.json`;
+          const target = join(clonesDir(), name);
+          await pipeline(Readable.fromWeb(response.body), createWriteStream(target));
+          const stat = statSync(target);
+          sendJson(res, 200, {
+            file: target,
+            bytes: stat.size,
+            elapsedMs: Date.now() - started,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          sendJson(res, 500, { code: "INTERNAL", message });
+        }
+      },
+    },
   ];
 }
 
@@ -118,7 +198,7 @@ export function apply(ctx: Context): void {
   });
 
   const disposers: Array<() => void> = [];
-  for (const route of configRoutes(scope)) {
+  for (const route of talkRoutes(scope)) {
     disposers.push(ctx.webServer.register(route));
   }
 

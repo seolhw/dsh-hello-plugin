@@ -63,6 +63,32 @@ export interface SettingsRpc {
   "talk.settings.watch"?(): AsyncIterable<TalkSettings>;
 }
 
+// ---------- 1.5 本地克隆（HTTP：host /api/talk/clone + /api/talk/clones） ----------
+
+/** GET /api/talk/clones —— 本地克隆目录与已克隆文件列表 */
+export interface HostClonesStatus {
+  dir: string;
+  items: Array<{
+    /** 文件名（相对 dir） */
+    file: string;
+    bytes: number;
+    modifiedAt: TimestampMs;
+  }>;
+}
+
+/** POST /api/talk/clone —— 让 host 把分享包流式下载直写本地 */
+export interface HostCloneRequest {
+  /** 分享包下载地址（share 的 downloadUrl，GET /api/r2/objects/…?download=1） */
+  downloadUrl: string;
+}
+
+export interface HostCloneResult {
+  /** 落盘绝对路径 */
+  file: string;
+  bytes: number;
+  elapsedMs: number;
+}
+
 // ---------- 2. 会话克隆（核心能力） ----------
 
 /** 克隆前：client 先让 host 检查一下能不能做（磁盘、版本等），顺便让用户弹确认框 */

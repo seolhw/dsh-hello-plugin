@@ -18,7 +18,7 @@ import type { ID, MemberRole, Message, User } from "@dsh-talk/types/entities";
 import type { TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { useEffect, useReducer } from "react";
-import { hostConfigGet, hostConfigSet } from "./config";
+import { hostClone, hostConfigGet, hostConfigSet } from "./config";
 import { ServerApiError, ServerClient } from "./server";
 import { TalkSocket } from "./ws";
 
@@ -811,6 +811,18 @@ export async function snapshotChannel(input: {
     const res = await server.createShareSnapshot(channelId, body);
     notify(`已生成分享「${res.share.title}」`);
     return res.downloadUrl;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 让 host 把分享包流式下载到本地克隆目录；成功返回落盘路径 */
+export async function cloneToLocal(downloadUrl: string): Promise<string | null> {
+  try {
+    const res = await hostClone(downloadUrl);
+    notify(`已克隆到本地：${res.file}（${res.bytes} B）`);
+    return res.file;
   } catch (error) {
     notify(errorText(error));
     return null;

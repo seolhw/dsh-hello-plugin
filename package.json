@@ -1,6 +1,7 @@
 {
   "name": "dsh-talk",
   "version": "0.0.1",
+  "packageManager": "pnpm@12.3.4",
   "description": "dsh-talk",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
@@ -37,7 +38,7 @@
     "build": "tsdown",
     "dev": "npx @deepseek-ai/dsh web --patch ./cordis.yml",
     "dev:server": "pnpm --filter @dsh-talk/server dev",
-    "deploy:server": "pnpm --filter @dsh-talk/server deploy",
+    "deploy:server": "pnpm --filter @dsh-talk/server run deploy",
     "update": "npx npm-check-updates -u --target greatest --dep peer @deepseek-ai/*",
     "typecheck": "pnpm -r run typecheck && pnpm typecheck:plugin && pnpm typecheck:client",
     "typecheck:types": "tsc -p packages/types/tsconfig.json --noEmit",

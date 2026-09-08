@@ -7,6 +7,7 @@ import {
   IconChevronLeftOutline14,
   IconCloseOutline16,
   IconEditOutline16,
+  IconLinkOutline16,
   IconLoadingOutline16,
   IconPlusOutline16,
   IconSendOutline16,
@@ -34,6 +35,7 @@ import {
   updateMessage,
   useTalkState,
 } from "../store";
+import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
 import { Avatar, palette, smallText, timeLabel } from "./styles";
 
 // ---------------- 布局样式 ----------------
@@ -174,7 +176,7 @@ function CommunitiesRail({
           <Button
             size="sm"
             variant="ghost"
-            icon={<IconPlusOutline16 />}
+            icon={<IconLinkOutline16 />}
             onClick={onJoin}
             aria-label="加入社区"
             title="用邀请码加入"
@@ -249,6 +251,7 @@ function ChannelList(): ReactElement | null {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 6,
         }}
       >
         <span
@@ -259,36 +262,63 @@ function ChannelList(): ReactElement | null {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            flex: 1,
           }}
         >
           {community.name}
         </span>
+        <CommunityTools />
       </div>
-      <div style={railScroll}>
+      <div style={{ ...railScroll, flex: 1 }}>
         {community.channels.map((ch: Channel) => {
           const active = ch.id === activeChannel;
           return (
-            <button
+            <div
               key={ch.id}
-              type="button"
-              style={{ ...itemRow, background: active ? palette.active : undefined }}
-              onClick={() => void selectChannel(ch.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                padding: "0 4px 0 8px",
+                borderRadius: 8,
+                background: active ? palette.active : undefined,
+              }}
             >
-              <span style={{ color: palette.muted }}>#</span>
-              <span
+              <button
+                type="button"
+                onClick={() => void selectChannel(ch.id)}
                 style={{
                   flex: 1,
                   minWidth: 0,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "7px 2px",
+                  border: "none",
+                  background: "transparent",
+                  color: palette.text,
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
               >
-                {ch.name}
-              </span>
-            </button>
+                <span style={{ color: palette.muted }}>#</span>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {ch.name}
+                </span>
+              </button>
+              <ChannelRowMenu channel={ch} />
+            </div>
           );
         })}
+        <CreateChannelButton />
       </div>
     </div>
   );

@@ -1,11 +1,11 @@
 // ================================================================
-// 认证视图：登录 / 注册（邮箱+用户名+GitHub OAuth）
+// 认证视图：登录 / 注册（邮箱或用户名 + 密码）
 // ================================================================
 
 import { Button, Input, Pill } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, FormEvent, ReactElement } from "react";
 import { useState } from "react";
-import { githubLogin, login, register, useTalkState } from "../store";
+import { login, register, useTalkState } from "../store";
 import { palette } from "./styles";
 
 type Mode = "login" | "register";
@@ -52,18 +52,6 @@ export function AuthScreen(): ReactElement {
         if (username.trim().length > 0) extra.username = username.trim();
         await register({ ...extra, email: account.trim(), password });
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onGithub(): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await githubLogin();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -155,16 +143,6 @@ export function AuthScreen(): ReactElement {
           {mode === "login" ? "登录" : "创建账号"}
         </Button>
       </form>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0" }}>
-        <span style={{ flex: 1, height: 1, background: palette.border }} />
-        <span style={label}>或</span>
-        <span style={{ flex: 1, height: 1, background: palette.border }} />
-      </div>
-
-      <Button variant="outline" size="md" onClick={() => void onGithub()} disabled={busy}>
-        GitHub 登录
-      </Button>
     </div>
   );
 }

@@ -1,10 +1,10 @@
 // ================================================================
 // predev：把 .env（包目录或仓库根）里的键同步到 .dev.vars，
-// 让 `wrangler dev` 能读到 BETTER_AUTH_SECRET / GITHUB_* / RESEND_*
-// 等本地开发密钥。
+// 让 `wrangler dev` 能读到 BETTER_AUTH_SECRET / RESEND_API_KEY 等
+// 本地开发密钥。
 // 说明：
 //   - .env 与 .dev.vars 都被 git 忽略，不会入库。
-//   - 只搬运认证相关变量（密钥/凭据 + BETTER_AUTH_URL）；其它策略都是代码常量，
+//   - 只搬运认证相关变量（密钥 + BETTER_AUTH_URL）；其它策略都是代码常量，
 //     不走 env。.dev.vars 里未出现在白名单的既有本地键会保留。
 // ================================================================
 
@@ -12,12 +12,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** 只把认证相关变量从 .env 同步到 .dev.vars（密钥/凭据 + 认证 URL） */
+/** 只把认证相关变量从 .env 同步到 .dev.vars（密钥 + 认证 URL） */
 const KEY_ALLOWLIST = new Set([
   "BETTER_AUTH_URL",
   "BETTER_AUTH_SECRET",
-  "GITHUB_CLIENT_ID",
-  "GITHUB_CLIENT_SECRET",
   "RESEND_API_KEY",
 ]);
 

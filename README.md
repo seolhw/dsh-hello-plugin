@@ -144,7 +144,7 @@ pnpm install        # 安装 host + types + server 三个 workspace 包
 pnpm dev:server     # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
 ```
 
-认证 key（`BETTER_AUTH_SECRET` 必填；`BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY` 按需）放仓库根 `.env`，`pnpm dev:server` 的 predev 会自动同步进 `packages/server/.dev.vars`（勿提交；生产用 `wrangler secret put`）。具体键说明见 `wrangler.jsonc` 底部注释。
+认证 key（`BETTER_AUTH_SECRET` 必填；`BETTER_AUTH_URL` / `RESEND_API_KEY` 按需）放仓库根 `.env`，`pnpm dev:server` 的 predev 会自动同步进 `packages/server/.dev.vars`（勿提交；生产用 `wrangler secret put`）。具体键说明见 `wrangler.jsonc` 底部注释。
 
 首次跑 Server 前用 Drizzle 生成迁移并写入本地 D1：
 

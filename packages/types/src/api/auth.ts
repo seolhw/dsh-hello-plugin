@@ -1,5 +1,5 @@
 // ===============================================================
-// /api/auth/* —— 由 Better Auth 提供（登录/注册/会话/GitHub/邮箱验证/改密/找回密码）
+// /api/auth/* —— 由 Better Auth 提供（登录/注册/会话/邮箱验证/改密/找回密码）
 //
 // 本文件只是「面向 API 客户端的类型契约」，服务端实现是 mounted 在
 // /api/auth/* 的 Better Auth handler（见 server/src/lib/auth.ts）。
@@ -15,7 +15,7 @@
 
 export interface AuthUser {
   id: string;
-  /** 展示名（注册时必填 name；GitHub 用其显示名） */
+  /** 展示名（注册时必填 name） */
   name: string;
   email: string;
   emailVerified: boolean;
@@ -75,14 +75,6 @@ export interface SignInUsernameRequest {
   password: string;
   rememberMe?: boolean;
   callbackURL?: string;
-}
-
-/** POST /api/auth/sign-in/social（GitHub 等，会 302 跳转授权页） */
-export interface SignInSocialRequest {
-  provider: "github";
-  callbackURL?: string;
-  newUserCallbackURL?: string;
-  errorCallbackURL?: string;
 }
 
 // ---------- 登出 / 改密 / 资料 ----------

@@ -11,10 +11,12 @@ import type {
   AuthUser,
   ChangePasswordRequest,
   CreateChannelRequest,
+  CreateChannelResponse,
   CreateCommunityRequest,
   CreateCommunityResponse,
   CreateMessageRequest,
   CreateMessageResponse,
+  DeleteChannelResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   GetReadStateResponse,
@@ -23,14 +25,24 @@ import type {
   JoinByInviteResponse,
   JoinCommunityResponse,
   LeaveCommunityResponse,
+  ListMembersQuery,
+  ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
+  RemoveMemberResponse,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
+  RotateInviteResponse,
   SendVerificationEmailRequest,
   SignInEmailRequest,
   SignInUsernameRequest,
   SignUpEmailRequest,
+  UpdateChannelRequest,
+  UpdateChannelResponse,
+  UpdateCommunityRequest,
+  UpdateCommunityResponse,
+  UpdateMemberRoleRequest,
+  UpdateMemberRoleResponse,
   UpdateMessageRequest,
   UpdateMessageResponse,
   UpdateReadStateRequest,
@@ -267,14 +279,92 @@ export class ServerClient {
   }
 
   /** POST /api/communities/:id/channels —— 新建频道（owner/admin） */
-  createChannel(
-    communityId: string,
-    body: CreateChannelRequest,
-  ): Promise<GetCommunityResponse["channels"][number]> {
-    return this.call<GetCommunityResponse["channels"][number]>(
+  createChannel(communityId: string, body: CreateChannelRequest): Promise<CreateChannelResponse> {
+    return this.call<CreateChannelResponse>(
       "POST",
       `/api/communities/${communityId}/channels`,
       body,
+      true,
+    );
+  }
+
+  /** PATCH /api/communities/:id —— 改社区（owner/admin） */
+  updateCommunity(
+    communityId: string,
+    body: UpdateCommunityRequest,
+  ): Promise<UpdateCommunityResponse> {
+    return this.call<UpdateCommunityResponse>(
+      "PATCH",
+      `/api/communities/${communityId}`,
+      body,
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/rotate-invite —— 轮换邀请码（owner/admin） */
+  rotateInvite(communityId: string): Promise<RotateInviteResponse> {
+    return this.call<RotateInviteResponse>(
+      "POST",
+      `/api/communities/${communityId}/rotate-invite`,
+      {},
+      true,
+    );
+  }
+
+  /** GET /api/communities/:id/members —— 成员列表（须是成员） */
+  listMembers(
+    communityId: string,
+    query: Pick<ListMembersQuery, "role" | "q" | "limit" | "offset"> = {},
+  ): Promise<ListMembersResponse> {
+    const qs = toQuery({
+      role: query.role ?? "",
+      q: query.q ?? "",
+      limit: query.limit ?? 100,
+      offset: query.offset ?? 0,
+    });
+    return this.call<ListMembersResponse>(
+      "GET",
+      `/api/communities/${communityId}/members${qs}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** PATCH /api/communities/:id/members/:userId/role —— 角色调整 / owner 转让 */
+  updateMemberRole(
+    communityId: string,
+    userId: string,
+    body: UpdateMemberRoleRequest,
+  ): Promise<UpdateMemberRoleResponse> {
+    return this.call<UpdateMemberRoleResponse>(
+      "PATCH",
+      `/api/communities/${communityId}/members/${userId}/role`,
+      body,
+      true,
+    );
+  }
+
+  /** DELETE /api/communities/:id/members/:userId —— 踢人（owner/admin，不能踢 owner） */
+  removeMember(communityId: string, userId: string): Promise<RemoveMemberResponse> {
+    return this.call<RemoveMemberResponse>(
+      "DELETE",
+      `/api/communities/${communityId}/members/${userId}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** PATCH /api/channels/:id —— 频道改名/主题/类型（owner/admin） */
+  updateChannel(channelId: string, body: UpdateChannelRequest): Promise<UpdateChannelResponse> {
+    return this.call<UpdateChannelResponse>("PATCH", `/api/channels/${channelId}`, body, true);
+  }
+
+  /** DELETE /api/channels/:id —— 删频道（owner/admin） */
+  deleteChannel(channelId: string): Promise<DeleteChannelResponse> {
+    return this.call<DeleteChannelResponse>(
+      "DELETE",
+      `/api/channels/${channelId}`,
+      undefined,
       true,
     );
   }

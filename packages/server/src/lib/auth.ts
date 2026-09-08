@@ -4,7 +4,6 @@
 // 以 Better Auth 作为整个应用的身份/认证/授权地基：
 //   - emailAndPassword：邮箱 + 密码
 //   - username 插件：用户名 + 密码（注册时邮箱必填、用户名可选）
-//   - github social provider：GitHub OAuth 登录（配置了凭据才启用）
 //   - bearer 插件：纯 API/桌面端通过 Authorization: Bearer <session token>
 //     认证；登录成功响应头 set-auth-token 即会话 token
 //   - emailVerification / sendResetPassword：邮箱验证 + 忘记密码（Resend 发送）
@@ -59,19 +58,12 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
     );
   }
 
-  // baseURL：配了 BETTER_AUTH_URL 就用它（GitHub 回调 / 邮箱验证 / 重置链接都基于此地址）；
+  // baseURL：配了 BETTER_AUTH_URL 就用它（邮箱验证 / 重置链接都基于此地址）；
   // 没配则按请求 Host 从白名单推导（适合本地 dev）
   const authUrl = env.BETTER_AUTH_URL?.trim();
   const baseURL: BetterAuthOptions["baseURL"] = authUrl
     ? authUrl
     : { allowedHosts: [...AUTH_ALLOWED_HOSTS] };
-
-  const githubClientId = env.GITHUB_CLIENT_ID?.trim();
-  const githubClientSecret = env.GITHUB_CLIENT_SECRET?.trim();
-  const socialProviders =
-    githubClientId && githubClientSecret
-      ? { github: { clientId: githubClientId, clientSecret: githubClientSecret } }
-      : undefined;
 
   return {
     appName: "dsh-talk",
@@ -97,7 +89,6 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
         dispatchVerificationEmail(env, request, user, url);
       },
     },
-    ...(socialProviders ? { socialProviders } : {}),
     plugins: [
       username(),
       // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，

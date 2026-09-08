@@ -20,7 +20,6 @@ export * from "./shares";
  *   POST  /api/auth/sign-up/email       邮箱注册（用户名可选）
  *   POST  /api/auth/sign-in/email       邮箱登录
  *   POST  /api/auth/sign-in/username    用户名登录（username 插件）
- *   POST  /api/auth/sign-in/social      GitHub OAuth（provider=github）
  *   POST  /api/auth/sign-out            登出（吊销会话）
  *   GET   /api/auth/get-session         当前会话（user + session）
  *   POST  /api/auth/change-password     修改密码

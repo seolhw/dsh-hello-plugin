@@ -2,7 +2,7 @@
 // dsh-talk client UI store（极简 listener store + React hook）
 // 流程：打开面板 → host 取配置 → 有 token 则 get-session + 我的社区。
 // 主屏：社区列表 ↔ 社区详情（频道） ↔ 频道消息（REST 加载 + WS 实时）。
-// 认证：邮箱/用户名登录、注册、GitHub OAuth（popup → server landing）。
+// 认证：邮箱/用户名登录、注册。
 // 实时：每个频道一条 TalkSocket；消息事件按当前 channelId 落到列表。
 // ================================================================
 
@@ -10,9 +10,10 @@ import type {
   AuthUser,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
+  ListMembersResponse,
   SignUpEmailRequest,
 } from "@dsh-talk/types/api";
-import type { ID, Message, User } from "@dsh-talk/types/entities";
+import type { ID, MemberRole, Message, User } from "@dsh-talk/types/entities";
 import type { TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { useEffect, useReducer } from "react";
@@ -211,35 +212,6 @@ export async function register(input: {
   await applySession({ user, token });
 }
 
-/** GitHub OAuth：打开服务端授权页（top-level 导航无 Origin 限制），
- *  回调回服务端 landing 页后 postMessage 回传 token（见 worker.ts social-landing）。 */
-export function githubLogin(): Promise<void> {
-  const settings = state.settings;
-  if (!settings) throw new Error("尚未就绪");
-  return new Promise((resolve, reject) => {
-    const origin = new URL(settings.serverUrl).origin;
-    const callback = `${settings.serverUrl}/api/auth/social-landing`;
-    const authUrl = `${settings.serverUrl}/api/auth/sign-in/social?provider=github&callbackURL=${encodeURIComponent(callback)}`;
-    const popup = window.open(authUrl, "dsh-talk-github", "popup,width=520,height=640");
-    if (!popup) {
-      reject(new Error("弹窗被拦截，请允许本站打开弹窗后重试"));
-      return;
-    }
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== origin) return;
-      const data = event.data as { type?: string; user?: AuthUser; token?: string };
-      if (data?.type !== "dsh-talk:auth") return;
-      window.removeEventListener("message", onMessage);
-      if (!data.user || !data.token) {
-        reject(new Error("GitHub 授权未完成或已取消"));
-        return;
-      }
-      void applySession({ user: data.user, token: data.token }).then(resolve, reject);
-    };
-    window.addEventListener("message", onMessage);
-  });
-}
-
 export async function applySession(result: { user: AuthUser; token: string }): Promise<void> {
   setState({ busy: true, error: "" });
   try {
@@ -419,6 +391,183 @@ export async function leaveCommunity(communityId: string): Promise<void> {
     notify("已退出社区");
   } catch (error) {
     notify(errorText(error));
+  }
+}
+
+// ---------------- 社区 / 成员 / 频道 管理（owner/admin） ----------------
+
+/** 重新拉取当前社区详情（编辑/建频道后刷新频道列表等） */
+export async function reloadCommunityDetail(): Promise<void> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return;
+  try {
+    const detail = await server.getCommunity(communityId);
+    patchView({ community: detail, communityLoading: false });
+  } catch (error) {
+    notify(errorText(error));
+  }
+}
+
+/** 编辑社区资料 */
+export async function updateCommunity(patch: {
+  name?: string;
+  description?: string | null;
+  privacy?: "public" | "private";
+}): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    const body: { name?: string; description?: string | null; privacy?: "public" | "private" } = {};
+    if (patch.name !== undefined) body.name = patch.name;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.privacy !== undefined) body.privacy = patch.privacy;
+    await server.updateCommunity(communityId, body);
+    await reloadCommunityDetail();
+    notify("社区资料已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 轮换邀请码，返回新码 */
+export async function rotateInvite(): Promise<string | null> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return null;
+  try {
+    const res = await server.rotateInvite(communityId);
+    await reloadCommunityDetail();
+    notify("邀请码已更新");
+    return res.inviteCode;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 拉成员列表 */
+export async function listMembers(): Promise<ListMembersResponse["items"]> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return [];
+  try {
+    const res = await server.listMembers(communityId);
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 调整成员角色 / owner 转让 */
+export async function setMemberRole(userId: string, role: MemberRole): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.updateMemberRole(communityId, userId, { role });
+    notify(role === "owner" ? "所有权已转让" : "成员角色已更新");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 移除成员 */
+export async function kickMember(userId: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.removeMember(communityId, userId);
+    notify("已移除该成员");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 新建频道（owner/admin），创建后自动进入 */
+export async function createChannel(input: {
+  name: string;
+  topic?: string;
+  kind?: "text" | "announcement";
+  isHelp?: boolean;
+  isShowcase?: boolean;
+}): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    const body: {
+      name: string;
+      topic?: string | null;
+      kind?: "text" | "announcement";
+      isHelp?: boolean;
+      isShowcase?: boolean;
+    } = { name: input.name };
+    if (input.topic !== undefined) body.topic = input.topic;
+    if (input.kind !== undefined) body.kind = input.kind;
+    if (input.isHelp !== undefined) body.isHelp = input.isHelp;
+    if (input.isShowcase !== undefined) body.isShowcase = input.isShowcase;
+    const created = await server.createChannel(communityId, body);
+    await reloadCommunityDetail();
+    await selectChannel(created.id);
+    notify("频道已创建");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 编辑频道（改名/主题/类型等） */
+export async function updateChannelById(
+  channelId: string,
+  patch: {
+    name?: string;
+    topic?: string | null;
+    kind?: "text" | "announcement";
+    isHelp?: boolean;
+    isShowcase?: boolean;
+  },
+): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.updateChannel(channelId, patch);
+    await reloadCommunityDetail();
+    notify("频道已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 删除频道（owner/admin）；若正打开该频道则关闭它 */
+export async function deleteChannelById(channelId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.deleteChannel(channelId);
+    if (state.view.channelId === channelId) {
+      closeRealtime();
+      patchView({ channelId: null, messages: [], nextCursor: null, live: false });
+    }
+    await reloadCommunityDetail();
+    notify("频道已删除");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
   }
 }
 

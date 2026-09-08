@@ -1,0 +1,518 @@
+// ================================================================
+// 管理 UI：社区工具（成员/邀请码/设置/退出）、频道创建/编辑/删除
+// 权限判定以 talk.view.community.myRole 为准（owner/admin 可见管理项）
+// ================================================================
+
+import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
+import {
+  Button,
+  IconCopyOutline16,
+  IconEditOutline16,
+  IconEllipsisOutline16,
+  IconPlusOutline16,
+  IconRefreshOutline16,
+  IconTrashOutline16,
+  IconUserOutline16,
+  Input,
+  Menu,
+  Modal,
+  Pill,
+  writeClipboard,
+} from "@deepseek-ai/dsh-client-ui-primitives";
+import type { Channel, MemberRole, User } from "@dsh-talk/types/entities";
+import type { ReactElement } from "react";
+import { useEffect, useState } from "react";
+import {
+  createChannel,
+  deleteChannelById,
+  kickMember,
+  leaveCommunity,
+  listMembers,
+  notify,
+  rotateInvite,
+  setMemberRole,
+  updateChannelById,
+  updateCommunity,
+  useTalkState,
+} from "../store";
+import { Avatar, palette, smallText } from "./styles";
+
+const isModerator = (role: MemberRole | null | undefined): boolean =>
+  role === "owner" || role === "admin";
+
+const roleColor: Record<MemberRole, string> = {
+  owner: "#f0a13a",
+  admin: "#5b8cff",
+  member: palette.muted,
+};
+
+const roleName: Record<MemberRole, string> = { owner: "所有者", admin: "管理员", member: "成员" };
+
+type CommunityDialog = null | "members" | "invite" | "settings";
+
+/** 频道列表顶部的社区管理菜单（成员 / 邀请码 / 设置 / 退出） */
+export function CommunityTools(): ReactElement | null {
+  const talk = useTalkState();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dialog, setDialog] = useState<CommunityDialog>(null);
+  const communityId = talk.view.communityId;
+  const moder = isModerator(talk.view.community?.myRole);
+  if (!communityId) return null;
+
+  const menuItems: MenuEntry[] = [];
+  if (moder) {
+    menuItems.push(
+      { id: "members", label: "成员管理", icon: <IconUserOutline16 /> },
+      { id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> },
+      { id: "settings", label: "社区设置", icon: <IconEditOutline16 /> },
+      { type: "separator", id: "sep" },
+    );
+  }
+  menuItems.push({ id: "leave", label: "退出社区", danger: true, icon: <IconTrashOutline16 /> });
+
+  return (
+    <>
+      <Menu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onSelect={(id) => {
+          setMenuOpen(false);
+          if (id === "members" || id === "invite" || id === "settings") setDialog(id);
+          if (id === "leave") {
+            if (window.confirm("退出该社区？所有者需先转让所有权。"))
+              void leaveCommunity(communityId);
+          }
+        }}
+        anchor={
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconEllipsisOutline16 />}
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="社区管理"
+          />
+        }
+        items={menuItems}
+      />
+      {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
+      {dialog === "invite" ? <InviteDialog open onClose={() => setDialog(null)} /> : null}
+      {dialog === "settings" ? <SettingsDialog open onClose={() => setDialog(null)} /> : null}
+    </>
+  );
+}
+
+/** 邀请码展示 / 复制 / 轮换（owner/admin 可轮换；码对所有成员可见） */
+function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
+  const talk = useTalkState();
+  const community = talk.view.community;
+  const code = community?.inviteCode ?? "";
+  const moder = isModerator(community?.myRole);
+  const [busy, setBusy] = useState(false);
+
+  async function copy(): Promise<void> {
+    await writeClipboard(code);
+    notify("邀请码已复制");
+  }
+  async function rotate(): Promise<void> {
+    setBusy(true);
+    const next = await rotateInvite();
+    setBusy(false);
+    if (next) await copyToClipboard(next);
+  }
+  async function copyToClipboard(value: string): Promise<void> {
+    await writeClipboard(value);
+    notify("邀请码已复制");
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="邀请码"
+      closeLabel="关闭"
+      description="把邀请码发给对方：对方在「+ 加入」里输入即可进社区。"
+    >
+      <div style={{ display: "flex", gap: 8 }}>
+        <Input readOnly value={code} aria-label="邀请码" style={{ flex: 1 }} />
+        <Button variant="outline" icon={<IconCopyOutline16 />} onClick={() => void copy()}>
+          复制
+        </Button>
+        {moder ? (
+          <Button
+            variant="ghost"
+            icon={<IconRefreshOutline16 />}
+            disabled={busy}
+            onClick={() => void rotate()}
+          >
+            换新码
+          </Button>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+/** 社区设置（owner/admin） */
+function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
+  const talk = useTalkState();
+  const community = talk.view.community;
+  const [name, setName] = useState(community?.name ?? "");
+  const [description, setDescription] = useState(community?.description ?? "");
+  const [privacy, setPrivacy] = useState<"public" | "private">(community?.privacy ?? "public");
+  const [busy, setBusy] = useState(false);
+
+  async function save(): Promise<void> {
+    if (name.trim().length === 0) return;
+    setBusy(true);
+    const ok = await updateCommunity({
+      name: name.trim(),
+      description: description.length > 0 ? description : null,
+      privacy,
+    });
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="社区设置"
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || name.trim().length === 0}
+            onClick={() => void save()}
+          >
+            保存
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="社区名称"
+          aria-label="社区名称"
+        />
+        <Input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="简介"
+          aria-label="简介"
+        />
+        <div style={{ display: "flex", gap: 6 }}>
+          <Pill active={privacy === "public"} onClick={() => setPrivacy("public")}>
+            公开
+          </Pill>
+          <Pill active={privacy === "private"} onClick={() => setPrivacy("private")}>
+            私有
+          </Pill>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+type MemberRow = { user: User; role: MemberRole; joinedAt: number };
+
+/** 成员管理（owner/admin） */
+function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
+  const talk = useTalkState();
+  const me = talk.me;
+  const myRole = talk.view.community?.myRole ?? null;
+  const [members, setMembers] = useState<MemberRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const isOwner = myRole === "owner";
+  const moder = isModerator(myRole);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    void listMembers().then((items) => {
+      setMembers(items as MemberRow[]);
+      setLoading(false);
+    });
+  }, [open]);
+
+  async function act(userId: string, role: MemberRole, label: string): Promise<void> {
+    if (!window.confirm(`确认${label}？`)) return;
+    const ok = await setMemberRole(userId, role);
+    if (ok) setMembers((prev) => prev.map((m) => (m.user.id === userId ? { ...m, role } : m)));
+  }
+
+  async function kick(user: User): Promise<void> {
+    if (!window.confirm(`把 ${user.handle} 移出社区？`)) return;
+    const ok = await kickMember(user.id);
+    if (ok) setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="成员管理" closeLabel="关闭">
+      {loading ? (
+        <div style={smallText}>加载成员…</div>
+      ) : members.length === 0 ? (
+        <div style={smallText}>还没有成员。</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {members.map((m) => {
+            const self = me !== null && m.user.id === me.id;
+            const targetIsOwner = m.role === "owner";
+            const rowCanManage = moder && !self && !targetIsOwner;
+            const canTransfer = isOwner && !self && targetIsOwner;
+            return (
+              <div
+                key={m.user.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 8px",
+                  borderRadius: 8,
+                  background: palette.inputBg,
+                }}
+              >
+                <Avatar label={m.user.handle} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {m.user.displayName ?? m.user.handle}
+                    {self ? (
+                      <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
+                    ) : null}
+                  </div>
+                  <div style={{ ...smallText, fontSize: 11 }}>@{m.user.handle}</div>
+                </div>
+                <span style={{ fontSize: 12, color: roleColor[m.role], width: 44 }}>
+                  {roleName[m.role]}
+                </span>
+                {canTransfer ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void act(m.user.id, "owner", "转让所有权给该成员")}
+                  >
+                    转让
+                  </Button>
+                ) : null}
+                {rowCanManage ? (
+                  <span style={{ display: "flex", gap: 2 }}>
+                    {m.role !== "admin" ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void act(m.user.id, "admin", "设为管理员")}
+                      >
+                        设管理员
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void act(m.user.id, "member", "降为成员")}
+                      >
+                        降为成员
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconTrashOutline16 />}
+                      onClick={() => void kick(m.user)}
+                      aria-label="移除成员"
+                    >
+                      移除
+                    </Button>
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------- 频道：创建 / 编辑 / 删除 ----------------
+
+/** 频道列表底部“新建频道”入口（owner/admin） */
+export function CreateChannelButton(): ReactElement | null {
+  const talk = useTalkState();
+  const [open, setOpen] = useState(false);
+  if (!isModerator(talk.view.community?.myRole)) return null;
+  return (
+    <>
+      <div style={{ padding: "6px 8px" }}>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<IconPlusOutline16 />}
+          onClick={() => setOpen(true)}
+          style={{ width: "100%" }}
+        >
+          新建频道
+        </Button>
+      </div>
+      {open ? <ChannelDialog open onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
+function ChannelDialog({
+  open,
+  onClose,
+  channel,
+}: {
+  open: boolean;
+  onClose: () => void;
+  channel?: Channel;
+}): ReactElement {
+  const isEdit = channel !== undefined;
+  const [name, setName] = useState(channel?.name ?? "");
+  const [topic, setTopic] = useState(channel?.topic ?? "");
+  const [kind, setKind] = useState<"text" | "announcement">(channel?.kind ?? "text");
+  const [isHelp, setIsHelp] = useState(channel?.isHelp ?? false);
+  const [busy, setBusy] = useState(false);
+
+  async function save(): Promise<void> {
+    if (name.trim().length === 0) return;
+    setBusy(true);
+    let ok = false;
+    if (isEdit) {
+      ok = await updateChannelById(channel.id, {
+        name: name.trim(),
+        topic: topic.length > 0 ? topic : null,
+        kind,
+        isHelp,
+      });
+    } else {
+      const body: {
+        name: string;
+        topic?: string;
+        kind?: "text" | "announcement";
+        isHelp?: boolean;
+      } = {
+        name: name.trim(),
+        kind,
+        isHelp,
+      };
+      if (topic.length > 0) body.topic = topic;
+      ok = await createChannel(body);
+    }
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isEdit ? "编辑频道" : "新建频道"}
+      closeLabel="关闭"
+      description={
+        isEdit
+          ? "可改名、改主题与类型。删除频道请用频道旁的「…」。"
+          : "和 Discord 一样，频道用于承载某一主题的实时消息。"
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || name.trim().length === 0}
+            onClick={() => void save()}
+          >
+            {isEdit ? "保存" : "创建"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="频道名，如 general / help"
+          aria-label="频道名"
+        />
+        <Input
+          value={topic}
+          onChange={(e) => setTopic(e.target.value)}
+          placeholder="主题（显示在消息区顶部，可选）"
+          aria-label="主题"
+        />
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <Pill active={kind === "text"} onClick={() => setKind("text")}>
+            文字
+          </Pill>
+          <Pill active={kind === "announcement"} onClick={() => setKind("announcement")}>
+            公告
+          </Pill>
+          <Pill active={isHelp} onClick={() => setIsHelp((v) => !v)}>
+            求助(可标记解决)
+          </Pill>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** 每行的频道管理菜单（改名 / 主题 / 删除；owner/admin 可见） */
+export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement | null {
+  const talk = useTalkState();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  if (!isModerator(talk.view.community?.myRole)) return null;
+
+  async function remove(): Promise<void> {
+    if (!window.confirm(`删除频道 #${channel.name}？其中的消息将一并删除。`)) return;
+    const ok = await deleteChannelById(channel.id);
+    if (ok) setMenuOpen(false);
+  }
+
+  return (
+    <>
+      <Menu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        onSelect={(id) => {
+          setMenuOpen(false);
+          if (id === "edit") setEditing(true);
+          if (id === "delete") void remove();
+        }}
+        anchor={
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconEllipsisOutline16 />}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((v) => !v);
+            }}
+            aria-label={`管理 #${channel.name}`}
+          />
+        }
+        items={[
+          { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
+          { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
+        ]}
+      />
+      {editing ? <ChannelDialog open channel={channel} onClose={() => setEditing(false)} /> : null}
+    </>
+  );
+}

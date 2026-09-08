@@ -1,0 +1,10 @@
+{
+  "name": "dsh-talk-cf-smoke",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "db:apply": "wrangler d1 migrations apply talk-smoke --local"
+  }
+}

@@ -32,13 +32,13 @@
 
 | 里程碑 | 总数 | 待办 | 进行中 | 评审中 | 完成 |
 | --- | --- | --- | --- | --- | --- |
-| M0 技术预研 | 6 | 2 | 0 | 0 | 4 |
+| M0 技术预研 | 6 | 1 | 0 | 0 | 5 |
 | M1 Hub 服务端 | 15 | 15 | 0 | 0 | 0 |
 | M2 客户端聊天 | 12 | 12 | 0 | 0 | 0 |
 | M3 分享与克隆 | 9 | 9 | 0 | 0 | 0 |
 | M4 打磨与发布 | 8 | 8 | 0 | 0 | 0 |
 | DOC 文档线 | 3 | 1 | 0 | 0 | 2 |
-| **合计** | **53** | **47** | **0** | **0** | **6** |
+| **合计** | **53** | **46** | **0** | **0** | **7** |
 
 ## 4. 建议的并行拓扑（首轮如何分工）
 
@@ -77,7 +77,7 @@ M4（2 条并行轨：体验轨 M4-1..M4-3 / 发布轨 M4-4..M4-8）
 | M0-2 | 双半包本地加载实验：tsdown 双入口打包 → `exports["./client"]` + `dsh.client` 声明 → 开发期以包名装入 profile 并被 client modules 扫描进 GUI（验证本地 dev 加载路径） | client | 无 | 完成 | 主 agent | 实验 `experiments/m0-2/`；证据 `docs/m0/r2-dualhalf.md`：boot 图含本包 + 组合脚本 `/plugins/…dsh-talk-m02/client.js` 200 且含注册代码；浏览器渲染留 M2 联调 |
 | M0-3 | 会话克隆恢复 spike（R2）：按 `dsh-session-persistence-jsonl` 布局直写 `session.jsonl` + 附件 + 在会话列表/查询索引注册新会话；验证「打开」与「继续对话」是否可行 | host | 无 | 完成 | 主 agent | `docs/m0/r3-session-clone.md`：Route B（`agents.create(seed)+workspace.attachSession`）定稿、fork/webhook 双源契约、续写可行；Route A 否决；非阻塞补遗待并入 |
 | M0-4 | workflow 运行通道 spike（R3）：验证「新建会话 + 注入 prompt」委派本地 agent（webhookRuntime 同构）vs `ctx.workflowEngine.start` parent 注入 | host | 无 | 完成 | 主 agent | `docs/m0/r4-workflow-run.md`：engine.start 需 live parent（否决）；采用 webhook `createWebhookSession` 同构执行器；兜底复制脚本；验收映射 M3-8 |
-| M0-5 | CF WS/DO 冒烟（R4）：wrangler dev 起 Worker + RoomActor（echo/广播/心跳/补漏 cursor），100 连接压测；D1 写路径、R2 预签名直传验证；同时产出「建社区限流 + 发现目录」接口设计（R7） | server | 无 | 待办 | | 冒烟脚本与压测记录；`docs/m0/r4-cf-smoke.md` |
+| M0-5 | CF WS/DO 冒烟（R4）：wrangler dev 起 Worker + RoomActor（echo/广播/心跳/补漏 cursor），100 连接压测；D1 写路径、R2 预签名直传验证；同时产出「建社区限流 + 发现目录」接口设计（R7） | server | 无 | 完成 | 主 agent | `experiments/m0-5/` + `docs/m0/r5-cloudflare.md`：本地 Miniflare 冒烟全绿（ping/D1/R2/WS-DO 广播）；DO 须用 Hibernation 类方法；R7 接口设计定稿；100 连接压测留 M1（本地冒烟只验证单/双连接路径） |
 | M0-6 | 门禁评审：汇总 R1–R4/R7 结论，冻结 MVP 范围（FR-D4/FR-D5 是否保留），输出决议并更新 PRD 为 v1.0 基线 | docs | M0-1..M0-5 | 待办 | | `docs/m0/gate.md`（Go/No-Go 决策表）；PRD 版本与变更记录更新；TASKS 快照刷新 |
 
 ### M1 Hub 服务端（2–3 周）

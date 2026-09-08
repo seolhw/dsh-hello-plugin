@@ -13,6 +13,7 @@ import {
   IconPaperclipOutline16,
   IconPlusOutline16,
   IconSendOutline16,
+  IconShareOutline16,
   IconTrashOutline16,
   Input,
   Modal,
@@ -35,6 +36,7 @@ import {
   selectChannel,
   sendMessage,
   setDraft,
+  snapshotChannel,
   updateMessage,
   useTalkState,
 } from "../store";
@@ -551,6 +553,7 @@ function ChatPane(): ReactElement | null {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const MAX_ATTACH = 4;
+  const [shareOpen, setShareOpen] = useState(false);
 
   const draft = channelId ? (talk.view.drafts[channelId] ?? "") : "";
 
@@ -611,140 +614,157 @@ function ChatPane(): ReactElement | null {
   const canLoadMore = !talk.view.loadingOlder && hasOlder;
 
   return (
-    <div style={chatCol}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "10px 16px",
-          borderBottom: `1px solid ${palette.border}`,
-        }}
-      >
-        <span style={{ color: palette.muted }}>#</span>
-        <span style={{ fontWeight: 650 }}>{channel?.name ?? ""}</span>
-        {channel?.topic ? (
-          <span
-            style={{
-              ...smallText,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {channel.topic}
-          </span>
-        ) : null}
-        <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: talk.view.live ? palette.success : palette.muted,
-              boxShadow: talk.view.live ? `0 0 6px ${palette.success}` : undefined,
-            }}
+    <>
+      <div style={chatCol}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 16px",
+            borderBottom: `1px solid ${palette.border}`,
+          }}
+        >
+          <span style={{ color: palette.muted }}>#</span>
+          <span style={{ fontWeight: 650 }}>{channel?.name ?? ""}</span>
+          {channel?.topic ? (
+            <span
+              style={{
+                ...smallText,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {channel.topic}
+            </span>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconShareOutline16 />}
+            onClick={() => setShareOpen(true)}
+            aria-label="分享会话快照"
+            title="把本频道消息打成可分享的快照"
           />
-          <span style={{ ...smallText, fontSize: 11 }}>{talk.view.live ? "实时" : "重连中…"}</span>
-        </span>
-      </div>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: talk.view.live ? palette.success : palette.muted,
+                boxShadow: talk.view.live ? `0 0 6px ${palette.success}` : undefined,
+              }}
+            />
+            <span style={{ ...smallText, fontSize: 11 }}>
+              {talk.view.live ? "实时" : "重连中…"}
+            </span>
+          </span>
+        </div>
 
-      <div ref={scrollRef} onScroll={onScroll} style={messagesWrap}>
-        {talk.view.messagesLoading ? (
-          <div style={{ ...smallText, padding: 16 }}>加载消息…</div>
-        ) : talk.view.messages.length === 0 ? (
-          <div style={{ ...smallText, padding: 16 }}>还没有消息，来说第一句吧。</div>
-        ) : (
-          <>
-            {canLoadMore ? (
-              <div style={{ textAlign: "center", padding: 4 }}>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void loadOlderMessages()}
-                  disabled={talk.view.loadingOlder}
-                >
-                  {talk.view.loadingOlder ? "加载中…" : "加载更早消息"}
-                </Button>
-              </div>
-            ) : null}
-            {talk.view.messages.map((item) => (
-              <MessageRow key={item.id} item={item} />
-            ))}
-          </>
-        )}
-      </div>
-
-      <div style={composerWrap}>
-        <Button
-          size="md"
-          variant="ghost"
-          icon={<IconPaperclipOutline16 />}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={talk.view.sending}
-          aria-label="添加附件"
-          title="添加附件"
-        />
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-          {pendingFiles.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {pendingFiles.map((f, i) => (
-                <span key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`} style={pendingChip}>
-                  <span
-                    style={{
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {f.name}
-                  </span>
-                  <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
-                    {formatBytes(f.size)}
-                  </span>
+        <div ref={scrollRef} onScroll={onScroll} style={messagesWrap}>
+          {talk.view.messagesLoading ? (
+            <div style={{ ...smallText, padding: 16 }}>加载消息…</div>
+          ) : talk.view.messages.length === 0 ? (
+            <div style={{ ...smallText, padding: 16 }}>还没有消息，来说第一句吧。</div>
+          ) : (
+            <>
+              {canLoadMore ? (
+                <div style={{ textAlign: "center", padding: 4 }}>
                   <Button
                     size="sm"
                     variant="ghost"
-                    icon={<IconCloseOutline16 />}
-                    onClick={() => removePending(i)}
-                    aria-label={`移除 ${f.name}`}
-                  />
-                </span>
+                    onClick={() => void loadOlderMessages()}
+                    disabled={talk.view.loadingOlder}
+                  >
+                    {talk.view.loadingOlder ? "加载中…" : "加载更早消息"}
+                  </Button>
+                </div>
+              ) : null}
+              {talk.view.messages.map((item) => (
+                <MessageRow key={item.id} item={item} />
               ))}
-            </div>
-          ) : null}
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void submit();
-              }
-            }}
-            placeholder={`在 #${channel?.name ?? ""} 发消息…`}
-            style={textArea}
+            </>
+          )}
+        </div>
+
+        <div style={composerWrap}>
+          <Button
+            size="md"
+            variant="ghost"
+            icon={<IconPaperclipOutline16 />}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={talk.view.sending}
+            aria-label="添加附件"
+            title="添加附件"
+          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+            {pendingFiles.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {pendingFiles.map((f, i) => (
+                  <span key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`} style={pendingChip}>
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {f.name}
+                    </span>
+                    <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+                      {formatBytes(f.size)}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconCloseOutline16 />}
+                      onClick={() => removePending(i)}
+                      aria-label={`移除 ${f.name}`}
+                    />
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder={`在 #${channel?.name ?? ""} 发消息…`}
+              style={textArea}
+            />
+          </div>
+          <Button
+            variant="primary"
+            size="md"
+            icon={<IconSendOutline16 />}
+            disabled={talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)}
+            onClick={() => void submit()}
+            aria-label="发送"
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={(e) => pickFiles(e)}
+            style={{ display: "none" }}
+            aria-hidden
+            tabIndex={-1}
           />
         </div>
-        <Button
-          variant="primary"
-          size="md"
-          icon={<IconSendOutline16 />}
-          disabled={talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)}
-          onClick={() => void submit()}
-          aria-label="发送"
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={(e) => pickFiles(e)}
-          style={{ display: "none" }}
-          aria-hidden
-          tabIndex={-1}
-        />
       </div>
-    </div>
+      <ShareSnapshotModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        channelName={channel?.name ?? ""}
+      />
+    </>
   );
 }
 
@@ -861,6 +881,76 @@ function JoinModal({ open, onClose }: { open: boolean; onClose: () => void }): R
         onChange={(e) => setCode(e.target.value)}
         placeholder="邀请码，如 ABCD1234"
       />
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：分享会话快照 ----------------
+
+function ShareSnapshotModal({
+  open,
+  onClose,
+  channelName,
+}: {
+  open: boolean;
+  onClose: () => void;
+  channelName: string;
+}): ReactElement {
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    const url = await snapshotChannel({ title, summary });
+    setBusy(false);
+    if (!url) return;
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // 剪贴板不可用时忽略
+      }
+    }
+    setTitle("");
+    setSummary("");
+    onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="分享会话快照"
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void submit()}>
+            {busy ? "打包中…" : "生成并复制链接"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder={`会话快照：${channelName}`}
+        />
+        <Input
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          placeholder="一句话摘要（可选）"
+        />
+        <div style={{ ...smallText, fontSize: 12 }}>
+          把本频道最近最多 200 条消息打包成 JSON
+          会话快照；生成后链接自动复制到剪贴板，可分享给其它人。
+        </div>
+      </div>
     </Modal>
   );
 }

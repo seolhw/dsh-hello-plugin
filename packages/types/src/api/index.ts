@@ -62,10 +62,10 @@ export * from "./shares";
  *   GET    /api/channels/:id/read-state        —                        → GetReadStateResponse
  *   POST   /api/channels/:id/read-state        UpdateReadStateRequest   → UpdateReadStateResponse
  *
- *  分享
+ *  分享（会话快照）
  *   GET    /api/shares/discover              query:ListSharesQuery      → ListSharesResponse
  *   GET    /api/shares/mine                  query:ListMySharesQuery    → ListMySharesResponse
- *   POST   /api/shares                       CreateShareRequest         → CreateShareResponse
+ *   POST   /api/shares/snapshot              CreateShareRequest         → CreateShareResponse
  *   GET    /api/shares/:id                   —                          → GetShareResponse
  *   DELETE /api/shares/:id                   —                          → DeleteShareResponse
  *

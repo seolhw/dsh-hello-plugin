@@ -1,53 +1,261 @@
 // ================================================================
-// /api/shares —— 分享（session / workflow）—— 后续阶段实现，当前为 501 占位
-// 附件上传不在这里：见 ./r2.ts（Worker 直写 R2）
+// /api/shares/* —— 会话快照分享（session）
+//   POST   /snapshot   把某频道最近消息打成 JSON 包 → R2 + 落一份分享元数据
+//   GET    /mine       我创建的分享
+//   GET    /discover   公开快照流（仅 isPublic=true）
+//   GET    /:id        元数据 + downloadUrl（作者 / 公开 / 来源社区成员）
+//   DELETE /:id        删除自己的分享（含 R2 包体）
+// 权限：快照须为该频道社区成员；isPublic 仅对「公开社区」的快照置 true。
 // ================================================================
 
-import type { CreateShareRequest, ListMySharesQuery, ListSharesQuery } from "@dsh-talk/types/api";
+import type { CreateShareRequest, ListSharesQuery } from "@dsh-talk/types/api";
+import type { Share, ShareKind, User } from "@dsh-talk/types/entities";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
+import {
+  channels,
+  communities,
+  type MessageRow,
+  messages,
+  type ShareRow,
+  shares,
+} from "../db/schema";
+import { requireMember } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
-import { emptyOk, notImplemented } from "../lib/response";
+import { db as dbOf } from "../lib/db";
+import { HttpApiError } from "../lib/errors";
+import { newId } from "../lib/ids";
+import { type AppCtx, emptyOk } from "../lib/response";
+import { fetchUserById } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
-const shares = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
-shares.use("*", createBearerAuth("required"));
+const api = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
+export const sharesRoutes = api;
 
-shares.get("/discover", (c) => {
-  requireUserId(c);
-  const _q = c.req.query() as unknown as ListSharesQuery;
-  void _q;
-  return notImplemented(c, "discover shares");
+api.use("*", createBearerAuth("required"));
+
+function parseJson<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+function rowToShare(row: ShareRow): Share {
+  return {
+    id: row.id,
+    authorId: row.authorId,
+    kind: row.kind,
+    title: row.title,
+    summary: row.summary,
+    coverUrl: row.coverUrl,
+    r2Key: row.r2Key,
+    sizeBytes: row.sizeBytes,
+    sha256: row.sha256,
+    manifest: parseJson<Record<string, unknown>>(row.manifest) ?? {},
+    public: row.isPublic,
+    downloadCount: row.downloadCount,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+async function authorOf(c: AppCtx, userId: string): Promise<User> {
+  const user = await fetchUserById(c.env.DB, userId);
+  if (!user) throw HttpApiError.internal("user not found");
+  return user;
+}
+
+async function loadShareRow(c: AppCtx, shareId: string): Promise<ShareRow> {
+  const db = dbOf(c);
+  const row = (await db.select().from(shares).where(eq(shares.id, shareId)).limit(1))[0];
+  if (!row) throw HttpApiError.notFound("share not found");
+  return row;
+}
+
+/** 快照来源社区（manifest 里记录 communityId） */
+function snapshotCommunityId(share: Share): string | null {
+  const communityId = share.manifest?.communityId;
+  return typeof communityId === "string" ? communityId : null;
+}
+
+// ---------------- 列表：mine / discover ----------------
+
+api.get("/mine", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const rawLimit = c.req.query("limit") ?? "";
+  const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 20, 1), 100);
+  const rows = await db
+    .select()
+    .from(shares)
+    .where(eq(shares.authorId, userId))
+    .orderBy(desc(shares.createdAt))
+    .limit(limit);
+  const items: Array<Share & { author: User }> = [];
+  for (const row of rows) {
+    items.push({ ...rowToShare(row), author: await authorOf(c, row.authorId) });
+  }
+  return c.json({ items, nextCursor: null, count: items.length });
 });
 
-shares.get("/mine", (c) => {
+api.get("/discover", async (c) => {
+  const db = dbOf(c);
   requireUserId(c);
-  const _q = c.req.query() as unknown as ListMySharesQuery;
-  void _q;
-  return notImplemented(c, "mine shares");
+  const q = c.req.query() as unknown as ListSharesQuery;
+  const rawLimit = c.req.query("limit") ?? "";
+  const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 20, 1), 100);
+  const kind: ShareKind | null = q.kind === "session" || q.kind === "workflow" ? q.kind : null;
+  const rows = await db
+    .select()
+    .from(shares)
+    .where(kind ? and(eq(shares.isPublic, true), eq(shares.kind, kind)) : eq(shares.isPublic, true))
+    .orderBy(desc(shares.createdAt))
+    .limit(limit);
+  const items: Array<Share & { author: User }> = [];
+  for (const row of rows) {
+    items.push({ ...rowToShare(row), author: await authorOf(c, row.authorId) });
+  }
+  return c.json({ items, nextCursor: null, count: items.length });
 });
 
-shares.post(
-  "/",
-  validator("json", (v) => v as CreateShareRequest),
-  async (c) => {
-    requireUserId(c);
-    const body = c.req.valid("json" as never) as CreateShareRequest;
-    void body;
-    return notImplemented(c, "create share");
-  },
-);
+// ---------------- 单条：GET / DELETE ----------------
 
-shares.get("/:id", (c) => {
-  requireUserId(c);
-  const id = c.req.param("id");
-  void id;
-  return notImplemented(c, "get share (meta + signed download url)");
+api.get("/:id", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadShareRow(c, c.req.param("id"));
+  const share = rowToShare(row);
+
+  // 作者/公开直通；其余须为来源社区成员（含私有社区内部共享）
+  if (row.authorId !== userId && !share.public) {
+    const communityId = snapshotCommunityId(share);
+    if (!communityId) throw HttpApiError.forbidden("无权查看该分享");
+    await requireMember(db, communityId, userId);
+  }
+  const author = await authorOf(c, row.authorId);
+  const origin = new URL(c.req.url).origin;
+  return c.json({
+    ...share,
+    author,
+    downloadUrl: `${origin}/api/r2/objects/${row.r2Key}?download=1`,
+  });
 });
 
-shares.delete("/:id", (c) => {
-  requireUserId(c);
+api.delete("/:id", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadShareRow(c, c.req.param("id"));
+  if (row.authorId !== userId) throw HttpApiError.forbidden("只能删除自己创建的分享");
+  await c.env.R2.delete(row.r2Key).catch(() => undefined);
+  await db.delete(shares).where(eq(shares.id, row.id));
   return emptyOk(c);
 });
 
-export { shares as sharesRoutes };
+// ---------------- 创建快照：POST /snapshot ----------------
+
+api.post(
+  "/snapshot",
+  validator("json", (v) => v as CreateShareRequest),
+  async (c) => {
+    const db = dbOf(c);
+    const userId = requireUserId(c);
+    const body = c.req.valid("json" as never) as CreateShareRequest;
+    const channelId = body.channelId;
+    if (!channelId) throw HttpApiError.badRequest("channelId 必填");
+
+    const channel = (
+      await db.select().from(channels).where(eq(channels.id, channelId)).limit(1)
+    )[0];
+    if (!channel) throw HttpApiError.notFound("channel not found");
+    await requireMember(db, channel.communityId, userId);
+
+    const community = (
+      await db.select().from(communities).where(eq(communities.id, channel.communityId)).limit(1)
+    )[0];
+
+    // 取该频道最近 200 条消息（旧→新）
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.channelId, channelId))
+      .orderBy(asc(messages.createdAt))
+      .limit(200);
+
+    // 作者资料去重加载
+    const authorIds = [...new Set(rows.map((m: MessageRow) => m.authorId))];
+    const users = new Map<string, User>();
+    for (const id of authorIds) {
+      const user = await fetchUserById(c.env.DB, id);
+      if (user) users.set(id, user);
+    }
+
+    const exportedAt = Date.now();
+    const packageBody = {
+      snapshotVersion: 1,
+      exportedAt,
+      community: { id: channel.communityId, name: community?.name ?? "" },
+      channel: { id: channel.id, name: channel.name },
+      messages: rows.map((m: MessageRow) => ({
+        id: m.id,
+        authorId: m.authorId,
+        authorHandle: users.get(m.authorId)?.handle ?? "",
+        authorName: users.get(m.authorId)?.displayName ?? null,
+        createdAt: m.createdAt,
+        content: m.content,
+        attachments: parseJson(m.attachments) ?? [],
+        mentions: parseJson<string[]>(m.mentions) ?? [],
+        replyToId: m.replyToId,
+      })),
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(packageBody));
+
+    const shareId = newId();
+    const r2Key = `shr${shareId}`;
+    const object = await c.env.R2.put(r2Key, bytes, {
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: { u: userId },
+    });
+    if (!object) throw HttpApiError.internal("R2 写入失败");
+
+    const now = Date.now();
+    const title = (body.title ?? "").trim() || `会话快照：${channel.name}`;
+    await db.insert(shares).values({
+      id: shareId,
+      authorId: userId,
+      kind: "session",
+      title,
+      summary: body.summary?.trim() || null,
+      coverUrl: null,
+      r2Key,
+      sizeBytes: object.size,
+      sha256: null,
+      manifest: JSON.stringify({
+        snapshotVersion: 1,
+        exportedAt,
+        communityId: channel.communityId,
+        channelId,
+        messageCount: rows.length,
+      }),
+      isPublic: community?.privacy === "public",
+      downloadCount: 0,
+      createdAt: now,
+      updatedAt: null,
+    });
+
+    const created = (await db.select().from(shares).where(eq(shares.id, shareId)).limit(1))[0];
+    if (!created) throw HttpApiError.internal("share row not found");
+    const author = await authorOf(c, userId);
+    const origin = new URL(c.req.url).origin;
+    return c.json(
+      {
+        share: { ...rowToShare(created), author },
+        downloadUrl: `${origin}/api/r2/objects/${r2Key}?download=1`,
+      },
+      201,
+    );
+  },
+);

@@ -209,6 +209,29 @@ const getRes = await fetch(sentAtt.url);
 assert(getRes.status === 200, "附件 GET 200");
 assert((getRes.headers.get("content-type") ?? "").startsWith("image/png"), "附件 GET content-type 正确");
 
+// Shares：快照当前频道 → 查看/下载包体/删除
+const snap = await call("POST", "/api/shares/snapshot", { channelId }, tokenA);
+assert(
+  snap.status === 201 &&
+    snap.json?.share?.kind === "session" &&
+    snap.json.share.r2Key.startsWith("shr") &&
+    typeof snap.json.downloadUrl === "string",
+  "A 生成会话快照",
+);
+const shareId = snap.json.share.id;
+const dlRes = await fetch(snap.json.downloadUrl);
+assert(dlRes.status === 200, "快照包 GET 200");
+const snapBody = await dlRes.json();
+assert(snapBody.channel?.name === "全员" && Array.isArray(snapBody.messages), "快照包含频道信息与消息列表");
+const mine = await call("GET", "/api/shares/mine", undefined, tokenA);
+assert(mine.status === 200 && mine.json.items.some((s) => s.id === shareId), "mine 列表含快照");
+const view = await call("GET", `/api/shares/${shareId}`, undefined, tokenB);
+assert(view.status === 200 && typeof view.json.downloadUrl === "string", "社区成员可查看分享");
+const del = await call("DELETE", `/api/shares/${shareId}`, undefined, tokenA);
+assert(del.status === 200, "作者可删除分享");
+const gone = await call("GET", `/api/shares/${shareId}`, undefined, tokenB);
+assert(gone.status === 404, "删除后 404");
+
 // 非成员直连同一频道 DO 被拒（握手前 403）
 const outsider = await signup("chout");
 await expectWsRejected(outsider, channelId);

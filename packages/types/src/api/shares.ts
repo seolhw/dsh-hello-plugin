@@ -1,53 +1,47 @@
 import type { ID, Share, ShareKind, User } from "../entities";
-import type { CursorPaginated, CursorPaginationQuery } from "./common";
+import type { CursorPaginated, CursorPaginationQuery, EmptyResponse } from "./common";
 
 // ===============================================================
-// /api/shares/*  ——  会话克隆包 / workflow 分享（后续阶段实现，先占位）
+// /api/shares/*  ——  会话快照分享（session）
+// 概念：把某个频道最近的消息打成 JSON 包存进 R2，落一份分享元数据；
+//       快照可公开（源自公开社区）或仅社区成员/作者可见，供克隆还原（阶段3 host）。
+// 流程：POST /api/shares/snapshot（服务端读 D1 打包）→ 拿 share + downloadUrl
 // ===============================================================
 
-/** POST /api/shares —— 元数据落库（附件包先经 Worker 直传 R2 拿 key） */
+/** POST /api/shares/snapshot —— 快照一个频道的会话（须为该社区成员） */
 export interface CreateShareRequest {
-  kind: ShareKind;
-  title: string;
+  kind?: "session";
+  channelId: ID;
+  /** 缺省用「频道快照：<channel name>」 */
+  title?: string;
   summary?: string | null;
-  coverUrl?: string | null;
-  /** 从 sign-upload 响应里拿的 */
-  r2Key: string;
-  sizeBytes: number;
-  sha256?: string | null;
-  /** 克隆包/workflow 的 manifest 快照（前端/host 打包时生成，原样存 JSONB） */
-  manifest: Record<string, unknown>;
-  /** 发布到哪个 showcase 频道（可选）。不传 = 只在「我的分享」里，不进频道 */
-  publishToChannelId?: ID | null;
-  /** 发布时附带的频道消息正文（不传就发一张纯卡片） */
-  publishMessageText?: string | null;
 }
 
 export interface CreateShareResponse {
   share: Share & { author: User };
-  /** 如果指定了 publishToChannelId，会自动创建一条带 shareCard 的消息 */
-  publishedMessageId?: ID | null;
+  /** 包体下载地址（GET /api/r2/objects/<key>?download=1，公开但 key 不可枚举） */
+  downloadUrl: string;
 }
 
-/** GET /api/shares/:id —— 取分享元数据（决定要不要点克隆） */
+/** GET /api/shares/:id —— 分享元数据 + 下载地址 */
 export type GetShareResponse = Share & {
   author: User;
-  /** 下载链接（预签名，短期有效）。给 client 的 host 调下载用 */
   downloadUrl: string;
 };
 
-/** GET /api/shares/discover —— showcase 聚合页（跨社区，或限定社区内） */
+/** GET /api/shares/discover —— 公开快照流（仅 isPublic=true 的快照） */
 export interface ListSharesQuery extends CursorPaginationQuery {
   kind?: ShareKind;
-  communityId?: ID;
   authorId?: ID;
   q?: string;
 }
 export type ListSharesResponse = CursorPaginated<Share & { author: User }>;
 
-/** GET /api/shares/mine —— 我自己的分享列表 */
-export type ListMySharesQuery = CursorPaginationQuery & { kind?: ShareKind };
+/** GET /api/shares/mine —— 我创建的分享 */
+export interface ListMySharesQuery extends CursorPaginationQuery {
+  kind?: ShareKind;
+}
 export type ListMySharesResponse = CursorPaginated<Share & { author: User }>;
 
-/** DELETE /api/shares/:id —— 删自己的分享（作者 + admin） */
-export type DeleteShareResponse = { ok: true };
+/** DELETE /api/shares/:id —— 删除自己创建的分享（含 R2 包体） */
+export type DeleteShareResponse = EmptyResponse;

@@ -794,6 +794,29 @@ export function setDraft(text: string): void {
   patchView({ drafts: { ...state.view.drafts, [channelId]: text } });
 }
 
+/** 把当前频道最近消息打成会话快照，返回包体下载链接 */
+export async function snapshotChannel(input: {
+  title?: string;
+  summary?: string;
+}): Promise<string | null> {
+  const server = serverOf();
+  const channelId = state.view.channelId;
+  if (!server || !channelId) return null;
+  try {
+    const body: { title?: string; summary?: string } = {};
+    const rawTitle = input.title?.trim() ?? "";
+    const rawSummary = input.summary?.trim() ?? "";
+    if (rawTitle.length > 0) body.title = rawTitle;
+    if (rawSummary.length > 0) body.summary = rawSummary;
+    const res = await server.createShareSnapshot(channelId, body);
+    notify(`已生成分享「${res.share.title}」`);
+    return res.downloadUrl;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
 /** 当前用户能否改/删一条消息（作者本人 或 社区 owner/admin） */
 export function canModify(item: MessageItem): boolean {
   if (state.me === null) return false;

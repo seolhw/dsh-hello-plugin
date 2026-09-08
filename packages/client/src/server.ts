@@ -16,6 +16,8 @@ import type {
   CreateCommunityResponse,
   CreateMessageRequest,
   CreateMessageResponse,
+  CreateShareRequest,
+  CreateShareResponse,
   DeleteChannelResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
@@ -431,6 +433,21 @@ export class ServerClient {
       "POST",
       `/api/channels/${channelId}/read-state`,
       body,
+      true,
+    );
+  }
+
+  // ---------- 业务 REST：会话快照分享 ----------
+
+  /** POST /api/shares/snapshot —— 把某频道消息打包成会话快照 */
+  createShareSnapshot(
+    channelId: string,
+    body: Pick<CreateShareRequest, "title" | "summary">,
+  ): Promise<CreateShareResponse> {
+    return this.call<CreateShareResponse>(
+      "POST",
+      "/api/shares/snapshot",
+      { channelId, ...body },
       true,
     );
   }

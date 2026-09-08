@@ -6,9 +6,11 @@ import {
   Button,
   IconChevronLeftOutline14,
   IconCloseOutline16,
+  IconDownloadOutline16,
   IconEditOutline16,
   IconLinkOutline16,
   IconLoadingOutline16,
+  IconPaperclipOutline16,
   IconPlusOutline16,
   IconSendOutline16,
   IconTrashOutline16,
@@ -16,8 +18,8 @@ import {
   Modal,
   Pill,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { Channel } from "@dsh-talk/types/entities";
-import type { CSSProperties, ReactElement, UIEvent } from "react";
+import type { Channel, MessageAttachment } from "@dsh-talk/types/entities";
+import type { ChangeEvent, CSSProperties, ReactElement, UIEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   backToCommunities,
@@ -28,6 +30,7 @@ import {
   loadOlderMessages,
   logout,
   type MessageItem,
+  notify,
   openCommunity,
   selectChannel,
   sendMessage,
@@ -155,6 +158,19 @@ const textAreaEdit: CSSProperties = {
   padding: "6px 8px",
   font: "inherit",
   fontSize: 13,
+};
+
+const pendingChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "3px 4px 3px 9px",
+  borderRadius: 8,
+  border: `1px solid ${palette.border}`,
+  background: palette.inputBg,
+  fontSize: 12,
+  color: palette.text,
+  maxWidth: 260,
 };
 
 // ---------------- 社区栏 ----------------
@@ -324,6 +340,92 @@ function ChannelList(): ReactElement | null {
   );
 }
 
+// ---------------- 附件展示 ----------------
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
+}
+
+const fileChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "5px 9px",
+  borderRadius: 8,
+  border: `1px solid ${palette.border}`,
+  background: palette.inputBg,
+  color: palette.text,
+  fontSize: 12,
+  textDecoration: "none",
+  maxWidth: 260,
+};
+
+function AttachmentList({
+  attachments,
+}: {
+  attachments: MessageAttachment[];
+}): ReactElement | null {
+  const list = attachments ?? [];
+  if (list.length === 0) return null;
+  const images = list.filter((a) => a.kind === "image");
+  const files = list.filter((a) => a.kind !== "image");
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+      {images.map((a) => (
+        <a
+          key={a.url}
+          href={a.url}
+          target="_blank"
+          rel="noreferrer"
+          title={a.name}
+          style={{ display: "block", borderRadius: 10, overflow: "hidden" }}
+        >
+          <img
+            src={a.url}
+            alt={a.name}
+            loading="lazy"
+            style={{
+              display: "block",
+              maxHeight: 240,
+              maxWidth: 320,
+              borderRadius: 10,
+              border: `1px solid ${palette.border}`,
+              background: palette.inputBg,
+            }}
+          />
+        </a>
+      ))}
+      {files.map((a) => (
+        <a key={a.url} href={`${a.url}?download=1`} title="点击下载" style={fileChip}>
+          <span style={{ color: palette.muted, display: "inline-flex" }}>
+            <IconDownloadOutline16 />
+          </span>
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {a.name}
+          </span>
+          <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+            {formatBytes(a.size)}
+          </span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
 // ---------------- 消息行 ----------------
 
 function MessageRow({ item }: { item: MessageItem }): ReactElement {
@@ -389,6 +491,7 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
             {item.content}
           </div>
         )}
+        <AttachmentList attachments={item.attachments ?? []} />
       </div>
       {allowEdit ? (
         <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -445,6 +548,9 @@ function ChatPane(): ReactElement | null {
   const channelRef = useRef<string | null>(null);
   const pinnedRef = useRef(true);
   const lastCountRef = useRef(0);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const MAX_ATTACH = 4;
 
   const draft = channelId ? (talk.view.drafts[channelId] ?? "") : "";
 
@@ -472,11 +578,33 @@ function ChatPane(): ReactElement | null {
 
   if (!channelId) return null;
 
+  function pickFiles(event: ChangeEvent<HTMLInputElement>): void {
+    const picked = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = "";
+    if (picked.length === 0) return;
+    setPendingFiles((prev) => {
+      const room = MAX_ATTACH - prev.length;
+      if (room <= 0) {
+        notify(`一条消息最多 ${MAX_ATTACH} 个附件`);
+        return prev;
+      }
+      if (picked.length > room) notify(`一条消息最多 ${MAX_ATTACH} 个附件，已保留前 ${room} 个`);
+      return [...prev, ...picked].slice(0, MAX_ATTACH);
+    });
+  }
+
+  function removePending(index: number): void {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function submit(): Promise<void> {
     const text = draft;
-    if (text.trim().length === 0) return;
-    await sendMessage(text);
-    setDraft("");
+    if (text.trim().length === 0 && pendingFiles.length === 0) return;
+    const ok = await sendMessage(text, pendingFiles);
+    if (ok) {
+      setDraft("");
+      setPendingFiles([]);
+    }
   }
 
   const hasOlder = talk.view.nextCursor !== null;
@@ -548,25 +676,72 @@ function ChatPane(): ReactElement | null {
       </div>
 
       <div style={composerWrap}>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-          placeholder={`在 #${channel?.name ?? ""} 发消息…`}
-          style={textArea}
+        <Button
+          size="md"
+          variant="ghost"
+          icon={<IconPaperclipOutline16 />}
+          onClick={() => fileInputRef.current?.click()}
+          disabled={talk.view.sending}
+          aria-label="添加附件"
+          title="添加附件"
         />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+          {pendingFiles.length > 0 ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {pendingFiles.map((f, i) => (
+                <span key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`} style={pendingChip}>
+                  <span
+                    style={{
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {f.name}
+                  </span>
+                  <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+                    {formatBytes(f.size)}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<IconCloseOutline16 />}
+                    onClick={() => removePending(i)}
+                    aria-label={`移除 ${f.name}`}
+                  />
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder={`在 #${channel?.name ?? ""} 发消息…`}
+            style={textArea}
+          />
+        </div>
         <Button
           variant="primary"
           size="md"
           icon={<IconSendOutline16 />}
-          disabled={talk.view.sending || draft.trim().length === 0}
+          disabled={talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)}
           onClick={() => void submit()}
           aria-label="发送"
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          onChange={(e) => pickFiles(e)}
+          style={{ display: "none" }}
+          aria-hidden
+          tabIndex={-1}
         />
       </div>
     </div>

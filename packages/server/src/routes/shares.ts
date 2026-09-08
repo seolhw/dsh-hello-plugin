@@ -1,9 +1,9 @@
-import type {
-  CreateShareRequest,
-  ListMySharesQuery,
-  ListSharesQuery,
-  R2SignedUploadRequest,
-} from "@dsh-talk/types/api";
+// ================================================================
+// /api/shares —— 分享（session / workflow）—— 后续阶段实现，当前为 501 占位
+// 附件上传不在这里：见 ./r2.ts（Worker 直写 R2）
+// ================================================================
+
+import type { CreateShareRequest, ListMySharesQuery, ListSharesQuery } from "@dsh-talk/types/api";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
 import { createBearerAuth, requireUserId } from "../lib/auth";
@@ -50,19 +50,4 @@ shares.delete("/:id", (c) => {
   return emptyOk(c);
 });
 
-// R2 通用签名（分享、消息附件、头像、社区图 都走这里）
-const r2 = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
-r2.use("*", createBearerAuth("required"));
-
-r2.post(
-  "/sign-upload",
-  validator("json", (v) => v as R2SignedUploadRequest),
-  async (c) => {
-    requireUserId(c);
-    const body = c.req.valid("json" as never) as R2SignedUploadRequest;
-    void body;
-    return notImplemented(c, "r2 sign upload");
-  },
-);
-
-export { r2 as r2Routes, shares as sharesRoutes };
+export { shares as sharesRoutes };

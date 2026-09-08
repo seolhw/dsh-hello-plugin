@@ -27,7 +27,9 @@ export function applyGlobalMiddleware(app: Hono<{ Bindings: Env; Variables: Hono
   });
 
   app.use("*", timing());
-  app.use("*", secureHeaders());
+  // CORP 放行跨源子资源（no-cors <img>）：公开附件对象本就靠不可枚举 key + CORS 兜底，
+  // 与其余 API（Bearer 鉴权）无冲突
+  app.use("*", secureHeaders({ crossOriginResourcePolicy: "cross-origin" }));
   app.use(
     "*",
     cors({
@@ -36,7 +38,12 @@ export function applyGlobalMiddleware(app: Hono<{ Bindings: Env; Variables: Hono
         // 若日后启用跨源 Cookie 会话需收窄到 trustedOrigins + 显式 origin。
         return origin ?? "*";
       },
-      allowHeaders: ["Authorization", "Content-Type", "X-Requested-With"],
+      allowHeaders: [
+        "Authorization",
+        "Content-Type",
+        "X-Requested-With",
+        "X-File-Name", // 附件直传 PUT /api/r2/objects 的文件名头（URL 编码）
+      ],
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       // set-auth-token：Better Auth bearer 插件在登录/注册响应头里回会话 token
       exposeHeaders: ["X-Request-Id", "set-auth-token"],
@@ -45,20 +52,22 @@ export function applyGlobalMiddleware(app: Hono<{ Bindings: Env; Variables: Hono
     }),
   );
 
-  // 2. Body 大小限制（分享包上限 50 MiB，但走 R2 预签名直传，API 层 5 MiB 足够）
-  app.use(
-    "*",
-    bodyLimit({
+  // 2. Body 大小限制：API 层 5 MiB；附件直传（PUT /api/r2/objects）豁免，
+  //    由该路由自身按 MAX_ATTACHMENT_BYTES 校验
+  app.use("*", async (c, next) => {
+    if (c.req.path.startsWith("/api/r2/objects")) return next();
+    const limit = bodyLimit({
       maxSize: 5 * 1024 * 1024,
       onError: (_c) => {
         const err: ApiErrorShape = {
           code: "PAYLOAD_TOO_LARGE",
-          message: "request body exceeded 5 MiB; for files use /r2/sign-upload first",
+          message: "request body exceeded 5 MiB; for files use PUT /api/r2/objects first",
         };
         return Response.json(err, { status: 413 });
       },
-    }),
-  );
+    });
+    return limit(c, next);
+  });
 
   // 3. 统一错误格式
   app.onError((err, c) => {

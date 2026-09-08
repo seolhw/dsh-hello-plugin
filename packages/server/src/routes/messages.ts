@@ -5,7 +5,7 @@
 //   - 发消息/看历史/未读：必须是该频道所属社区的成员
 //   - 改/删消息：仅消息作者本人，或该社区 owner/admin
 //   - help 解决：提问作者或 owner/admin
-//   - 附件（R2）与分享卡片尚未纳入 MVP，接口遇到会明确拒绝
+//   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片尚未纳入 MVP
 // ================================================================
 
 import type { D1Database } from "@cloudflare/workers-types";
@@ -16,11 +16,11 @@ import type {
   UpdateMessageRequest,
   UpdateReadStateRequest,
 } from "@dsh-talk/types/api";
-import type { ChannelReadState, Message, User } from "@dsh-talk/types/entities";
+import type { ChannelReadState, Message, MessageAttachment, User } from "@dsh-talk/types/entities";
 import type { EvtMessageDeleted, EvtMessageNew, EvtMessageUpdated } from "@dsh-talk/types/ws";
 import { and, asc, desc, eq, gt, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { MAX_MESSAGE_LENGTH } from "../constants";
+import { MAX_ATTACHMENT_NAME, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from "../constants";
 import {
   type ChannelRow,
   channelReadStates,
@@ -188,12 +188,41 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   const body = await jsonBody<CreateMessageRequest>(c);
   const d1 = c.env.DB;
   const content = (body.content ?? "").trim();
-  if (content.length === 0) throw HttpApiError.badRequest("content 不能为空");
   if (content.length > MAX_MESSAGE_LENGTH)
     throw HttpApiError.badRequest(`content 超过 ${MAX_MESSAGE_LENGTH} 字符上限`);
-  if (body.attachments && body.attachments.length > 0) {
-    throw HttpApiError.badRequest("附件上传（R2）尚未就绪，MVP 阶段请发送纯文本消息");
+
+  // 附件：r2Key -> R2 实际对象。只允许引用「自己刚上传、尚未被消费」的对象；
+  // 落库前以 R2 对象为准回填 name/size/mime（客户端声明仅作预检）。
+  const puts = body.attachments ?? [];
+  if (puts.length > MAX_ATTACHMENTS_PER_MESSAGE)
+    throw HttpApiError.badRequest(`一条消息最多携带 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件`);
+  const origin = new URL(c.req.url).origin;
+  const attachments: MessageAttachment[] = [];
+  for (const a of puts) {
+    if (typeof a.r2Key !== "string" || !a.r2Key.startsWith("att"))
+      throw HttpApiError.badRequest("附件 r2Key 无效");
+    const name = typeof a.name === "string" ? a.name.trim() : "";
+    if (!name || name.length > MAX_ATTACHMENT_NAME)
+      throw HttpApiError.badRequest("附件名缺失或超过 200 字符");
+    if (!Number.isInteger(a.size) || a.size <= 0) throw HttpApiError.badRequest("附件 size 无效");
+
+    const object = await c.env.R2.get(a.r2Key);
+    if (!object) throw HttpApiError.badRequest(`附件「${name}」尚未上传完成或已不存在`);
+    if (object.customMetadata?.u !== userId) throw HttpApiError.forbidden("只能引用自己上传的附件");
+
+    const mimeType = object.httpMetadata?.contentType ?? null;
+    attachments.push({
+      kind: mimeType?.startsWith("image/") ? "image" : "file",
+      url: `${origin}/api/r2/objects/${a.r2Key}`,
+      name,
+      size: object.size,
+      mimeType,
+      width: typeof a.width === "number" ? a.width : null,
+      height: typeof a.height === "number" ? a.height : null,
+    });
   }
+  if (content.length === 0 && attachments.length === 0)
+    throw HttpApiError.badRequest("content 不能为空（纯附件消息也请附上文件）");
 
   // mentions：@handle -> userId
   const mentions: string[] = [];
@@ -243,7 +272,7 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     communityId: channel.communityId,
     authorId: userId,
     content,
-    attachments: JSON.stringify(body.attachments ?? []),
+    attachments: JSON.stringify(attachments),
     mentions: JSON.stringify(mentions),
     shareCard: shareCard ? JSON.stringify(shareCard) : null,
     resolution: null,

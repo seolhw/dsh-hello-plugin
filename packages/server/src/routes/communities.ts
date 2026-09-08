@@ -241,10 +241,10 @@ communitiesApi.post("/", async (c) => {
     role: "owner",
     joinedAt: now,
   });
-  // 默认频道
+  // 默认频道：全员（文字讨论）+ 公告（announcement，只有管理员可发）
   const defaults = [
-    { name: "general", kind: "text" as const, position: 0 },
-    { name: "announcements", kind: "announcement" as const, position: 1 },
+    { name: "全员", kind: "text" as const, position: 0 },
+    { name: "公告", kind: "announcement" as const, position: 1 },
   ];
   const createdChannels: ChannelRow[] = [];
   for (const d of defaults) {

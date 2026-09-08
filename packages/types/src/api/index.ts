@@ -6,6 +6,7 @@ export * from "./auth";
 export * from "./common";
 export * from "./communities";
 export * from "./messages";
+export * from "./r2";
 export * from "./shares";
 
 // ---------------------------------------------------------------
@@ -68,8 +69,10 @@ export * from "./shares";
  *   GET    /api/shares/:id                   —                          → GetShareResponse
  *   DELETE /api/shares/:id                   —                          → DeleteShareResponse
  *
- *  R2 通用签名
- *   POST   /api/r2/sign-upload               R2SignedUploadRequest      → R2SignedUploadResponse
+ *  附件（R2，Worker 直写）
+ *   PUT   /api/r2/objects              原始字节 body + X-File-Name(URL 编码)
+ *                                      + Content-Type → UploadAttachmentResponse
+ *   GET   /api/r2/objects/:key         公开读取（key 不可枚举）；?download=1 触发下载
  *
  *  WebSocket 升级
  *   GET    /ws                               Upgrade header             → WebSocket 连接

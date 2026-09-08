@@ -1,5 +1,3 @@
-import type { ID, TimestampMs } from "../entities";
-
 // ===============================================================
 // API 通用类型：分页、错误、空响应
 // ===============================================================
@@ -60,30 +58,3 @@ export type ApiErrorCode =
 
 /** 空成功响应（200 / 204） */
 export type EmptyResponse = Record<never, never>;
-
-/** R2 预签名上传请求 */
-export interface R2SignedUploadRequest {
-  /** 逻辑文件分类：message-attachment / share-package / avatar */
-  intent: "message-attachment" | "share-package" | "avatar" | "community-icon" | "community-banner";
-  fileName: string;
-  /** 字节数 */
-  size: number;
-  /** MIME 类型 */
-  contentType: string;
-  /** 关联上下文（可选），如 messageId / shareId */
-  contextId?: ID;
-}
-
-/** R2 预签名上传响应 */
-export interface R2SignedUploadResponse {
-  /** PUT 到这个 URL */
-  uploadUrl: string;
-  /** 上传后，调用下游 API（如发消息、创建分享）时带这个 r2Key */
-  r2Key: string;
-  /** 有效期 ms */
-  expiresAt: TimestampMs;
-  /** 建议添加的请求头（AWS SigV4 需要的 x-amz-*） */
-  requiredHeaders: Record<string, string>;
-  /** 上传完成后可公开访问的 URL（若对象设为 public-read）；否则 null，客户端统一走后端代取 */
-  publicUrl: string | null;
-}

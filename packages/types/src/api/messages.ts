@@ -1,5 +1,6 @@
 import type { ChannelReadState, ID, Message, User } from "../entities";
 import type { CursorPaginated, CursorPaginationQuery, EmptyResponse } from "./common";
+import type { MessageAttachmentPut } from "./r2";
 
 // ===============================================================
 // /api/channels/:id/*  ——  频道消息 & 未读
@@ -17,19 +18,11 @@ export type ListMessagesResponse = CursorPaginated<
   Message & { author: User; replyTo?: (Message & { author: User }) | null }
 >;
 
-/** POST /api/channels/:id/messages —— 发消息（MVP 没有 edit；实时广播走 WS） */
+/** POST /api/channels/:id/messages —— 发消息（实时广播走 WS） */
 export interface CreateMessageRequest {
   content: string;
-  /** 附件，先通过 POST /r2/sign-upload 拿到 r2Key 列表后传 */
-  attachments?: Array<{
-    r2Key: string;
-    name: string;
-    size: number;
-    mimeType?: string | null;
-    /** image 时给宽高 */
-    width?: number | null;
-    height?: number | null;
-  }>;
+  /** 附件：先 PUT /api/r2/objects 拿 r2Key 列表再随消息提交 */
+  attachments?: MessageAttachmentPut[];
   /** @handle 列表（前端传 handle，后端解析成 userId 存入 mentions） */
   mentionHandles?: string[];
   /** 回复的父消息 */

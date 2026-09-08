@@ -23,7 +23,8 @@ import { HttpApiError } from "./lib/errors";
 import { applyGlobalMiddleware } from "./lib/middleware";
 import { channelsRoutes, communitiesRoutes } from "./routes/communities";
 import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
-import { r2Routes, sharesRoutes } from "./routes/shares";
+import { r2ObjectReadRoutes, r2UploadRoutes } from "./routes/r2";
+import { sharesRoutes } from "./routes/shares";
 import type { Env, HonoAppVariables } from "./types";
 
 // ChannelActor DO 类在同脚本里（wrangler 经 durable_objects binding + exports 找到）
@@ -56,7 +57,8 @@ app.route("/api/channels", channelMessagesRoutes); // /api/channels/:id/messages
 app.route("/api/channels", channelsRoutes); // /api/channels/:id PATCH/DELETE 叠加
 app.route("/api/messages", messagesRoutes);
 app.route("/api/shares", sharesRoutes);
-app.route("/api/r2", r2Routes);
+app.route("/api/r2", r2ObjectReadRoutes); // GET /api/r2/objects/:key（公开读取）
+app.route("/api/r2", r2UploadRoutes); // PUT /api/r2/objects（Bearer 鉴权）
 
 // ----------------- WebSocket Upgrade (/ws) -----------------
 // 浏览器 WS 无法自定义 Header，用 ?token=<session token>&channelId=<id>：

@@ -26,6 +26,28 @@ async function call(method, path, body, token) {
   return { status: res.status, json };
 }
 
+/** PUT /api/r2/objects —— 原始字节直传（Worker 直写 R2） */
+async function uploadAttachment(token, name, bytes, contentType) {
+  const res = await fetch(`${BASE}/api/r2/objects`, {
+    method: "PUT",
+    headers: {
+      origin: BASE,
+      authorization: `Bearer ${token}`,
+      "x-file-name": encodeURIComponent(name),
+      "content-type": contentType,
+    },
+    body: bytes,
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
+  }
+  return { status: res.status, json };
+}
+
 async function signup(name) {
   const res = await call("POST", "/api/auth/sign-up/email", {
     name,
@@ -102,7 +124,7 @@ const tokenA = await signup("chalice");
 const tokenB = await signup("chbob");
 const comm = await call("POST", "/api/communities", { name: "Channel DO Test", privacy: "public" }, tokenA);
 assert(comm.status === 201, "A 建社区");
-const channelId = comm.json.channels.find((ch) => ch.name === "general").id;
+const channelId = comm.json.channels.find((ch) => ch.name === "全员").id;
 await call("POST", `/api/communities/${comm.json.id}/join`, {}, tokenB);
 
 // A 直连 general 频道的 ChannelActor
@@ -148,6 +170,44 @@ const delP = waitFrame(ws, (f) => f.type === "evt.message.deleted");
 await call("DELETE", `/api/messages/${post.json.id}`, undefined, tokenB);
 const delEvt = await delP;
 assert(delEvt.payload.messageId === post.json.id, "收到 evt.message.deleted");
+
+// 附件链路：B 直传 R2 → 带附件发消息 → A 收到含图片附件的广播；误引用/读回也要对
+const upl = await uploadAttachment(
+  tokenB,
+  "pic.png",
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]),
+  "image/png",
+);
+assert(upl.status === 201 && upl.json?.r2Key?.startsWith("att"), "B 直传 R2 成功");
+const attachP = waitFrame(
+  ws,
+  (f) => f.type === "evt.message.new" && (f.payload.message.attachments ?? []).length > 0,
+);
+const withAtt = await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "look at this", attachments: [{ r2Key: upl.json.r2Key, name: "pic.png", size: upl.json.size }] },
+  tokenB,
+);
+assert(withAtt.status === 201, "B 带附件发消息成功");
+const evtAtt = await attachP;
+const sentAtt = evtAtt.payload.message.attachments?.[0];
+assert(
+  sentAtt && sentAtt.kind === "image" && sentAtt.url.includes(upl.json.r2Key),
+  "广播携带图片附件（kind=image + url）",
+);
+
+const bad = await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "bad attach", attachments: [{ r2Key: "attNoSuchObject", name: "x.txt", size: 1 }] },
+  tokenB,
+);
+assert(bad.status === 400, "引用不存在附件被拒（400）");
+
+const getRes = await fetch(sentAtt.url);
+assert(getRes.status === 200, "附件 GET 200");
+assert((getRes.headers.get("content-type") ?? "").startsWith("image/png"), "附件 GET content-type 正确");
 
 // 非成员直连同一频道 DO 被拒（握手前 403）
 const outsider = await signup("chout");

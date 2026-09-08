@@ -11,6 +11,7 @@ import type {
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   ListMembersResponse,
+  MessageAttachmentPut,
   SignUpEmailRequest,
 } from "@dsh-talk/types/api";
 import type { ID, MemberRole, Message, User } from "@dsh-talk/types/entities";
@@ -724,23 +725,41 @@ export async function loadOlderMessages(): Promise<void> {
   }
 }
 
-/** 发消息：走 REST；WS live 时事件会回填，否则本地补一条 */
-export async function sendMessage(content: string): Promise<void> {
+/**
+ * 发消息：先逐个 PUT 附件拿 r2Key，再走 REST 创建；WS live 时事件回填，否则本地补一条。
+ * @returns 是否成功入队（成功时调用方应清空输入与附件）
+ */
+export async function sendMessage(content: string, files: File[] = []): Promise<boolean> {
   const server = serverOf();
   const channelId = state.view.channelId;
-  if (!server || !channelId) return;
+  if (!server || !channelId || state.view.sending) return false;
   const text = content.trim();
-  if (text.length === 0 || state.view.sending) return;
+  if (text.length === 0 && files.length === 0) return false;
   patchView({ sending: true });
   try {
-    const created = await server.createMessage(channelId, { content: text });
+    const attachments: MessageAttachmentPut[] = [];
+    for (const file of files) {
+      const up = await server.uploadObject(file);
+      attachments.push({
+        r2Key: up.r2Key,
+        name: up.name,
+        size: up.size,
+        mimeType: up.mimeType ?? (file.type.length > 0 ? file.type : null),
+      });
+    }
+    const created = await server.createMessage(
+      channelId,
+      attachments.length > 0 ? { content: text, attachments } : { content: text },
+    );
     if (!state.view.live) {
       upsertMessage(created as MessageItem, true);
     }
     patchView({ sending: false });
+    return true;
   } catch (error) {
     patchView({ sending: false });
     notify(errorText(error));
+    return false;
   }
 }
 

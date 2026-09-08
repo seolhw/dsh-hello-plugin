@@ -15,5 +15,14 @@ export const ADMIN_HANDLES: readonly string[] = [];
 /** 单条消息最大长度（字符） */
 export const MAX_MESSAGE_LENGTH = 4000;
 
-/** 分享包最大字节数（50 MiB；与 R2 预签名上传限制一致） */
+/** 单个附件最大字节数（25 MiB；走 Worker 直写 R2 的单次 PUT 上限内） */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** 一条消息最多携带的附件数 */
+export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+
+/** 附件原始文件名最大长度（字符） */
+export const MAX_ATTACHMENT_NAME = 200;
+
+/** 分享包最大字节数（50 MiB） */
 export const MAX_SHARE_BYTES = 50 * 1024 * 1024;

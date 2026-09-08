@@ -47,6 +47,7 @@ import type {
   UpdateMessageResponse,
   UpdateReadStateRequest,
   UpdateUserRequest,
+  UploadAttachmentResponse,
 } from "@dsh-talk/types/api";
 
 export class ServerApiError extends Error {
@@ -432,5 +433,44 @@ export class ServerClient {
       body,
       true,
     );
+  }
+
+  /**
+   * PUT /api/r2/objects —— 直传一个附件文件（body = 文件原始字节，非 JSON）。
+   * 文件名为非 ASCII 时浏览器不允许放进请求头，故 X-File-Name 用 URL 编码传输。
+   */
+  async uploadObject(file: File): Promise<UploadAttachmentResponse> {
+    if (!this.hasToken) throw new ServerApiError(401, "UNAUTHORIZED", "未登录");
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${this.token}`,
+      "x-file-name": encodeURIComponent(file.name),
+    };
+    if (file.type.length > 0) headers["content-type"] = file.type;
+
+    const res = await fetch(this.url("/api/r2/objects"), {
+      method: "PUT",
+      headers,
+      body: file,
+    });
+    const text = await res.text();
+    let data: unknown = null;
+    if (text.length > 0) {
+      try {
+        data = JSON.parse(text) as unknown;
+      } catch {
+        data = null;
+      }
+    }
+    if (!res.ok) {
+      const err = data as ApiError | null;
+      throw new ServerApiError(
+        res.status,
+        err?.code ?? "AUTH_ERROR",
+        errorMessage(data, text),
+        err?.requestId,
+        err?.details,
+      );
+    }
+    return data as UploadAttachmentResponse;
   }
 }

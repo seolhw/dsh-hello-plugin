@@ -1,21 +1,11 @@
 import type { ID, Share, ShareKind, User } from "../entities";
-import type {
-  CursorPaginated,
-  CursorPaginationQuery,
-  R2SignedUploadRequest,
-  R2SignedUploadResponse,
-} from "./common";
+import type { CursorPaginated, CursorPaginationQuery } from "./common";
 
 // ===============================================================
-// /api/shares/*  ——  会话克隆包 / workflow 分享
-// 两步：① 拿 R2 预签名上传 URL → ② 直传 R2 → ③ POST /api/shares 落元数据
+// /api/shares/*  ——  会话克隆包 / workflow 分享（后续阶段实现，先占位）
 // ===============================================================
 
-/** POST /api/r2/sign-upload（通用签名；shares 用 intent=share-package） */
-export type SignShareUploadRequest = R2SignedUploadRequest & { intent: "share-package" };
-export type SignShareUploadResponse = R2SignedUploadResponse;
-
-/** POST /api/shares —— 上传完 R2 后，落元数据 */
+/** POST /api/shares —— 元数据落库（附件包先经 Worker 直传 R2 拿 key） */
 export interface CreateShareRequest {
   kind: ShareKind;
   title: string;

@@ -8,25 +8,24 @@
   "name": "dsh-talk-server",
   "main": "src/worker.ts",
   "compatibility_date": "2025-01-01",
-  "compatibility_flags": ["nodejs_compat"],
-
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   // ---------- 本地开发（wrangler dev --port 8787） ----------
   "dev": {
     "port": 8787,
     "local_protocol": "http"
   },
-
   // ---------- D1：元数据库（社区/频道/消息/分享；用户等认证实体由 Better Auth 建表） ----------
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "dsh-talk-server",
-      "database_id": "placeholder-local-dev-only",
+      "database_id": "b0b6854d-8710-4e19-a4dc-0f2234c97f99",
       // drizzle-kit 生成的 SQL 迁移目录（wrangler d1 migrations apply 使用）
       "migrations_dir": "drizzle"
     }
   ],
-
   // ---------- R2：附件 / 会话克隆包 / workflow 载荷 ----------
   "r2_buckets": [
     {
@@ -35,24 +34,32 @@
       "preview_bucket_name": "dsh-talk-assets-local"
     }
   ],
-
   // ---------- Durable Object：ChannelActor（一个频道 = 一个 DO 实例，实时广播） ----------
   // Free 计划只能用 SQLite 后端 DO。用新式声明式 exports（wrangler 4 推荐）：
   //   类在代码中 export，storage:"sqlite" 表示 SQLite 后端；删除旧 migrations。
   "durable_objects": {
-    "bindings": [{ "name": "ROOM_ACTOR", "class_name": "ChannelActor" }]
+    "bindings": [
+      {
+        "name": "ROOM_ACTOR",
+        "class_name": "ChannelActor"
+      }
+    ]
   },
   "exports": {
     "ChannelActor": {
       "type": "durable-object",
       "storage": "sqlite"
     }
-  }
-
+  },
   // ---------- 环境变量（生产用 wrangler secret put；本地 pnpm dev 自动把 .env 同步到 .dev.vars） ----------
   // 认证相关只保留密钥/凭据 + 认证 URL；其余策略均为代码常量（见 src/constants.ts 与 src/lib/auth.ts）：
   //   BETTER_AUTH_URL      认证服务对外地址（可选）：邮箱验证 / 重置链接都基于它。
   //                        例如本地 http://127.0.0.1:8787。留空时按请求 Host 推导。
   //   BETTER_AUTH_SECRET   会话签名密钥（≥32 字符，必填）
   //   RESEND_API_KEY       事务邮件（邮箱验证 / 找回密码）
+  "variables": {
+    "BETTER_AUTH_URL": "string",
+    "BETTER_AUTH_SECRET": "string",
+    "RESEND_API_KEY": "string"
+  }
 }

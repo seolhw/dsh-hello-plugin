@@ -1,12 +1,17 @@
 # 复制为 .dev.vars 并填入真实值（或直接写到仓库根 .env，pnpm dev 时 predev 会自动同步）。
-# 只放密钥/凭据，其它策略都是代码常量（见 src/lib/auth.ts / email.ts）。不要提交真实密钥。
+# 认证变量 = 密钥/凭据 + 认证 URL；其它策略都是代码常量（见 src/lib/auth.ts / email.ts）。不要提交真实密钥。
 # 生产环境请用 `wrangler secret put` 逐项设置。
+
+# ---- 认证服务对外地址（可选，留空则按请求 Host 推导） ----
+# GitHub OAuth 回调 / 邮箱验证 / 重置密码链接都基于它。
+# 例如：BETTER_AUTH_URL="http://localhost:8787"（GitHub 回调 = {此值}/api/auth/callback/github）
+BETTER_AUTH_URL="http://localhost:8787"
 
 # ---- Better Auth（必填） ----
 BETTER_AUTH_SECRET="change-me-to-a-random-string-at-least-32-chars"
 
-# ---- GitHub OAuth（配置后才显示 GitHub 登录） ----
-# OAuth App 回调地址填：http://localhost:8787/api/auth/callback/github（生产填你的域名）
+# ---- GitHub OAuth 凭据（配置后才显示 GitHub 登录） ----
+# OAuth App 回调地址在 GitHub 后台填：{BETTER_AUTH_URL}/api/auth/callback/github
 GITHUB_CLIENT_ID=""
 GITHUB_CLIENT_SECRET=""
 

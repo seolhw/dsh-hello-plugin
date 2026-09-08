@@ -13,6 +13,9 @@ export interface Env {
   ROOM_ACTOR: DurableObjectNamespace;
 
   // ---------- Better Auth 密钥（本地放 packages/server/.dev.vars / 根 .env；生产用 wrangler secret put） ----------
+  /** 认证服务对外公开地址，如 https://auth.example.com 或 http://localhost:8787。
+   *  GitHub 回调、邮箱验证/重置链接都以它为基础。留空时按请求 Host 推导（本地开发够用） */
+  BETTER_AUTH_URL?: string;
   /** 会话签名密钥，≥32 字符，必填 */
   BETTER_AUTH_SECRET?: string;
 

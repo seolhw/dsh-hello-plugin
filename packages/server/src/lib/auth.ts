@@ -30,8 +30,8 @@ type BetterAuthOptions = Parameters<typeof betterAuth>[0];
 // Better Auth 实例装配 & 缓存（每个 isolate 惰性构建一次）
 // ================================================================
 
-// 默认允许回跳/回调的 Host（本地 + workers/pages 预览）。
-// 生产用自定义域名时把域名加到这里即可（避免新增环境变量）。
+// 未配置 BETTER_AUTH_URL 时，按请求 Host 从该白名单挑 base（本地 + workers/pages 预览）。
+// 生产建议直接设 BETTER_AUTH_URL，此处白名单便不再参与。
 const AUTH_ALLOWED_HOSTS = [
   "localhost:8787",
   "127.0.0.1:8787",
@@ -48,8 +48,12 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
     );
   }
 
-  // 动态 baseURL：按请求 Host 从白名单里挑，GitHub 回调 / 验证链接都用它
-  const baseURL: BetterAuthOptions["baseURL"] = { allowedHosts: [...AUTH_ALLOWED_HOSTS] };
+  // baseURL：配了 BETTER_AUTH_URL 就用它（GitHub 回调 / 邮箱验证 / 重置链接都基于此地址）；
+  // 没配则按请求 Host 从白名单推导（适合本地 dev）
+  const authUrl = env.BETTER_AUTH_URL?.trim();
+  const baseURL: BetterAuthOptions["baseURL"] = authUrl
+    ? authUrl
+    : { allowedHosts: [...AUTH_ALLOWED_HOSTS] };
 
   const githubClientId = env.GITHUB_CLIENT_ID?.trim();
   const githubClientSecret = env.GITHUB_CLIENT_SECRET?.trim();

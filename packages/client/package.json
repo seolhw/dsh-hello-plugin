@@ -1,0 +1,25 @@
+{
+  "name": "@dsh-talk/client",
+  "version": "0.0.1",
+  "description": "dsh-talk 浏览器侧（React UI + Hub 连接层）。源码由根包 dsh-talk 的 tsdown 打进 lib/client.js",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dsh-talk/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-layout": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.1.0-rc.6",
+    "@types/react": "^18.3.1",
+    "react": "18.3.1",
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT"
+}

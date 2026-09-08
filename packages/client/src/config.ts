@@ -1,0 +1,45 @@
+// ================================================================
+// client → host 本地配置接口（同源 fetch，语义 = SettingsRpc 的 get/set）
+// 由 host 的 /api/talk/config 提供（见 ../../src/index.ts）
+// ================================================================
+
+import type { TalkSettings } from "@dsh-talk/types/rpc";
+
+export class HostConfigError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function hostFetch(input: string, init?: RequestInit): Promise<unknown> {
+  const res = await fetch(input, init);
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text;
+    try {
+      const data = JSON.parse(text) as { message?: string };
+      if (typeof data.message === "string" && data.message.length > 0) {
+        message = data.message;
+      }
+    } catch {
+      // 非 JSON 错误体，直接用原文
+    }
+    throw new HostConfigError(message, res.status);
+  }
+  return text.length > 0 ? (JSON.parse(text) as unknown) : {};
+}
+
+export function hostConfigGet(): Promise<TalkSettings> {
+  return hostFetch("/api/talk/config") as Promise<TalkSettings>;
+}
+
+export function hostConfigSet(patch: Partial<TalkSettings>): Promise<TalkSettings> {
+  return hostFetch("/api/talk/config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  }) as Promise<TalkSettings>;
+}

@@ -1,13 +1,7 @@
-import Schema from "@deepseek-ai/schemastery";
 import { Context } from "@deepseek-ai/cordis";
-//#region src/index.d.ts
-export declare const name = "dsh-hello-plugin";
-export interface Config {
-  greeting: string;
-  maxRetries: number;
-  verbose?: boolean;
-}
-export declare const Config: Schema<Config>;
-export declare function apply(ctx: Context, config: Config): void;
+//#region packages/host/src/index.d.ts
+export declare const name = "dsh-talk";
+/** 需要 DSH 内置的两个 host service 就绪后才启动。 */
+export declare const inject: string[];
+export declare function apply(ctx: Context): void;
 //#endregion
-//# sourceMappingURL=index.d.mts.map

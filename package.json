@@ -5,23 +5,50 @@
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
   "files": [
-    "lib/index.cjs",
-    "lib/index.mjs",
+    "lib",
     "cordis.patch.yml"
   ],
   "exports": {
-    "import": "./lib/index.mjs",
-    "require": "./lib/index.cjs"
+    ".": {
+      "import": {
+        "types": "./lib/index.d.mts",
+        "default": "./lib/index.mjs"
+      },
+      "require": {
+        "types": "./lib/index.d.cts",
+        "default": "./lib/index.cjs"
+      }
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
     }
   },
   "scripts": {
     "build": "tsdown",
     "dev": "npx @deepseek-ai/dsh web --patch ./cordis.yml",
-    "update": "npx npm-check-updates -u --target greatest --dep peer @deepseek-ai/*"
+    "dev:hub": "pnpm --filter @dsh-talk/server dev",
+    "deploy:hub": "pnpm --filter @dsh-talk/server deploy",
+    "update": "npx npm-check-updates -u --target greatest --dep peer @deepseek-ai/*",
+    "typecheck": "pnpm -r run typecheck && pnpm typecheck:plugin && pnpm typecheck:client",
+    "typecheck:types": "tsc -p packages/types/tsconfig.json --noEmit",
+    "typecheck:hub": "tsc -p packages/server/tsconfig.json --noEmit",
+    "typecheck:plugin": "tsc -p packages/host/tsconfig.json --noEmit",
+    "typecheck:client": "tsc -p packages/client/tsconfig.json --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "check": "biome check --write .",
+    "check:ci": "biome ci ."
   },
   "keywords": [],
   "author": "",
@@ -33,6 +60,8 @@
     "@deepseek-ai/schemastery": "3.18.2"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "^22.0.0",
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2"
   }

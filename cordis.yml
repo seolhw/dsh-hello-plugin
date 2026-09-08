@@ -1,6 +1,4 @@
 - insert:
-    - id: talk
-      name: "./src/index.ts"
-      config:
-        greeting: "Hi there"
-        maxRetries: 5
+    - id: "dsh-talk"
+      name: "./packages/host/src/index.ts"
+

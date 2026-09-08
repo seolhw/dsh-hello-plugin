@@ -56,7 +56,7 @@ DSH 插件天然分为两个运行环境，本项目通过 `package.json` 的 `e
 - **client（浏览器）**：聊天 UI、与 Hub 的 WebSocket 长连接、未读状态、分享卡片、R2 预签名直传。
 - **host（Node.js）**：插件配置（`ctx.settings` 命名空间 `talk`）、克隆恢复器（把分享包写回本地 DSH 会话持久化与索引）、workflow 运行器、本地缓存（`ctx.storageDomain` 自定义 domain `talk`）。
 
-client 需要 host 能力时走 DSH 既有 RPC 通道（参照 `dsh-client-connection` 的 remote 机制）。
+client 需要 host 能力时走 host 在 `webServer` 上注册的同源接口（当前：`/api/talk/config` 读写 token/hubUrl 等配置，语义见 `@dsh-talk/types/rpc` 的 `SettingsRpc`）；克隆/运行 workflow 等重活后续按需扩展。
 
 ### Hub（Cloudflare 全家桶，无任何第三方云依赖）
 
@@ -75,21 +75,53 @@ Hub 代码在本仓库 `server/` 目录下（独立工程，支持自托管）�
 
 ```
 dsh-talk/
-├── src/                  # DSH 插件 host（TypeScript，tsdown 打包）
-│   └── index.ts          # 插件入口：配置、服务接线
-├── lib/                  # host 打包产物（tsdown 输出）
-├── src-client/           # DSH 插件 client（浏览器 UI，React）—— 规划中
-├── server/               # Cloudflare Hub（独立工程，可自托管）—— 规划中
-│   ├── wrangler.toml     # D1 / R2 / DO bindings
-│   ├── src/worker.ts     # 路由：REST + WS upgrade
-│   ├── src/room.ts       # RoomActor（Durable Object）
-│   └── src/schema.sql    # D1 DDL
-├── cordis.yml            # 本地开发：把本插件 insert 进 dsh 配置树
+├── packages/
+│   ├── host/             # DSH 插件 host（Node.js：注册 talk 配置 + /api/talk/config）
+│   │   ├── src/index.ts  # 入口：ctx.settings 命名空间 'talk' + webServer 路由
+│   │   ├── package.json  # 包名 @dsh-talk/host
+│   │   └── tsconfig.json
+│   ├── client/           # DSH 插件 client（浏览器 React UI + 连接层，源码打进 lib/client.js）
+│   │   ├── src/
+│   │   │   ├── index.ts      # client 入口：sidebar「社区」入口 + shell.overlay 面板
+│   │   │   ├── augment.ts    # 类型化 slot 接入（拉入官方 SlotMap 合并）
+│   │   │   ├── components.tsx# 面板 UI（身份注册 / 我的社区列表）
+│   │   │   ├── store.ts      # UI store：host 配置 → Hub 身份 → 我的社区
+│   │   │   ├── hub.ts        # Hub REST client（复用 @dsh-talk/types/api 契约）
+│   │   │   ├── ws.ts         # Hub WebSocket client（复用 @dsh-talk/types/ws 契约）
+│   │   │   └── config.ts     # 同源读 /api/talk/config（取 token/hubUrl）
+│   │   ├── package.json      # 包名 @dsh-talk/client
+│   │   └── tsconfig.json
+│   ├── types/            # ⭐ 全栈共享类型包（接口定义都在这里）
+│   │   ├── src/
+│   │   │   ├── entities.ts      User/Community/Channel/Message/Share 等 D1 实体
+│   │   │   ├── api/*            Hub REST API 请求/响应类型 + 路由契约注释
+│   │   │   ├── ws.ts            Hub WebSocket 帧协议（client↔server）
+│   │   │   ├── rpc.ts           DSH 插件 client↔host RPC 接口
+│   │   │   └── index.ts         barrel 导出
+│   │   ├── package.json         包名 @dsh-talk/types
+│   │   └── tsconfig.json
+│   └── server/           # ⭐ Cloudflare Hub（Hono Worker + D1 + R2 + Durable Object）
+│       ├── wrangler.toml     # D1 / R2 / DO bindings + vars
+│       ├── drizzle.config.ts # drizzle-kit 配置（sqlite 方言 + 迁移目录）
+│       ├── src/
+│       │   ├── worker.ts     # Hono 入口：全局中间件 + 路由装配 + /ws upgrade
+│       │   ├── room.ts       # RoomActor（Durable Object，每频道实时广播）
+│       │   ├── types.ts      # Env / Hono Variables 类型
+│       │   ├── db/
+│       │   │   ├── schema.ts # ⭐ Drizzle ORM schema（8 张表 + 索引 + 行类型）
+│       │   │   └── index.ts  # createDbForWorker(D1) / createDbForLocal(sqlite 路径)
+│       │   ├── lib/          # errors / response / auth / db 注入 / middleware 通用
+│       │   └── routes/       # auth / communities / messages / shares / r2 分组
+│       ├── package.json      # 包名 @dsh-talk/server，依赖 hono + @dsh-talk/types
+│       └── tsconfig.json
+├── lib/                  # 打包产物：host lib/index.{mjs,cjs} + 浏览器 lib/client.js
+├── tsdown.config.ts      # 双入口打包：host（packages/host）+ client（packages/client）
+├── cordis.yml            # 本地开发：insert packages/host 源码进 dsh 配置树
 ├── cordis.patch.yml      # 发布：作为 bundle patch 被 dsh 加载
-├── pnpm-workspace.yaml   # pnpm 白名单：跳过 DSH alpha 包的发布年龄检查
-├── tsdown.config.ts      # host 打包配置
+├── pnpm-workspace.yaml   # packages/* workspace + 供应链检查策略（见下方「供应链检查」）
+├── biome.json            # Biome 配置：格式 + lint + import 排序
 ├── tsconfig.json
-└── package.json
+└── package.json          # 双面插件壳：host/client 源码来自 packages，由 tsdown 打产物
 ```
 
 ---
@@ -107,18 +139,31 @@ dsh-talk/
 ### 1. 本地启动 Hub
 
 ```bash
-cd server
-pnpm install
-pnpm dev            # wrangler dev，默认 http://127.0.0.1:8787
+# 仓库根目录
+pnpm install        # 安装 host + types + server 三个 workspace 包
+pnpm dev:hub        # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
 ```
 
-首次启动时用环境变量注入一个平台注册码（单次使用）：
+首次启动时用环境变量注入平台注册码（AUTH_INVITE_CODES 不要写进 wrangler.toml，走 env）：
 
 ```bash
 # PowerShell
 $env:AUTH_INVITE_CODES = "dshtalk-dev-0001"
-pnpm dev
+pnpm dev:hub
 ```
+
+首次跑 Hub 前用 Drizzle 生成迁移并写入本地 D1：
+
+```bash
+cd packages/server
+pnpm db:generate       # 对比 src/db/schema.ts → 生成 SQL 到 drizzle/
+# 方式 A（本地 Drizzle studio/快速开发）：连到本地 SQLite
+#   pnpm db:up
+# 方式 B（对齐 Cloudflare D1）：用 wrangler 把迁移写入本地 D1
+pnpm db:apply-local
+```
+
+> 迁移生成后，也可手工执行 SQL 文件：`wrangler d1 execute talkhub --local --file=./drizzle/0000_xxxx.sql`
 
 ### 2. 启动 DSH 并加载插件
 
@@ -151,7 +196,7 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 | `autoReconnect` | boolean | `true` | WebSocket 断线自动重连 |
 | `share.maxSizeMb` | number | `50` | 本地上传体积上限（需 ≤ 服务端上限） |
 
-### Hub 环境变量（`server/`）
+### Hub 环境变量（`packages/server/`）
 
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
@@ -169,10 +214,34 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 ### 脚本
 
 ```bash
-pnpm build        # tsdown 打包 host（输出到 lib/）
+pnpm build        # 双入口打包：host → lib/index.{mjs,cjs}，client → lib/client.js
 pnpm dev          # 本地起 dsh web 并 insert 本插件
 pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
+
+# 类型检查
+pnpm typecheck        # types + server + host + client 全量
+pnpm typecheck:hub    # 只查 server
+pnpm typecheck:plugin # 只查 host（packages/host/）
+pnpm typecheck:client # 只查 client（packages/client/）
+
+# 代码质量（Biome）
+pnpm lint         # lint 只报告
+pnpm lint:fix     # lint 自动修复
+pnpm format       # biome format --write .
+pnpm check        # 一键 format + lint + import 排序，并写回
+pnpm check:ci     # 严格模式（CI）：任何差异 / 告警都失败
 ```
+
+### 供应链检查（为什么「完全禁用」）
+
+pnpm v11+ 默认开启供应商检查：新依赖要满足「发布年龄 ≥ 1440 分钟」、每次 install 还会对 lockfile 全表复验（报错形如 `Lockfile failed supply-chain policy check`）。dsh-talk 依赖大量 `@deepseek-ai/*` 的 alpha 预发布包（发布即需安装），因此通过 [pnpm-workspace.yaml](file:///e:/dsh-talk/pnpm-workspace.yaml) 显式关闭：
+
+```yaml
+minimumReleaseAge: 0      # 发布年龄要求 = 0：任意版本发布后立即允许安装
+trustLockfile: true       # 信任 lockfile，跳过整表供应链复验
+```
+
+> 注意：该配置放在 `pnpm-workspace.yaml`（pnpm v11+ 生效）；`minimum-release-age-exclude` 白名单式做法仅对 pnpm ≤ v10 的 `.npmrc` 生效，本项目已不再使用。
 
 ### 双包约定（实现时必须满足）
 
@@ -181,13 +250,22 @@ pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
 3. 插件语言包用 `ctx.locale.register('talk', 'zh'|'en', …)` 注册，UI 文案先做 `zh`，`en` 同步补齐；
 4. host 能力（克隆恢复、workflow 运行）一律要求用户确认，禁止静默执行。
 
-### pnpm 发布年龄白名单
+### 共享类型包 `@dsh-talk/types`
 
-`pnpm-workspace.yaml` 中的 `minimumReleaseAgeExclude` 用于豁免 DSH 的 alpha 预发布包。如果项目根目录或全局 `.npmrc` 中配置了 `minimumReleaseAge`（如 `7d`），这些刚发布的 alpha 包会跳过年龄检查，确保能正常安装。如需新增 DSH 相关依赖，请同步更新此白名单。
+所有接口定义集中在 [packages/types/](file:///e:/dsh-talk/packages/types)：
+
+| 文件 | 内容 |
+| --- | --- |
+| `src/entities.ts` | D1 表对应的实体类型（User / Community / Channel / Message / Share…） |
+| `src/api/*` | Hub REST API 请求/响应类型 + 路由契约总表注释 |
+| `src/ws.ts` | Hub WebSocket 协议帧：请求/应答/推送（含联合类型 `ClientFrame` / `ServerFrame`） |
+| `src/rpc.ts` | DSH 插件 client ↔ host 的 RPC 方法签名总接口 `TalkHostRpc` |
+
+根 `package.json` 已通过 `"@dsh-talk/types": "workspace:*"` 直接依赖，写 host / server / client 时直接 `import type { … } from "@dsh-talk/types"` 或子路径即可。
 
 ### 本地联调注意
 
-- `cordis.yml` 用于本地开发（直接 `insert` 指向 `./src/index.ts` 源码）；
+- `cordis.yml` 用于本地开发（直接 `insert` 指向 `./packages/host/src/index.ts` 源码）；
 - `cordis.patch.yml` 用于发布形态（`insert` 指向包名 `dsh-talk`，由 DSH 的 bundle patch 机制加载）；
 - 双用户联调需使用两个独立的 DSH profile（不同端口、不同配置目录），避免数据冲突。
 

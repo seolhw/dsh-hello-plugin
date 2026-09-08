@@ -1,13 +1,11 @@
 {
-  // 根 tsconfig：服务 tsdown 构建的 dts 生成（host 入口在 packages/host）
-  // 常规类型检查由各包自己的 tsconfig 负责
+  // @dsh-talk/client（浏览器侧）类型检查
   "compilerOptions": {
-    // Environment Settings
     "module": "esnext",
     "moduleResolution": "bundler",
-    "target": "esnext",
-    "lib": ["esnext"],
-    "types": ["node"],
+    "target": "es2022",
+    "lib": ["es2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
@@ -22,6 +20,6 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "files": ["tsdown.config.ts", "packages/host/src/index.ts"],
-  "exclude": ["node_modules", "lib", "packages"]
+  "include": ["src"],
+  "exclude": ["node_modules"]
 }

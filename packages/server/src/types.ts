@@ -2,15 +2,17 @@
 // Worker Bindings & Context 类型
 // ================================================================
 
-import type { D1Database, DurableObjectNamespace, R2Bucket } from "@cloudflare/workers-types";
+import type { D1Database, R2Bucket } from "@cloudflare/workers-types";
 import type { ID, User } from "@dsh-talk/types/entities";
 import type { Db } from "./db";
+import type { ChannelActor } from "./room";
 
 export interface Env {
-  // ---------- Wrangler.toml bindings ----------
+  // ---------- Wrangler bindings ----------
   DB: D1Database;
   R2: R2Bucket;
-  ROOM_ACTOR: DurableObjectNamespace;
+  /** ChannelActor：每个频道一个 DO 实例（idFromName(channelId)），RPC 类型化广播 */
+  ROOM_ACTOR: DurableObjectNamespace<ChannelActor>;
 
   // ---------- Better Auth 密钥（本地放 packages/server/.dev.vars / 根 .env；生产用 wrangler secret put） ----------
   /** 认证服务对外公开地址，如 https://auth.example.com 或 http://localhost:8787。
@@ -34,11 +36,4 @@ export interface HonoAppVariables {
   requestId?: string;
   /** Drizzle D1 实例（中间件在 * 上注入一次） */
   db: Db;
-}
-
-// Worker -> DO 传递的连接元数据（通过 fetch 路径带 header）
-export interface RoomActorConnectionMeta {
-  userId: ID;
-  connectionId: string;
-  handle: string;
 }

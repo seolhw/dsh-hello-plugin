@@ -22,13 +22,14 @@
     "@dsh-talk/types": "workspace:*",
     "better-auth": "^1.7.3",
     "drizzle-orm": "^0.38.0",
-    "hono": "^4.7.0"
+    "hono": "^4.7.0",
+    "nanoid": "^6.0.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",
     "drizzle-kit": "^0.30.0",
     "typescript": "^7.0.2",
-    "wrangler": "^3.90.0"
+    "wrangler": "^4.129.1"
   },
   "license": "MIT"
 }

@@ -9,12 +9,8 @@
 //   后续的查询接口获取。
 // ================================================================
 
-import { asc, desc, type SQL, sql } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-
-// ---------- 时间戳：Unix 毫秒 (INTEGER)，由 SQLite 在 INSERT 时求值 ----------
-const tsNow = (): SQL<number> =>
-  sql<number>`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
 
 const $id = (name: string) => text(name).notNull();
 
@@ -34,8 +30,8 @@ export const communities = sqliteTable(
     bannerUrl: text("banner_url"),
     inviteCode: text("invite_code"),
     memberCount: integer("member_count", { mode: "number" }).notNull().default(0),
-    createdAt: integer("created_at", { mode: "number" }).notNull().default(tsNow()),
-    updatedAt: integer("updated_at", { mode: "number" }).notNull().default(tsNow()),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
   (t) => [
     index("idx_communities_owner").on(t.ownerId),
@@ -55,7 +51,7 @@ export const communityMembers = sqliteTable(
     role: text("role", { enum: ["owner", "admin", "member"] })
       .notNull()
       .default("member"),
-    joinedAt: integer("joined_at", { mode: "number" }).notNull().default(tsNow()),
+    joinedAt: integer("joined_at", { mode: "number" }).notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.communityId, t.userId] }),
@@ -78,10 +74,10 @@ export const channels = sqliteTable(
       .default("text"),
     position: integer("position", { mode: "number" }).notNull().default(0),
     topic: text("topic"),
-    isHelp: integer("is_help", { mode: "boolean" }).notNull().default(false),
-    isShowcase: integer("is_showcase", { mode: "boolean" }).notNull().default(false),
-    createdAt: integer("created_at", { mode: "number" }).notNull().default(tsNow()),
-    updatedAt: integer("updated_at", { mode: "number" }).notNull().default(tsNow()),
+    isHelp: integer("is_help", { mode: "boolean" }).notNull(),
+    isShowcase: integer("is_showcase", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
   (t) => [index("idx_channels_community_position").on(t.communityId, asc(t.position))],
 );
@@ -104,7 +100,7 @@ export const messages = sqliteTable(
     shareCard: text("share_card"), // JSON: MessageShareCardRef | null
     resolution: text("resolution"), // JSON: HelpResolution | null
     replyToId: text("reply_to_id"), // FK 弱引用，避免循环删除复杂
-    createdAt: integer("created_at", { mode: "number" }).notNull().default(tsNow()),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }),
   },
   (t) => [
@@ -128,9 +124,9 @@ export const shares = sqliteTable(
     sizeBytes: integer("size_bytes", { mode: "number" }).notNull(),
     sha256: text("sha256"),
     manifest: text("manifest"), // JSON
-    isPublic: integer("is_public", { mode: "boolean" }).notNull().default(false),
+    isPublic: integer("is_public", { mode: "boolean" }).notNull(),
     downloadCount: integer("download_count", { mode: "number" }).notNull().default(0),
-    createdAt: integer("created_at", { mode: "number" }).notNull().default(tsNow()),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }),
   },
   (t) => [

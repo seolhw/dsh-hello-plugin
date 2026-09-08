@@ -101,7 +101,7 @@ dsh-talk/
 │   │   ├── package.json         包名 @dsh-talk/types
 │   │   └── tsconfig.json
 │   └── server/           # ⭐ Cloudflare Server（Hono Worker + D1 + R2 + Durable Object）
-│       ├── wrangler.toml     # D1 / R2 / DO bindings + vars
+│       ├── wrangler.jsonc    # Wrangler 配置（D1 / R2 / DO bindings）
 │       ├── drizzle.config.ts # drizzle-kit 配置（sqlite 方言 + 迁移目录）
 │       ├── src/
 │       │   ├── worker.ts     # Hono 入口：全局中间件 + 路由装配 + /ws upgrade
@@ -144,13 +144,7 @@ pnpm install        # 安装 host + types + server 三个 workspace 包
 pnpm dev:server     # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
 ```
 
-首次启动时用环境变量注入平台注册码（AUTH_INVITE_CODES 不要写进 wrangler.toml，走 env）：
-
-```bash
-# PowerShell
-$env:AUTH_INVITE_CODES = "dshtalk-dev-0001"
-pnpm dev:server
-```
+认证 key（`BETTER_AUTH_SECRET` 必填；`BETTER_AUTH_URL` / `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `RESEND_API_KEY` 按需）放仓库根 `.env`，`pnpm dev:server` 的 predev 会自动同步进 `packages/server/.dev.vars`（勿提交；生产用 `wrangler secret put`）。具体键说明见 `wrangler.jsonc` 底部注释。
 
 首次跑 Server 前用 Drizzle 生成迁移并写入本地 D1：
 

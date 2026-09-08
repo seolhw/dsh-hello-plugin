@@ -1,23 +1,30 @@
 // ===============================================================
-// Server WebSocket 协议
-// 连接：GET /ws 升级，URL 参数：
-//   ?token=<jwt-or-bearer-token>    身份令牌（也可以走 Sec-WebSocket-Protocol header）
-//   ?compression=0                  预留
+// Server WebSocket 协议（每条连接 = 一个频道 DO，一频道一实例）
+//
+// 连接：GET /ws?token=<session-token>&channelId=<id>
+//   Worker 完成 Better Auth 鉴权 → 路由到该频道的 Durable Object
+//   （ROOM_ACTOR.idFromName(channelId)），DO 再校验社区成员资格并 accept。
+//   因此协议层面没有 channel.join/leave——连接建立即代表订阅该频道。
 //
 // 所有帧都是 JSON 文本帧，统一 Envelope 结构：
 //   { type: "xxx", payload: {...}, id?: "req-uuid" }
 //
-// 对于需要应答的请求帧（带 id），服务端回：
+// 对带 id 的请求帧，服务端回：
 //   { type: "ok",    payload: {...}, id: "<同 req 的 id>" }
 //   { type: "error", payload: ApiError, id: "<同 req 的 id>" }
 //
 // 服务端主动推送（无 id）：
-//   { type: "evt.xxx", payload: {...} }
+//   { type: "evt.xxx", payload: {...}, ts: <发送时间> }
+//
+// 数据归属（隔离原则）：
+//   - 消息/未读/成员/社区等共享规范数据 => 业务 D1（REST 读写）
+//   - 该频道的在线 presence / 连接订阅等房间私有热状态 => 频道 DO
+//     （内存索引 + WebSocket attachment；presence 落 DO 私有 SQLite）
+//   - 实时广播：REST 写入成功 → RPC 通知该频道 DO 实例内扇出
 // ===============================================================
 
-import type { ApiError, CursorPaginationQuery } from "./api/common";
-import type { CreateMessageRequest, UpdateMessageRequest } from "./api/messages";
-import type { ChannelReadState, ID, Message, TimestampMs, User } from "./entities";
+import type { ApiError } from "./api/common";
+import type { ID, Message, TimestampMs, User } from "./entities";
 
 // ======= 通用信封 =======
 
@@ -51,76 +58,43 @@ export interface ServerEvt<TType extends string, TPayload> {
 
 // ======= 连接生命周期 =======
 
-/** 服务端在 WS 握手完成后推的第一帧：确认身份 + 给会话 ID */
+/** 服务端在 WS 握手完成后推的第一帧：确认身份 + 所订阅频道 */
 export type EvtHello = ServerEvt<
   "evt.hello",
   {
     connectionId: ID;
+    /** 本条连接订阅的频道（= 频道 DO 的稳定名字 id） */
+    channelId: ID;
     user: User & { tokenIat: TimestampMs };
     serverTime: TimestampMs;
-    /** 心跳间隔（秒）；客户端每 interval*0.8 秒发 ping */
+    /** 心跳间隔（秒）；客户端每 interval*0.8 秒发一次 JSON ping */
     heartbeatIntervalSec: number;
+    /** 当前该频道的在线连接数（同人多端会重复计，仅作展示） */
+    onlineCount: number;
   }
 >;
 
-/** C→S：心跳 */
+/** C→S：心跳（协议级 ping 由运行时应答，这里是应用层保活/RTT） */
 export type ReqPing = ClientReq<"ping", { clientTime: TimestampMs }>;
 /** S→C：心跳应答 */
 export type RespPong = ServerRespOk<{ serverTime: TimestampMs; echoClientTime: TimestampMs }>;
 
-// ======= 房间（频道）管理 =======
+// ======= 在线状态（presence，仅影响本频道） =======
 
-/** C→S：加入一个频道（即订阅它的消息推送） */
-export interface JoinChannelPayload {
-  channelId: ID;
-  /** 可选：加入后立即向后拉 N 条历史（相当于一次 history 调用），减少 HTTP 请求 */
-  prefetch?: CursorPaginationQuery;
-}
-export type ReqJoinChannel = ClientReq<"channel.join", JoinChannelPayload>;
+export type PresenceKind = "online" | "away" | "offline";
 
-export interface JoinChannelRespPayload {
-  channelId: ID;
-  /** 在线人数（不保证精确，用来显示「当前 x 人在线」） */
-  onlineCount: number;
-  /** 如果请求带了 prefetch，直接返回首批历史；否则空 */
-  prefetch?: {
-    items: (Message & { author: User })[];
-    nextCursor: string | null;
-  };
-  /** 我在这个频道当前的未读快照 */
-  readState: ChannelReadState & { lastMessageAt: TimestampMs | null };
-}
-export type RespJoinChannel = ServerRespOk<JoinChannelRespPayload>;
+export type ReqSetPresence = ClientReq<"presence.set", { kind: PresenceKind }>;
+export type RespSetPresence = ServerRespOk<{ kind: PresenceKind }>;
 
-/** C→S：离开 */
-export type ReqLeaveChannel = ClientReq<"channel.leave", { channelId: ID }>;
-export type RespLeaveChannel = ServerRespOk<{ channelId: ID }>;
+// ======= 服务端主动推送：频道消息事件 =======
 
-// ======= 消息收发 =======
-
-/** C→S：发消息（和 REST POST /messages 等价，MVP 推荐走 WS 实现端到端延迟更低） */
-export interface SendMessagePayload extends CreateMessageRequest {
-  channelId: ID;
-  /** 客户端生成的临时消息 id（UUID），服务端回 ok 时带上映射回真实 id；evt.message.new 也带，方便客户端「假消息」替换 */
-  clientMsgId?: ID;
-}
-export type ReqSendMessage = ClientReq<"message.send", SendMessagePayload>;
-
-export interface SendMessageRespPayload {
-  channelId: ID;
-  clientMsgId: ID | null;
-  message: Message & { author: User };
-}
-export type RespSendMessage = ServerRespOk<SendMessageRespPayload>;
-
-/** S→C：新消息广播（任何成员 join 的频道里，有消息被创建了） */
+/** S→C：新消息（REST 写库成功后经 RPC 广播到这里扇出） */
 export type EvtMessageNew = ServerEvt<
   "evt.message.new",
   {
     channelId: ID;
     message: Message & { author: User };
-    clientMsgId?: ID;
-    /** 这条消息对我而言是不是 @mention（服务端算好，客户端直接标红） */
+    /** 这条消息对我而言是不是 @mention（服务端按接收者算好） */
     mentionMe: boolean;
   }
 >;
@@ -145,90 +119,19 @@ export type EvtMessageDeleted = ServerEvt<
   }
 >;
 
-// ======= 消息编辑 / 删除（WS 也能发；和 REST 二选一） =======
-
-export type ReqUpdateMessage = ClientReq<
-  "message.update",
-  { messageId: ID } & UpdateMessageRequest
->;
-export type RespUpdateMessage = ServerRespOk<{ message: Message & { author: User } }>;
-
-export type ReqDeleteMessage = ClientReq<"message.delete", { messageId: ID }>;
-export type RespDeleteMessage = ServerRespOk<{ messageId: ID }>;
-
-// ======= 解决 help（通过 WS 也行，方便实时广播状态变更） =======
-
-export type ReqResolveHelp = ClientReq<
-  "message.resolve",
-  {
-    messageId: ID;
-    resolved: boolean;
-    answerMessageId?: ID | null;
-  }
->;
-export type RespResolveHelp = ServerRespOk<{ message: Message & { author: User } }>;
-
-// ======= 未读上报 =======
-
-export type ReqMarkRead = ClientReq<"channel.markRead", { channelId: ID; lastReadMessageId: ID }>;
-export type RespMarkRead = ServerRespOk<ChannelReadState>;
-
-/** S→C：有新消息进来时，如果客户端需要更精确的未读计数（可选） */
-export type EvtReadStateUpdated = ServerEvt<
-  "evt.channel.read-state",
-  {
-    channelId: ID;
-    unreadMentions: number;
-    /** 新未读增量；客户端自己累加也可以，用这个简化实现 */
-    hasUnread: boolean;
-  }
->;
-
-// ======= 用户上线/下线（MVP 可选：只有同社区成员 join 的频道会广播） =======
-
-export type PresenceKind = "online" | "away" | "offline";
-
-export type ReqSetPresence = ClientReq<"presence.set", { kind: PresenceKind }>;
-export type RespSetPresence = ServerRespOk<{ kind: PresenceKind }>;
-
-export type EvtPresenceChanged = ServerEvt<
-  "evt.user.presence",
-  {
-    userId: ID;
-    kind: PresenceKind;
-    /** 哪些社区受影响（避免客户端无意义重绘） */
-    communityIds: ID[];
-  }
->;
+// ======= 未读（走 REST，见 messages.ts 的 read-state 端点） =======
+// 说明：未读/已读状态需要跨频道的聚合（社区侧边栏 × 频道），
+// 放业务 D1 才是正确归属；频道 DO 不做持久化副本，因此这里没有相关帧。
 
 // ======= 联合类型：方便在 switch 里穷举 =======
 
-export type ClientFrame =
-  | ReqPing
-  | ReqJoinChannel
-  | ReqLeaveChannel
-  | ReqSendMessage
-  | ReqUpdateMessage
-  | ReqDeleteMessage
-  | ReqResolveHelp
-  | ReqMarkRead
-  | ReqSetPresence;
+export type ClientFrame = ReqPing | ReqSetPresence;
 
 export type ServerFrame =
   | RespPong
-  | RespJoinChannel
-  | RespLeaveChannel
-  | RespSendMessage
-  | RespUpdateMessage
-  | RespDeleteMessage
-  | RespResolveHelp
-  | RespMarkRead
   | RespSetPresence
   | ServerRespError
-  // 主动推送
   | EvtHello
   | EvtMessageNew
   | EvtMessageUpdated
-  | EvtMessageDeleted
-  | EvtReadStateUpdated
-  | EvtPresenceChanged;
+  | EvtMessageDeleted;

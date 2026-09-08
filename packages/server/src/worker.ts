@@ -3,7 +3,7 @@
 //   身份认证：Better Auth 挂载在 /api/auth/*（承载全应用登录/注册/
 //             GitHub OAuth/邮箱验证/改密/找回密码/会话；Bearer token 会话）
 //   业务 REST：/api/communities|channels|messages|shares|r2（用 Better Auth 会话鉴权）
-//   /ws：WebSocket upgrade -> RoomActor (DO)
+//   /ws：WebSocket upgrade -> 该频道的 ChannelActor (DO)
 // 部署方式：pnpm deploy (wrangler deploy)
 // 本地：pnpm dev (wrangler dev --port 8787)
 // ================================================================
@@ -11,18 +11,23 @@
 import type { ExecutionContext } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import { createBearerAuth, ensureAuthSchema, getAuth, requireUserId } from "./lib/auth";
+import {
+  createBearerAuth,
+  ensureAuthSchema,
+  getAuth,
+  requireCurrentUser,
+  requireUserId,
+} from "./lib/auth";
 import { bindExecutionCtx, unbindExecutionCtx } from "./lib/email";
 import { HttpApiError } from "./lib/errors";
 import { applyGlobalMiddleware } from "./lib/middleware";
-import { notImplemented } from "./lib/response";
 import { channelsRoutes, communitiesRoutes } from "./routes/communities";
 import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
 import { r2Routes, sharesRoutes } from "./routes/shares";
 import type { Env, HonoAppVariables } from "./types";
 
-// RoomActor DO 类在同脚本里（wrangler 会通过 [durable_objects] binding 找到）
-export { RoomActor } from "./room";
+// ChannelActor DO 类在同脚本里（wrangler 经 durable_objects binding + exports 找到）
+export { ChannelActor } from "./room";
 
 const app = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
 
@@ -54,37 +59,38 @@ app.route("/api/shares", sharesRoutes);
 app.route("/api/r2", r2Routes);
 
 // ----------------- WebSocket Upgrade (/ws) -----------------
-// 浏览器 WS 无法自定义 Header，用 ?token=<session token> 做 Bearer 认证；
-// 桌面/服务端直连亦可直接带 Authorization: Bearer。
-// 通过鉴权后把用户身份透传给 Durable Object RoomActor。
+// 浏览器 WS 无法自定义 Header，用 ?token=<session token>&channelId=<id>：
+//   - Worker：Bearer 鉴权（Better Auth 会话）
+//   - 路由到该频道的 ChannelActor（ROOM_ACTOR.idFromName(channelId)），
+//     DO 再校验「频道存在 + 调用方是社区成员」后 accept（见 room.ts handleConnect）
 app.get("/ws", createBearerAuth("required"), async (c) => {
   const upgradeHeader = c.req.header("Upgrade");
   if (!upgradeHeader || upgradeHeader !== "websocket") {
     throw HttpApiError.badRequest("expected Upgrade: websocket");
   }
+  const channelId = c.req.query("channelId");
+  if (!channelId) {
+    throw HttpApiError.badRequest("missing channelId query param");
+  }
   const uid = requireUserId(c);
+  const user = requireCurrentUser(c);
 
-  // MVP：所有连接路由到同一个全局房间管理器 DO id
-  const globalRoomId = c.env.ROOM_ACTOR.idFromName("server-default");
-  const stub = c.env.ROOM_ACTOR.get(globalRoomId);
+  // 每个频道一个 DO 实例（稳定名字路由，广播只在实例内扇出）
+  const stub = c.env.ROOM_ACTOR.get(c.env.ROOM_ACTOR.idFromName(channelId));
 
   // 把子请求转发到 DO（带上 Upgrade 的原始 Request + 用户身份头）
   const url = new URL(c.req.url);
   url.pathname = "/ws/actor/connect";
   const forwardReq = new Request(url.toString(), c.req.raw as unknown as Request);
   forwardReq.headers.set("X-User-Id", uid);
+  forwardReq.headers.set("X-Channel-Id", channelId);
   forwardReq.headers.set("X-Conn-Id", crypto.randomUUID());
-  // 展示名/头像在 RoomActor 需要时再查认证库；MVP 先传 id
-  forwardReq.headers.set("X-Handle", uid);
+  forwardReq.headers.set("X-Handle", user.handle);
+  if (user.displayName) forwardReq.headers.set("X-Display-Name", user.displayName);
+  if (user.avatarUrl) forwardReq.headers.set("X-Avatar", user.avatarUrl);
 
   return stub.fetch(forwardReq) as Promise<Response>;
 });
-
-// 给 DO 自己暴露一个 /ws/actor/connect 的握手路径（room.ts 的 handleConnect）
-// DO.fetch 不经过 Hono，这里仅占位避免 404 fallback 误打
-app.get("/ws/actor/connect", (c) =>
-  notImplemented(c, "this path handled by RoomActor DO directly"),
-);
 
 // ----------------- Worker 模块入口（绑定 waitUntil 供邮件后台投递） -----------------
 export default {

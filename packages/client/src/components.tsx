@@ -1,67 +1,22 @@
 // ================================================================
 // dsh-talk client UI：sidebar 底部入口 + 全屏浮层面板
-// 纯 React（平台模块），样式内联，不依赖其它 UI 组件库
+// 认证态 → AuthScreen；已登录 → HomeScreen（社区/频道/消息 + 实时）
+// 交互控件来自 @deepseek-ai/dsh-client-ui-primitives（最新 rc.6）
 // ================================================================
 
-import type { GetMyCommunitiesResponse } from "@dsh-talk/types/api";
+import {
+  Button,
+  IconCloseOutline16,
+  IconQueueOutline14,
+  Toast,
+} from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement } from "react";
-import { closeTalk, logout, openTalk, refresh, useTalkState } from "./store";
+import { AuthScreen } from "./components/AuthScreen";
+import { HomeScreen } from "./components/HomeScreen";
+import { overlayStyle, palette, panelHeader, panelStyle } from "./components/styles";
+import { closeTalk, dismissToast, openTalk, refresh, useTalkState } from "./store";
 
-// ---------- 极简样式 ----------
-
-const COLORS = {
-  bg: "rgba(16,18,24,0.72)",
-  panel: "#1b1e27",
-  border: "rgba(255,255,255,0.09)",
-  text: "#e6e9ef",
-  muted: "#9aa1ad",
-  accent: "#4f7cff",
-  danger: "#e5534b",
-};
-
-const overlayStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  zIndex: 1200,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: COLORS.bg,
-  backdropFilter: "blur(4px)",
-  pointerEvents: "auto",
-};
-
-const panelStyle: CSSProperties = {
-  width: 460,
-  maxWidth: "calc(100vw - 40px)",
-  maxHeight: "min(620px, calc(100vh - 40px))",
-  overflow: "auto",
-  background: COLORS.panel,
-  color: COLORS.text,
-  border: `1px solid ${COLORS.border}`,
-  borderRadius: 12,
-  padding: "20px 20px 16px",
-  boxShadow: "0 12px 40px rgba(0,0,0,.45)",
-};
-
-const btnStyle: CSSProperties = {
-  border: `1px solid ${COLORS.border}`,
-  background: "rgba(255,255,255,0.06)",
-  color: COLORS.text,
-  padding: "7px 14px",
-  borderRadius: 8,
-  cursor: "pointer",
-};
-
-const rowStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: `1px solid ${COLORS.border}`,
-  marginBottom: 8,
-};
+// ---------- Sidebar 底部入口（'sidebar.footer.action' 列表项） ----------
 
 const footerActionStyle: CSSProperties = {
   width: "100%",
@@ -72,35 +27,21 @@ const footerActionStyle: CSSProperties = {
   borderRadius: 8,
   border: "none",
   background: "transparent",
-  color: COLORS.text,
+  color: palette.text,
   cursor: "pointer",
   fontSize: 13,
 };
 
-// ---------- 图标 ----------
-
-function TalkIcon({ size = 18 }: { size?: number }): ReactElement {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-      <circle cx="9" cy="8" r="3.2" />
-      <circle cx="17" cy="8" r="2" opacity="0.6" />
-      <circle cx="9" cy="16" r="3.2" />
-      <circle cx="17" cy="16" r="2" opacity="0.6" />
-    </svg>
-  );
-}
-
-// ---------- Sidebar 底部入口（'sidebar.footer.action' 列表项） ----------
-
 export function TalkToggle({ wide }: { wide: boolean }): ReactElement {
   const { open } = useTalkState();
-  const style: CSSProperties = {
-    ...footerActionStyle,
-    ...(open ? { background: "rgba(255,255,255,0.08)" } : {}),
-  };
   return (
-    <button type="button" style={style} onClick={() => openTalk()} title="dsh-talk 社区">
-      <TalkIcon />
+    <button
+      type="button"
+      style={{ ...footerActionStyle, background: open ? palette.active : undefined }}
+      onClick={() => openTalk()}
+      title="dsh-talk 社区"
+    >
+      <IconQueueOutline14 size={16} />
       {wide ? <span>社区</span> : null}
     </button>
   );
@@ -108,49 +49,18 @@ export function TalkToggle({ wide }: { wide: boolean }): ReactElement {
 
 // ---------- 浮层面板（'shell.overlay' 列表项） ----------
 
-function CommunityList({ communities }: { communities: GetMyCommunitiesResponse }): ReactElement {
-  if (communities.length === 0) {
-    return (
-      <div style={{ color: COLORS.muted }}>
-        还没有加入任何社区。创建/加入功能随 Server API 完善后开启。
-      </div>
-    );
-  }
-  return (
-    <div>
-      {communities.map((community) => (
-        <div key={community.id} style={rowStyle}>
-          <div>
-            <div>{community.name}</div>
-            {community.description ? (
-              <div style={{ color: COLORS.muted, fontSize: 12 }}>{community.description}</div>
-            ) : null}
-          </div>
-          <span
-            style={{
-              fontSize: 11,
-              color: COLORS.accent,
-              border: `1px solid ${COLORS.accent}`,
-              borderRadius: 999,
-              padding: "2px 8px",
-            }}
-          >
-            {community.role}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
+function LoadingView(): ReactElement {
+  return <div style={{ color: palette.muted, padding: 20 }}>连接 Server…</div>;
 }
 
-function ErrorView(): React.ReactElement {
+function ErrorView(): ReactElement {
   const { error } = useTalkState();
   return (
-    <div>
-      <div style={{ color: COLORS.danger, marginBottom: 12 }}>连接失败：{error}</div>
-      <button type="button" style={btnStyle} onClick={() => void refresh()}>
+    <div style={{ color: palette.muted }}>
+      <div style={{ color: palette.danger, marginBottom: 12 }}>连接失败：{error}</div>
+      <Button variant="outline" size="sm" onClick={() => void refresh()}>
         重试
-      </button>
+      </Button>
     </div>
   );
 }
@@ -159,65 +69,57 @@ export function TalkOverlay(_props: object): ReactElement | null {
   const talk = useTalkState();
   if (!talk.open) return null;
 
-  const body =
-    talk.busy && talk.phase === "booting" ? (
-      <div style={{ color: COLORS.muted }}>连接 Server…</div>
-    ) : talk.phase === "error" ? (
-      <ErrorView />
-    ) : talk.phase === "anon" ? (
-      <div style={{ color: COLORS.muted, fontSize: 13 }}>
-        {`尚未登录。登录 / 注册（邮箱 / GitHub）与账号管理 UI 将于下一步接入。当前 Server：${
-          talk.settings?.serverUrl ?? "http://127.0.0.1:8787"
-        }。已有会话 token 时打开面板会自动验证并展示账号。`}
-      </div>
-    ) : (
-      <div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 12,
-          }}
-        >
-          <div>
-            <div style={{ fontWeight: 600 }}>
-              {talk.me?.displayName ?? talk.me?.handle ?? "已登录"}
-            </div>
-            <div style={{ color: COLORS.muted, fontSize: 12 }}>@{talk.me?.handle}</div>
-          </div>
-          <button type="button" style={btnStyle} onClick={() => void logout()}>
-            退出
-          </button>
-        </div>
-        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8 }}>我的社区</div>
-        {talk.me !== null ? <CommunityList communities={talk.communities} /> : null}
-      </div>
-    );
+  let body: ReactElement;
+  if (talk.phase === "error") {
+    body = <ErrorView />;
+  } else if (talk.phase === "anon") {
+    body = <AuthScreen />;
+  } else if (talk.busy || talk.phase === "booting") {
+    body = <LoadingView />;
+  } else {
+    body = <HomeScreen />;
+  }
 
+  const centered = talk.phase === "anon" || talk.phase === "error";
   return (
     <div style={overlayStyle}>
       <div style={panelStyle}>
+        <div style={panelHeader}>
+          <span
+            style={{ fontWeight: 650, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}
+          >
+            <IconQueueOutline14 size={16} />
+            dsh-talk 社区
+          </span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {talk.phase === "ready" && talk.me ? (
+              <span style={{ color: palette.muted, fontSize: 12, alignSelf: "center" }}>
+                @{talk.me.handle}
+              </span>
+            ) : null}
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<IconCloseOutline16 />}
+              onClick={() => closeTalk()}
+              aria-label="关闭面板"
+            />
+          </span>
+        </div>
         <div
           style={{
+            flex: 1,
+            minHeight: 0,
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
+            alignItems: centered ? "center" : undefined,
+            justifyContent: centered ? "center" : undefined,
+            overflow: "hidden",
           }}
         >
-          <div
-            style={{ fontWeight: 600, fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}
-          >
-            <TalkIcon />
-            dsh-talk 社区
-          </div>
-          <button type="button" style={btnStyle} onClick={() => closeTalk()} aria-label="关闭">
-            关闭
-          </button>
+          {body}
         </div>
-        {body}
       </div>
+      {talk.toast.length > 0 ? <Toast text={talk.toast} onDone={() => dismissToast()} /> : null}
     </div>
   );
 }

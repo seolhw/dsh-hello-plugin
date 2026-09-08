@@ -39,6 +39,17 @@ const AUTH_ALLOWED_HOSTS = [
   "*.pages.dev",
 ] as const;
 
+// Bearer-only 会话（无 cookie CSRF 面），为本地 DSH web shell / 前端 dev server
+// 放行跨源调用；生产用 BETTER_AUTH_URL 域名（该域名永远在允许名单里）。
+const AUTH_TRUSTED_ORIGINS = [
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "http://localhost:3080",
+  "http://127.0.0.1:3080",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+] as const;
+
 function buildAuthOptions(env: Env): BetterAuthOptions {
   const secret = env.BETTER_AUTH_SECRET?.trim();
   if (!secret || secret.length < 32) {
@@ -97,6 +108,9 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       // 与默认 /api/auth 一致即可；前缀定短一点避免与业务混淆
       cookiePrefix: "dsh_talk",
     },
+    // 信任的跨源调用方（本插件是纯 Bearer 会话，无 cookie，CSRF 面小）；
+    // 本地 DSH web shell / 前端 dev server 用。BETTER_AUTH_URL 域名始终在允许名单。
+    trustedOrigins: [...AUTH_TRUSTED_ORIGINS],
   };
 }
 

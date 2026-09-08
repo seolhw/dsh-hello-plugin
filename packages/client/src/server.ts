@@ -3,21 +3,37 @@
 // 认证采用 Better Auth Bearer Token：
 //   - /api/auth/*：登录/注册/会话/改密等（见 @dsh-talk/types/api/auth）
 //   - 业务 REST：Authorization: Bearer <session token>
-// 类型契约复用 @dsh-talk/types/api。
+// 类型契约复用 @dsh-talk/types/api（请求）+ @dsh-talk/types/entities（实体）。
 // ================================================================
 
 import type {
   ApiError,
   AuthUser,
   ChangePasswordRequest,
+  CreateChannelRequest,
+  CreateCommunityRequest,
+  CreateCommunityResponse,
+  CreateMessageRequest,
+  CreateMessageResponse,
+  GetCommunityResponse,
   GetMyCommunitiesResponse,
+  GetReadStateResponse,
   GetSessionResponse,
+  JoinByInviteRequest,
+  JoinByInviteResponse,
+  JoinCommunityResponse,
+  LeaveCommunityResponse,
+  ListMessagesQuery,
+  ListMessagesResponse,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
   SendVerificationEmailRequest,
   SignInEmailRequest,
   SignInUsernameRequest,
   SignUpEmailRequest,
+  UpdateMessageRequest,
+  UpdateMessageResponse,
+  UpdateReadStateRequest,
   UpdateUserRequest,
 } from "@dsh-talk/types/api";
 
@@ -55,6 +71,15 @@ export interface AuthCallResult {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toQuery(params: Record<string, string | number | undefined>): string {
+  const entries = Object.entries(params).filter(
+    (entry): entry is [string, string | number] =>
+      entry[1] !== undefined && entry[1] !== null && String(entry[1]).length > 0,
+  );
+  if (entries.length === 0) return "";
+  return `?${entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
 }
 
 export class ServerClient {
@@ -194,10 +219,128 @@ export class ServerClient {
     return this.call<{ status: boolean }>("POST", "/api/auth/reset-password", body);
   }
 
-  // ---------- 业务 REST ----------
+  // ---------- 业务 REST：社区 / 频道 / 成员 ----------
 
-  /** GET /api/communities/mine —— 我加入的社区 */
+  /** GET /api/communities/mine —— 我加入的社区（含未读概览） */
   myCommunities(): Promise<GetMyCommunitiesResponse> {
     return this.call<GetMyCommunitiesResponse>("GET", "/api/communities/mine", undefined, true);
+  }
+
+  /** GET /api/communities/:id —— 社区详情（频道 + 我的角色） */
+  getCommunity(communityId: string): Promise<GetCommunityResponse> {
+    return this.call<GetCommunityResponse>(
+      "GET",
+      `/api/communities/${communityId}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/communities —— 创建社区 */
+  createCommunity(body: CreateCommunityRequest): Promise<CreateCommunityResponse> {
+    return this.call<CreateCommunityResponse>("POST", "/api/communities", body, true);
+  }
+
+  /** POST /api/communities/join-by-code —— 邀请码加入（私有/公开通用） */
+  joinByCode(body: JoinByInviteRequest): Promise<JoinByInviteResponse> {
+    return this.call<JoinByInviteResponse>("POST", "/api/communities/join-by-code", body, true);
+  }
+
+  /** POST /api/communities/:id/join —— 直接加入公开社区 */
+  joinCommunity(communityId: string): Promise<JoinCommunityResponse> {
+    return this.call<JoinCommunityResponse>(
+      "POST",
+      `/api/communities/${communityId}/join`,
+      {},
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/leave —— 退出社区（owner 不能退） */
+  leaveCommunity(communityId: string): Promise<LeaveCommunityResponse> {
+    return this.call<LeaveCommunityResponse>(
+      "POST",
+      `/api/communities/${communityId}/leave`,
+      {},
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/channels —— 新建频道（owner/admin） */
+  createChannel(
+    communityId: string,
+    body: CreateChannelRequest,
+  ): Promise<GetCommunityResponse["channels"][number]> {
+    return this.call<GetCommunityResponse["channels"][number]>(
+      "POST",
+      `/api/communities/${communityId}/channels`,
+      body,
+      true,
+    );
+  }
+
+  // ---------- 业务 REST：消息 & 未读 ----------
+
+  /** GET /api/channels/:id/messages —— 历史（desc 新→旧；cursor=某条 createdAt 翻更早） */
+  listMessages(
+    channelId: string,
+    opts: Pick<ListMessagesQuery, "cursor" | "limit" | "direction"> = {},
+  ): Promise<ListMessagesResponse> {
+    const query = toQuery({
+      cursor: opts.cursor ?? "",
+      limit: opts.limit ?? 50,
+      direction: opts.direction ?? "desc",
+    });
+    return this.call<ListMessagesResponse>(
+      "GET",
+      `/api/channels/${channelId}/messages${query}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/channels/:id/messages —— 发消息 */
+  createMessage(channelId: string, body: CreateMessageRequest): Promise<CreateMessageResponse> {
+    return this.call<CreateMessageResponse>(
+      "POST",
+      `/api/channels/${channelId}/messages`,
+      body,
+      true,
+    );
+  }
+
+  /** PATCH /api/messages/:id —— 编辑消息（作者或 owner/admin） */
+  updateMessage(messageId: string, body: UpdateMessageRequest): Promise<UpdateMessageResponse> {
+    return this.call<UpdateMessageResponse>("PATCH", `/api/messages/${messageId}`, body, true);
+  }
+
+  /** DELETE /api/messages/:id —— 删除消息（作者或 owner/admin） */
+  deleteMessage(messageId: string): Promise<Record<string, never>> {
+    return this.call<Record<string, never>>(
+      "DELETE",
+      `/api/messages/${messageId}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** GET /api/channels/:id/read-state —— 未读快照 */
+  getReadState(channelId: string): Promise<GetReadStateResponse> {
+    return this.call<GetReadStateResponse>(
+      "GET",
+      `/api/channels/${channelId}/read-state`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/channels/:id/read-state —— 上报已读 */
+  markRead(channelId: string, body: UpdateReadStateRequest): Promise<GetReadStateResponse> {
+    return this.call<GetReadStateResponse>(
+      "POST",
+      `/api/channels/${channelId}/read-state`,
+      body,
+      true,
+    );
   }
 }

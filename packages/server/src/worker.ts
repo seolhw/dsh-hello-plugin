@@ -44,6 +44,30 @@ app.get("/healthz", (c) =>
 );
 
 // ----------------- Better Auth（/api/auth/*，接管身份/会话/注册/找回密码） -----------------
+
+// GitHub OAuth 完成后，better-auth 会把用户重定向回这里（同源），
+// 此页读取会话并把 {user, token} postMessage 回打开弹窗的插件（跨源）后自关。
+app.get("/api/auth/social-landing", async (c) => {
+  await ensureAuthSchema(c.env);
+  const auth = getAuth(c.env);
+  const session = (await auth.api.getSession({
+    headers: new Headers(c.req.raw.headers),
+  })) as {
+    session: { token: string } | null;
+    user: unknown;
+  } | null;
+  const token = session?.session?.token ?? null;
+  const payload = token
+    ? JSON.stringify({ type: "dsh-talk:auth", token, user: session?.user })
+    : null;
+  const script = payload
+    ? `if(window.opener){window.opener.postMessage(${payload},"*");} window.close();`
+    : `document.body.textContent='GitHub 授权未完成'; setTimeout(()=>window.close(),1500);`;
+  return c.html(
+    `<!doctype html><html><meta charset="utf-8"><title>dsh-talk 登录</title><body style="font-family:sans-serif;padding:24px;color:#333">${payload ? "登录成功，正在返回…" : "授权未完成或已取消"}</body><script>${script}</script></html>`,
+  );
+});
+
 app.all("/api/auth/*", async (c) => {
   // 认证表（user/session/account/verification…）首访自举创建（幂等、按 isolate 只跑一次）
   await ensureAuthSchema(c.env);

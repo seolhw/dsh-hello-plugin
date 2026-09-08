@@ -4,8 +4,6 @@
 
 *A Discord-like community living inside DSH (DeepSeek Harness): real-time channels, Q&A with a resolution loop, and sharing workflows or full agent sessions that others can clone — one click, identical trajectory, on their own machine.*
 
-> **当前状态**：MVP 规划阶段 —— README 与 [docs/PRD.md](docs/PRD.md) 已就绪（评审中）。代码仍为仓库脚手架（`src/index.ts` hello 示例），`server/`、`src-client/` 等目录为规划布局，待 M0 预研后按 Roadmap 实现。
-
 ---
 
 ## 目录
@@ -66,8 +64,8 @@ DSH 用户与开发者今天要「跳出 DSH」才能获得社区支持：
 ```mermaid
 flowchart LR
     subgraph A["用户 A 的 DSH（本地）"]
-        UI["dsh-talk 聊天面板（client 半）"]
-        HOST["dsh-talk host 半<br/>会话克隆 / workflow 运行 / 本地缓存"]
+        UI["dsh-talk 聊天面板（client ）"]
+        HOST["dsh-talk host <br/>会话克隆 / workflow 运行 / 本地缓存"]
         UI <--> HOST
     end
     subgraph C["Cloudflare（Hub，本仓库 server/ 部署）"]
@@ -80,19 +78,19 @@ flowchart LR
         API <--> R2
     end
     subgraph B["用户 B 的 DSH（本地）"]
-        UI2["dsh-talk 聊天面板（client 半）"]
-        HOST2["dsh-talk host 半"]
+        UI2["dsh-talk 聊天面板（client ）"]
+        HOST2["dsh-talk host "]
         UI2 <--> HOST2
     end
     UI -- "WSS + REST（Bearer）" --> API
     UI2 -- "WSS + REST（Bearer）" --> API
 ```
 
-**双半插件分工**（DSH 客户端插件标准形态，`package.json` 声明 `dsh.client` 并提供 `./client` 导出）：
+**双插件分工**（DSH 客户端插件标准形态，`package.json` 声明 `dsh.client` 并提供 `./client` 导出）：
 
-- **client 半（浏览器）**：聊天 UI、与 Hub 的长连接、未读状态、分享卡片、上传（R2 预签名直传）。
-- **host 半（Node）**：插件配置（`ctx.settings` 命名空间 `talk`）、**克隆恢复器**（把分享包写回本地 DSH 会话持久化与索引）、**workflow 运行器**、本地缓存（`ctx.storageDomain` 自定义 domain `talk`）。
-- client 半需要 host 半能力的调用走 DSH 既有 RPC 通道（参照 `dsh-client-connection` 的 remote 机制）。
+- **client （浏览器）**：聊天 UI、与 Hub 的长连接、未读状态、分享卡片、上传（R2 预签名直传）。
+- **host （Node）**：插件配置（`ctx.settings` 命名空间 `talk`）、**克隆恢复器**（把分享包写回本地 DSH 会话持久化与索引）、**workflow 运行器**、本地缓存（`ctx.storageDomain` 自定义 domain `talk`）。
+- client 需要 host 能力的调用走 DSH 既有 RPC 通道（参照 `dsh-client-connection` 的 remote 机制）。
 
 **Hub（Cloudflare 全家桶，无任何第三方云依赖）**：一个 Hub 承载多个社区（层级 **Hub → 社区 → 频道**，社区即 Discord 的「服务器」，可由注册用户自行创建）。Worker 提供 REST + WebSocket；每个频道一个 Durable Object（RoomActor）负责连接管理与实时广播；D1 存元数据（源真）；R2 存图片附件与会话/工作流分享包。详见 [docs/PRD.md §8](docs/PRD.md)。
 
@@ -102,13 +100,13 @@ flowchart LR
 
 ```
 dsh-talk/
-├── src/                  # DSH 插件 host 半（TypeScript，tsdown 打包）
+├── src/                  # DSH 插件 host（TypeScript，tsdown 打包）
 │   ├── index.ts          # 插件入口：配置、服务接线（当前为脚手架）
 │   ├── config.ts         # schemastery Config（hubUrl / handle / token…）
 │   ├── clone/            # 会话克隆恢复器（写回本地 DSH 会话）
 │   ├── workflow/         # workflow 运行器
 │   └── cache/            # storageDomain 'talk' 本地缓存/草稿
-├── src-client/           # DSH 插件 client 半（浏览器 UI，React）
+├── src-client/           # DSH 插件 client （浏览器 UI，React）
 │   ├── index.ts          # slots 注册（入口/设置页）+ locale zh/en
 │   ├── panels/           # 频道列表 / 消息区 / 输入区
 │   ├── share/            # 分享对话框、卡片、克隆对话框
@@ -123,11 +121,11 @@ dsh-talk/
 │   └── PRD.md            # 产品需求文档（MVP）
 ├── cordis.yml            # 本地开发：把本插件 insert 进 dsh 配置树
 ├── cordis.patch.yml      # 发布：作为 bundle patch 被 dsh 加载
-├── tsdown.config.ts      # host 半打包
+├── tsdown.config.ts      # host 打包
 └── package.json
 ```
 
-> 注：当前仓库只有 `src/index.ts`（脚手架，含 hello 示例的 `greeting`/`maxRetries` 配置）；`src-client/`、`server/` 及 `src/` 下的子目录为**规划布局**，随 M0–M3 逐步建立。实现时注意：client 半打包产物需按「双半包」约定导出（`exports["./client"]` + `dsh.client` 声明）。
+> 注：当前仓库只有 `src/index.ts`（脚手架，含 hello 示例的 `greeting`/`maxRetries` 配置）；`src-client/`、`server/` 及 `src/` 下的子目录为**规划布局**，随 M0–M3 逐步建立。实现时注意：client 打包产物需按「双包」约定导出（`exports["./client"]` + `dsh.client` 声明）。
 
 ---
 
@@ -165,7 +163,7 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 
 打开 DSH Web GUI（默认 http://127.0.0.1:3080），侧栏出现 **dsh-talk** 入口。
 
-> 本地联调 client 半（聊天 UI）的加载方式在 M0 确定：双半包的浏览器半按「包名」被 client modules 扫描，开发期需要把构建产物以包名形式（`pnpm link`/发布/本地 tarball）装进 profile，见 PRD §14 R1。
+> 本地联调 client （聊天 UI）的加载方式在 M0 确定：双包的浏览器按「包名」被 client modules 扫描，开发期需要把构建产物以包名形式（`pnpm link`/发布/本地 tarball）装进 profile，见 PRD §14 R1。
 
 ### 3. 首次连接
 
@@ -206,22 +204,22 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 ### 脚本
 
 ```bash
-pnpm build        # tsdown 打包 host 半（lib/）
+pnpm build        # tsdown 打包 host （lib/）
 pnpm dev          # 本地起 dsh web 并 insert 本插件
 pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
 ```
 
-### 双半包约定（实现时必须满足）
+### 双包约定（实现时必须满足）
 
-1. `package.json`：`exports` 增加 `"./client"`（浏览器半入口），并声明 `"dsh": { "client": { "inject": [...], "platform": "web" } }`；
-2. 浏览器半 UI 挂载走 slot 机制（`ctx.slots.register` / `ctx.slots.inject`），入口孔位以 `sidebar.footer.action`（列表槽）等 DSH 内置孔位为参考锚点 —— **精确的 SlotCore / dsh-client-web 契约需从源码仓库核对**（PRD §14 R1）；
+1. `package.json`：`exports` 增加 `"./client"`（浏览器入口），并声明 `"dsh": { "client": { "inject": [...], "platform": "web" } }`；
+2. 浏览器 UI 挂载走 slot 机制（`ctx.slots.register` / `ctx.slots.inject`），入口孔位以 `sidebar.footer.action`（列表槽）等 DSH 内置孔位为参考锚点 —— **精确的 SlotCore / dsh-client-web 契约需从源码仓库核对**（PRD §14 R1）；
 3. 插件语言包用 `ctx.locale.register('talk', 'zh'|'en', …)` 注册，UI 文案先做 `zh`，`en` 同步补齐；
-4. host 半能力（克隆恢复、workflow 运行）一律要求用户确认，禁止静默执行。
+4. host 能力（克隆恢复、workflow 运行）一律要求用户确认，禁止静默执行。
 
 ### 测试
 
 - `server/`：`pnpm test`（wrangler dev + 集成测试：双用户消息互发、分享上传/下载）；
-- 插件 host 半：单测覆盖 config 默认值、克隆包的 manifest 校验；
+- 插件 host ：单测覆盖 config 默认值、克隆包的 manifest 校验；
 - 端到端：两个独立 DSH profile（`alice` / `bob`，各监听不同端口）+ 本地 Hub 手工验证主流程（PRD §6 验收）。
 
 ### 已知注意
@@ -235,9 +233,9 @@ pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
 
 | 里程碑 | 内容 | 周期（单人估算） |
 | --- | --- | --- |
-| **M0 技术预研** | 客户端 slot/双半加载、会话克隆恢复、workflow 运行通道、Cloudflare DO+WS 冒烟；输出 Go/No-Go | 1–2 周 |
+| **M0 技术预研** | 客户端 slot/双加载、会话克隆恢复、workflow 运行通道、Cloudflare DO+WS 冒烟；输出 Go/No-Go | 1–2 周 |
 | **M1 Hub 服务端** | Worker API、平台注册码、社区（创建/发现/加入/邀请码/频道管理）、消息、DO RoomActor、R2 上传、D1 存储 | 2–3 周 |
-| **M2 客户端聊天** | 双半骨架 + 社区抽屉（我的/发现/创建）+ 频道 UI、WS 实时、历史、Markdown/代码块、图片、未读/提及、设置 | 3 周 |
+| **M2 客户端聊天** | 双骨架 + 社区抽屉（我的/发现/创建）+ 频道 UI、WS 实时、历史、Markdown/代码块、图片、未读/提及、设置 | 3 周 |
 | **M3 分享与克隆** | 会话/工作流分享、R2 两段上传、分享卡片、一键克隆、workflow 运行、#help 闭环 | 2–3 周 |
 | **M4 打磨与发布** | 通知、加载/错误态、a11y、i18n、端到端测试、插件发布、部署指南、种子内容 | 1–2 周 |
 
@@ -245,12 +243,7 @@ P1/P2 详见 [docs/PRD.md §17](docs/PRD.md)。
 
 ---
 
-## 相关文档
-
-- [docs/PRD.md](docs/PRD.md) —— 产品需求文档（MVP）：用户故事、功能需求与验收、分享与克隆规格、服务端设计、消息协议、数据模型、安全与隐私、技术风险、里程碑。
-- [docs/TASKS.md](docs/TASKS.md) —— 多 Agent 开发任务看板：任务分解（M0–M4 + 文档线）、状态跟踪（待办/进行中/评审中/完成/受阻）、协作规则、并行拓扑与完成定义。
-- 上游与参考：DSH 基于 [Cordis 4](https://github.com/cordiverse/cordis)（DSH 内 `@deepseek-ai/cordis`）；DSH 本体见 `github.com/deepseek-ai/deepseek-harness`。
 
 ## License
 
-ISC（与仓库脚手架一致；如引入 server/ 内依赖按各自许可）。
+MIT

@@ -1,0 +1,32 @@
+{
+  "name": "dsh-talk-m02",
+  "version": "0.0.0",
+  "description": "M0-2 double-half loading experiment (throwaway)",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.2"
+  }
+}

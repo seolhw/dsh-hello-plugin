@@ -50,16 +50,12 @@
       "type": "durable-object",
       "storage": "sqlite"
     }
-  },
+  }
   // ---------- 环境变量（生产用 wrangler secret put；本地 pnpm dev 自动把 .env 同步到 .dev.vars） ----------
   // 认证相关只保留密钥/凭据 + 认证 URL；其余策略均为代码常量（见 src/constants.ts 与 src/lib/auth.ts）：
   //   BETTER_AUTH_URL      认证服务对外地址（可选）：邮箱验证 / 重置链接都基于它。
   //                        例如本地 http://127.0.0.1:8787。留空时按请求 Host 推导。
   //   BETTER_AUTH_SECRET   会话签名密钥（≥32 字符，必填）
   //   RESEND_API_KEY       事务邮件（邮箱验证 / 找回密码）
-  "variables": {
-    "BETTER_AUTH_URL": "string",
-    "BETTER_AUTH_SECRET": "string",
-    "RESEND_API_KEY": "string"
-  }
+  //
 }

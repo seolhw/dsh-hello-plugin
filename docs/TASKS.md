@@ -32,13 +32,13 @@
 
 | 里程碑 | 总数 | 待办 | 进行中 | 评审中 | 完成 |
 | --- | --- | --- | --- | --- | --- |
-| M0 技术预研 | 6 | 5 | 1 | 0 | 0 |
+| M0 技术预研 | 6 | 5 | 0 | 0 | 1 |
 | M1 Hub 服务端 | 15 | 15 | 0 | 0 | 0 |
 | M2 客户端聊天 | 12 | 12 | 0 | 0 | 0 |
 | M3 分享与克隆 | 9 | 9 | 0 | 0 | 0 |
 | M4 打磨与发布 | 8 | 8 | 0 | 0 | 0 |
 | DOC 文档线 | 3 | 1 | 0 | 0 | 2 |
-| **合计** | **53** | **50** | **1** | **0** | **2** |
+| **合计** | **53** | **50** | **0** | **0** | **3** |
 
 ## 4. 建议的并行拓扑（首轮如何分工）
 
@@ -73,7 +73,7 @@ M4（2 条并行轨：体验轨 M4-1..M4-3 / 发布轨 M4-4..M4-8）
 
 | ID | 任务 | 流 | 依赖 | 状态 | 认领 | 验收/产出 |
 | --- | --- | --- | --- | --- | --- | --- |
-| M0-1 | 客户端契约核对（R1）：从 `deepseek-ai/deepseek-harness` 源码取得 `dsh-client-web`（shell）、`dsh-client-ui-slots`（SlotCore）、`dsh-client-ui-primitives` 契约；确认可挂载孔位（sidebar/settings/会话操作区）与 `ctx.slots` 精确 API | research | 无 | 进行中 | research-sub（委托深读中） | 产出 `docs/m0/r1-contracts.md`：孔位清单 + slot API 签名 + 挂载示例 |
+| M0-1 | 客户端契约核对（R1）：从 `deepseek-ai/deepseek-harness` 源码取得 `dsh-client-web`（shell）、`dsh-client-ui-slots`（SlotCore）、`dsh-client-ui-primitives` 契约；确认可挂载孔位（sidebar/settings/会话操作区）与 `ctx.slots` 精确 API | research | 无 | 完成 | 主 agent（一手核验 + research-sub 审计并入中） | 产出 `docs/m0/r1-contracts.md`：双半 manifest/产物契约、SlotCore 签名、孔位清单（sidebar.footer.action / settings.section / shell.overlay）、挂载方案定稿 §6.1 |
 | M0-2 | 双半包本地加载实验：tsdown 双入口打包 → `exports["./client"]` + `dsh.client` 声明 → 开发期以包名装入 profile 并被 client modules 扫描进 GUI（验证本地 dev 加载路径） | client | 无 | 待办 | | 最小 client 插件能在 DSH Web 渲染一个面板；结论写回 `docs/m0/r2-dualhalf.md` |
 | M0-3 | 会话克隆恢复 spike（R2）：按 `dsh-session-persistence-jsonl` 布局直写 `session.jsonl` + 附件 + 在会话列表/查询索引注册新会话；验证「打开」与「继续对话」是否可行 | host | 无 | 待办 | | 原型代码 + 结论表：逐事件一致校验方法（§6.3 AC3）、能否续写；Go/No-Go 依据 |
 | M0-4 | workflow 运行通道 spike（R3）：验证「新建会话 + 注入 prompt」委派本地 agent（webhookRuntime 同构）vs `ctx.workflowEngine.start` parent 注入 | host | 无 | 待办 | | 结论 + 推荐通道；备选「复制脚本」兜底确认 |

@@ -131,7 +131,7 @@ function CommunityList({ communities }: { communities: GetMyCommunitiesResponse 
   if (communities.length === 0) {
     return (
       <div style={{ color: COLORS.muted }}>
-        还没有加入任何社区。创建/加入功能随 Hub API 完善后开启。
+        还没有加入任何社区。创建/加入功能随 Server API 完善后开启。
       </div>
     );
   }
@@ -162,7 +162,7 @@ function CommunityList({ communities }: { communities: GetMyCommunitiesResponse 
   );
 }
 
-function RegisterForm({ hubUrl }: { hubUrl: string }): ReactElement {
+function RegisterForm({ serverUrl }: { serverUrl: string }): ReactElement {
   const { busy } = useTalkState();
   const [code, setCode] = useState("");
   const [handle, setHandle] = useState("");
@@ -181,7 +181,7 @@ function RegisterForm({ hubUrl }: { hubUrl: string }): ReactElement {
   return (
     <form onSubmit={submit}>
       <p style={{ color: COLORS.muted, fontSize: 12, marginTop: 0 }}>
-        Hub：{hubUrl} —— 用一次性平台注册码开通身份，令牌会安全保存在本地 DSH 设置里。
+        Server：{serverUrl} —— 用一次性平台注册码开通身份，令牌会安全保存在本地 DSH 设置里。
       </p>
       <input
         style={fieldStyle}
@@ -233,11 +233,11 @@ export function TalkOverlay(_props: object): ReactElement | null {
 
   const body =
     talk.busy && talk.phase === "booting" ? (
-      <div style={{ color: COLORS.muted }}>连接 Hub…</div>
+      <div style={{ color: COLORS.muted }}>连接 Server…</div>
     ) : talk.phase === "error" ? (
       <ErrorView />
     ) : talk.phase === "anon" ? (
-      <RegisterForm hubUrl={talk.settings?.hubUrl ?? "http://127.0.0.1:8787"} />
+      <RegisterForm serverUrl={talk.settings?.serverUrl ?? "http://127.0.0.1:8787"} />
     ) : (
       <div>
         <div

@@ -15,7 +15,7 @@ DSH 用户与开发者今天要「跳出 DSH」才能获得社区支持：
 | 遇到问题要在 Discord / 微信群 / 论坛之间来回切，上下文丢失 | 在 DSH 内直接进入频道提问、贴代码、被解答，`#help` 有解决闭环 |
 | 「帮我看看我这个会话为什么这样」只能截图、口述 | 分享一个链接/卡片，对方一键克隆：本地生成记录与整个轨迹完全一致的会话副本，可直接打开查看甚至继续 |
 | 好用的 workflow 无法分发、无法复用 | 以纯 JSON 载荷 `{meta, script, args}` 分享 workflow，对方本地一键运行 |
-| 社区内容与自己的 Agent 工作区割裂 | 分享/克隆/运行全部发生在本地 DSH 与社区 Hub 之间，产出留在自己的工作区 |
+| 社区内容与自己的 Agent 工作区割裂 | 分享/克隆/运行全部发生在本地 DSH 与社区 Server 之间，产出留在自己的工作区 |
 | 默认只有单一官方群，圈子无法生长 | 任何注册用户都能自建社区（类 Discord「服务器」）：公开可被「发现」加入，或发社区邀请码私有加入 |
 
 > 目标场景：多社区（自行创建 / 「发现」加入 / 私有邀请码加入），社区内 `#general` 闲聊、`#help` 求助解答、`#showcase` 分享工作流与「会话克隆」卡片、`#announcements` 社区公告。
@@ -31,7 +31,7 @@ flowchart LR
         HOST["dsh-talk host<br/>会话克隆 / workflow 运行 / 本地缓存"]
         UI <--> HOST
     end
-    subgraph C["Cloudflare（Hub）"]
+    subgraph C["Cloudflare（Server）"]
         API["Worker API<br/>REST + WebSocket"]
         DO["Durable Object<br/>RoomActor（每频道实时广播）"]
         D1[("D1<br/>用户 / 社区 / 频道 / 消息 / 分享")]
@@ -53,21 +53,21 @@ flowchart LR
 
 DSH 插件天然分为两个运行环境，本项目通过 `package.json` 的 `exports` 与 `dsh.client` 声明同时提供两份产物：
 
-- **client（浏览器）**：聊天 UI、与 Hub 的 WebSocket 长连接、未读状态、分享卡片、R2 预签名直传。
+- **client（浏览器）**：聊天 UI、与 Server 的 WebSocket 长连接、未读状态、分享卡片、R2 预签名直传。
 - **host（Node.js）**：插件配置（`ctx.settings` 命名空间 `talk`）、克隆恢复器（把分享包写回本地 DSH 会话持久化与索引）、workflow 运行器、本地缓存（`ctx.storageDomain` 自定义 domain `talk`）。
 
-client 需要 host 能力时走 host 在 `webServer` 上注册的同源接口（当前：`/api/talk/config` 读写 token/hubUrl 等配置，语义见 `@dsh-talk/types/rpc` 的 `SettingsRpc`）；克隆/运行 workflow 等重活后续按需扩展。
+client 需要 host 能力时走 host 在 `webServer` 上注册的同源接口（当前：`/api/talk/config` 读写 token/serverUrl 等配置，语义见 `@dsh-talk/types/rpc` 的 `SettingsRpc`）；克隆/运行 workflow 等重活后续按需扩展。
 
-### Hub（Cloudflare 全家桶，无任何第三方云依赖）
+### Server（Cloudflare 全家桶，无任何第三方云依赖）
 
-一个 Hub 承载多个社区（层级 **Hub → 社区 → 频道**，社区即 Discord 的「服务器」，可由注册用户自行创建）：
+一个 Server 承载多个社区（层级 **Server → 社区 → 频道**，社区即 Discord 的「服务器」，可由注册用户自行创建）：
 
 - **Worker**：提供 REST + WebSocket 入口
 - **Durable Object（RoomActor）**：每个频道一个实例，负责连接管理与实时广播
 - **D1**：用户 / 社区 / 频道 / 消息 / 分享等元数据（源真）
 - **R2**：图片附件与会话 / 工作流分享包
 
-Hub 代码在本仓库 `server/` 目录下（独立工程，支持自托管）。
+Server 代码在本仓库 `packages/server/` 目录下（独立工程，支持自托管）。
 
 ---
 
@@ -85,22 +85,22 @@ dsh-talk/
 │   │   │   ├── index.ts      # client 入口：sidebar「社区」入口 + shell.overlay 面板
 │   │   │   ├── augment.ts    # 类型化 slot 接入（拉入官方 SlotMap 合并）
 │   │   │   ├── components.tsx# 面板 UI（身份注册 / 我的社区列表）
-│   │   │   ├── store.ts      # UI store：host 配置 → Hub 身份 → 我的社区
-│   │   │   ├── hub.ts        # Hub REST client（复用 @dsh-talk/types/api 契约）
-│   │   │   ├── ws.ts         # Hub WebSocket client（复用 @dsh-talk/types/ws 契约）
-│   │   │   └── config.ts     # 同源读 /api/talk/config（取 token/hubUrl）
+│   │   │   ├── store.ts      # UI store：host 配置 → Server 身份 → 我的社区
+│   │   │   ├── server.ts     # Server REST client（复用 @dsh-talk/types/api 契约）
+│   │   │   ├── ws.ts         # Server WebSocket client（复用 @dsh-talk/types/ws 契约）
+│   │   │   └── config.ts     # 同源读 /api/talk/config（取 token/serverUrl）
 │   │   ├── package.json      # 包名 @dsh-talk/client
 │   │   └── tsconfig.json
 │   ├── types/            # ⭐ 全栈共享类型包（接口定义都在这里）
 │   │   ├── src/
 │   │   │   ├── entities.ts      User/Community/Channel/Message/Share 等 D1 实体
-│   │   │   ├── api/*            Hub REST API 请求/响应类型 + 路由契约注释
-│   │   │   ├── ws.ts            Hub WebSocket 帧协议（client↔server）
+│   │   │   ├── api/*            Server REST API 请求/响应类型 + 路由契约注释
+│   │   │   ├── ws.ts            Server WebSocket 帧协议（client↔server）
 │   │   │   ├── rpc.ts           DSH 插件 client↔host RPC 接口
 │   │   │   └── index.ts         barrel 导出
 │   │   ├── package.json         包名 @dsh-talk/types
 │   │   └── tsconfig.json
-│   └── server/           # ⭐ Cloudflare Hub（Hono Worker + D1 + R2 + Durable Object）
+│   └── server/           # ⭐ Cloudflare Server（Hono Worker + D1 + R2 + Durable Object）
 │       ├── wrangler.toml     # D1 / R2 / DO bindings + vars
 │       ├── drizzle.config.ts # drizzle-kit 配置（sqlite 方言 + 迁移目录）
 │       ├── src/
@@ -131,17 +131,17 @@ dsh-talk/
 ### 0. 前置
 
 - Node.js ≥ 20、pnpm ≥ 9
-- [Wrangler](https://developers.cloudflare.com/workers/wrangler/)（跑 Hub 无需 Cloudflare 账号）
+- [Wrangler](https://developers.cloudflare.com/workers/wrangler/)（跑 Server 无需 Cloudflare 账号）
 - DSH 本体：`npx @deepseek-ai/dsh`
 
 > 注意：本仓库声明的 `@deepseek-ai/dsh-tools` 等 peer 依赖版本为 `0.1.3-alpha.2`，如本地实测 DSH 版本不同，请先 `pnpm run update` 对齐（见下方开发指南）。
 
-### 1. 本地启动 Hub
+### 1. 本地启动 Server
 
 ```bash
 # 仓库根目录
 pnpm install        # 安装 host + types + server 三个 workspace 包
-pnpm dev:hub        # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
+pnpm dev:server     # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
 ```
 
 首次启动时用环境变量注入平台注册码（AUTH_INVITE_CODES 不要写进 wrangler.toml，走 env）：
@@ -149,10 +149,10 @@ pnpm dev:hub        # = pnpm --filter @dsh-talk/server dev，默认 http://127.0
 ```bash
 # PowerShell
 $env:AUTH_INVITE_CODES = "dshtalk-dev-0001"
-pnpm dev:hub
+pnpm dev:server
 ```
 
-首次跑 Hub 前用 Drizzle 生成迁移并写入本地 D1：
+首次跑 Server 前用 Drizzle 生成迁移并写入本地 D1：
 
 ```bash
 cd packages/server
@@ -163,7 +163,7 @@ pnpm db:generate       # 对比 src/db/schema.ts → 生成 SQL 到 drizzle/
 pnpm db:apply-local
 ```
 
-> 迁移生成后，也可手工执行 SQL 文件：`wrangler d1 execute talkhub --local --file=./drizzle/0000_xxxx.sql`
+> 迁移生成后，也可手工执行 SQL 文件：`wrangler d1 execute dsh-talk-server --local --file=./drizzle/0000_xxxx.sql`
 
 ### 2. 启动 DSH 并加载插件
 
@@ -177,9 +177,9 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 
 ### 3. 首次连接
 
-1. 打开 dsh-talk 面板 → 「注册身份」：输入**平台注册码**与昵称（如 `alice`）→ Hub 返回令牌并自动写入本地设置；
+1. 打开 dsh-talk 面板 → 「注册身份」：输入**平台注册码**与昵称（如 `alice`）→ Server 返回令牌并自动写入本地设置；
 2. 创建第一个社区（自动获得默认频道），或从「发现」加入公开社区 / 输入社区邀请码加入私有社区；
-3. 进入社区内的 `#general`，用第二个用户验证实时互通：同机联调请再起一个独立的 DSH profile（不同端口、不同配置树，另用一个平台注册码）连接同一个 Hub；
+3. 进入社区内的 `#general`，用第二个用户验证实时互通：同机联调请再起一个独立的 DSH profile（不同端口、不同配置树，另用一个平台注册码）连接同一个 Server；
 4. 两个用户都能在 `#showcase` 发布分享卡片、在 `#help` 提问并标记已解决。
 
 ---
@@ -190,13 +190,13 @@ pnpm dev            # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 
 | 键 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
-| `hubUrl` | string | `http://127.0.0.1:8787` | Hub 地址；生产环境填 `https://<你的域名>` |
+| `serverUrl` | string | `http://127.0.0.1:8787` | Server 地址；生产环境填 `https://<你的域名>` |
 | `handle` | string | `""` | 社区昵称（平台注册码换取令牌时写入） |
 | `token` | string（secret） | `""` | 社区访问令牌，`settings` 用户层覆盖 |
 | `autoReconnect` | boolean | `true` | WebSocket 断线自动重连 |
 | `share.maxSizeMb` | number | `50` | 本地上传体积上限（需 ≤ 服务端上限） |
 
-### Hub 环境变量（`packages/server/`）
+### Server 环境变量（`packages/server/`）
 
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
 
 # 类型检查
 pnpm typecheck        # types + server + host + client 全量
-pnpm typecheck:hub    # 只查 server
+pnpm typecheck:server # 只查 server
 pnpm typecheck:plugin # 只查 host（packages/host/）
 pnpm typecheck:client # 只查 client（packages/client/）
 
@@ -257,8 +257,8 @@ trustLockfile: true       # 信任 lockfile，跳过整表供应链复验
 | 文件 | 内容 |
 | --- | --- |
 | `src/entities.ts` | D1 表对应的实体类型（User / Community / Channel / Message / Share…） |
-| `src/api/*` | Hub REST API 请求/响应类型 + 路由契约总表注释 |
-| `src/ws.ts` | Hub WebSocket 协议帧：请求/应答/推送（含联合类型 `ClientFrame` / `ServerFrame`） |
+| `src/api/*` | Server REST API 请求/响应类型 + 路由契约总表注释 |
+| `src/ws.ts` | Server WebSocket 协议帧：请求/应答/推送（含联合类型 `ClientFrame` / `ServerFrame`） |
 | `src/rpc.ts` | DSH 插件 client ↔ host 的 RPC 方法签名总接口 `TalkHostRpc` |
 
 根 `package.json` 已通过 `"@dsh-talk/types": "workspace:*"` 直接依赖，写 host / server / client 时直接 `import type { … } from "@dsh-talk/types"` 或子路径即可。

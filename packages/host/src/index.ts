@@ -1,6 +1,6 @@
 // ================================================================
 // dsh-talk host（Node.js）
-//  1. 注册 `talk` 配置命名空间（ctx.settings）：hubUrl / handle / token …
+//  1. 注册 `talk` 配置命名空间（ctx.settings）：serverUrl / handle / token …
 //  2. 挂本地接口 GET|POST /api/talk/config，供浏览器端（client）同源调用
 //     语义与 @dsh-talk/types/rpc 的 SettingsRpc 一致（get / set / watch）
 // ================================================================
@@ -23,7 +23,7 @@ const TALK_NS = settingsNamespace("talk");
 // ---------- talk 配置 schema（默认值 + 用户层覆盖） ----------
 
 const talkSettingsSchema = z.object({
-  hubUrl: z.string().default("http://127.0.0.1:8787"),
+  serverUrl: z.string().default("http://127.0.0.1:8787"),
   handle: z.string().default(""),
   /** secret：settings 文档 redact 时会被剥掉，不会随描述接口外泄 */
   token: z.string().role("secret").default(""),
@@ -65,8 +65,8 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 function sanitizePatch(raw: unknown): Partial<TalkSettings> {
   if (!isPlainObject(raw)) return {};
   const patch: Partial<TalkSettings> = {};
-  const { hubUrl, handle, token, autoReconnect, share } = raw;
-  if (typeof hubUrl === "string" && hubUrl.length > 0) patch.hubUrl = hubUrl;
+  const { serverUrl, handle, token, autoReconnect, share } = raw;
+  if (typeof serverUrl === "string" && serverUrl.length > 0) patch.serverUrl = serverUrl;
   if (typeof handle === "string") patch.handle = handle;
   if (typeof token === "string") patch.token = token;
   if (typeof autoReconnect === "boolean") patch.autoReconnect = autoReconnect;

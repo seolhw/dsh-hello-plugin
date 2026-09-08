@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk Hub Worker 入口
+// dsh-talk Server Worker 入口
 //   Hono 路由装配 + /ws WebSocket upgrade -> RoomActor (DO)
 //   部署方式：pnpm deploy (wrangler deploy)
 //   本地：pnpm dev (wrangler dev --port 8787)
@@ -60,7 +60,7 @@ app.get("/ws", createBearerAuth("required"), async (c) => {
   // MVP：所有连接路由到同一个 DO id（全局唯一的房间管理器 DO），
   // 由它内部按 channelId 做 Map 管理。
   // 另一种路由策略：每个 channelId 一个 DO id（可水平扩展）
-  const globalRoomId = c.env.ROOM_ACTOR.idFromName("hub-default");
+  const globalRoomId = c.env.ROOM_ACTOR.idFromName("server-default");
   const stub = c.env.ROOM_ACTOR.get(globalRoomId);
 
   // 把子请求转发到 DO（带上 Upgrade 的原始 Request + 用户身份头）

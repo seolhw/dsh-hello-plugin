@@ -1,6 +1,6 @@
 // ================================================================
 // dsh-talk client UI store（极简 listener store + React hook）
-// 流程：打开面板 → host 取配置 → 有 token 则 Hub me + 我的社区，
+// 流程：打开面板 → host 取配置 → 有 token 则 Server me + 我的社区，
 //      没有则进入「注册身份」（注册码换令牌后回写 host 配置）
 // ================================================================
 
@@ -9,7 +9,7 @@ import type { User } from "@dsh-talk/types/entities";
 import type { TalkSettings } from "@dsh-talk/types/rpc";
 import { useEffect, useReducer } from "react";
 import { hostConfigGet, hostConfigSet } from "./config";
-import { HubClient } from "./hub";
+import { ServerClient } from "./server";
 
 export type TalkPhase = "booting" | "anon" | "ready" | "error";
 
@@ -41,8 +41,8 @@ function setState(patch: Partial<TalkState>): void {
   for (const listener of listeners) listener();
 }
 
-function makeHub(settings: TalkSettings): HubClient {
-  return new HubClient(settings.hubUrl, settings.token);
+function makeServer(settings: TalkSettings): ServerClient {
+  return new ServerClient(settings.serverUrl, settings.token);
 }
 
 const errorText = (error: unknown): string =>
@@ -73,7 +73,7 @@ export function closeTalk(): void {
   setState({ open: false });
 }
 
-/** 重取：host 配置 → 有 token 就拉 Hub 身份 + 我的社区。 */
+/** 重取：host 配置 → 有 token 就拉 Server 身份 + 我的社区。 */
 export async function refresh(): Promise<void> {
   setState({ phase: "booting", busy: true, error: "" });
   try {
@@ -82,9 +82,9 @@ export async function refresh(): Promise<void> {
       setState({ phase: "anon", busy: false, settings });
       return;
     }
-    const hub = makeHub(settings);
-    const me = await hub.me();
-    const communities = await hub.myCommunities();
+    const server = makeServer(settings);
+    const me = await server.me();
+    const communities = await server.myCommunities();
     setState({ phase: "ready", busy: false, settings, me, communities });
   } catch (error) {
     setState({ phase: "error", busy: false, error: errorText(error) });
@@ -97,13 +97,13 @@ export interface RegisterIdentityInput {
   displayName?: string | null;
 }
 
-/** 平台注册码 → Hub 换令牌 → 回写 host 配置 → 拉我的社区。 */
+/** 平台注册码 → Server 换令牌 → 回写 host 配置 → 拉我的社区。 */
 export async function registerIdentity(input: RegisterIdentityInput): Promise<void> {
   setState({ busy: true, error: "" });
   try {
     const settings = await hostConfigGet();
-    const hub = makeHub(settings);
-    const res = await hub.exchangeInvite({
+    const server = makeServer(settings);
+    const res = await server.exchangeInvite({
       inviteCode: input.inviteCode,
       handle: input.handle,
       displayName: input.displayName || null,
@@ -112,8 +112,8 @@ export async function registerIdentity(input: RegisterIdentityInput): Promise<vo
       token: res.token,
       handle: res.user.handle,
     });
-    hub.setToken(res.token);
-    const communities = await hub.myCommunities();
+    server.setToken(res.token);
+    const communities = await server.myCommunities();
     setState({
       busy: false,
       phase: "ready",
@@ -126,7 +126,7 @@ export async function registerIdentity(input: RegisterIdentityInput): Promise<vo
   }
 }
 
-/** 退出身份：清掉本地 token（保留 hubUrl/handle 等偏好）。 */
+/** 退出身份：清掉本地 token（保留 serverUrl/handle 等偏好）。 */
 export async function logout(): Promise<void> {
   try {
     await hostConfigSet({ token: "" });

@@ -3,8 +3,8 @@
  *
  * dsh-talk 全栈共享类型包：
  *  - entities.ts        D1 表对应实体
- *  - api/*              Hub REST API 请求/响应 + 路由契约注释
- *  - ws.ts              Hub WebSocket 帧协议
+ *  - api/*              Server REST API 请求/响应 + 路由契约注释
+ *  - ws.ts              Server WebSocket 帧协议
  *  - rpc.ts             DSH 插件 client ↔ host 的 RPC 接口
  *
  * 使用方式：

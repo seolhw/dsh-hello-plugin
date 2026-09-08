@@ -10,8 +10,6 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { UserConfig } from "tsdown";
 
-const ID = "dsh-talk";
-
 /** 浏览器平台模块（镜像 shell seed table） */
 const PLATFORM_MODULES = [
   "react",
@@ -26,7 +24,7 @@ const PLATFORM_MODULES = [
 export default (): UserConfig[] => {
   const configs: UserConfig[] = [
     {
-      name: ID,
+      name: "dsh-talk/host",
       entry: ["packages/host/src/index.ts"],
       outDir: "lib",
       format: ["esm", "cjs"],
@@ -47,7 +45,7 @@ export default (): UserConfig[] => {
 
   if (existsSync(resolve(process.cwd(), "packages/client/src/index.ts"))) {
     configs.push({
-      name: `${ID}/client`,
+      name: "dsh-talk/client",
       entry: { client: "packages/client/src/index.ts" },
       outDir: "lib",
       format: "cjs",
@@ -68,7 +66,7 @@ export default (): UserConfig[] => {
       },
       outputOptions: {
         entryFileNames: "client.js",
-        banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(ID)}, factory: (require) => {`,
+        banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify("dsh-talk")}, factory: (require) => {`,
         footer: "return module.exports; } });",
         intro: "var module = { exports: {} }; var exports = module.exports;",
       },

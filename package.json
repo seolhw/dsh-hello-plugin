@@ -36,12 +36,12 @@
   "scripts": {
     "build": "tsdown",
     "dev": "npx @deepseek-ai/dsh web --patch ./cordis.yml",
-    "dev:hub": "pnpm --filter @dsh-talk/server dev",
-    "deploy:hub": "pnpm --filter @dsh-talk/server deploy",
+    "dev:server": "pnpm --filter @dsh-talk/server dev",
+    "deploy:server": "pnpm --filter @dsh-talk/server deploy",
     "update": "npx npm-check-updates -u --target greatest --dep peer @deepseek-ai/*",
     "typecheck": "pnpm -r run typecheck && pnpm typecheck:plugin && pnpm typecheck:client",
     "typecheck:types": "tsc -p packages/types/tsconfig.json --noEmit",
-    "typecheck:hub": "tsc -p packages/server/tsconfig.json --noEmit",
+    "typecheck:server": "tsc -p packages/server/tsconfig.json --noEmit",
     "typecheck:plugin": "tsc -p packages/host/tsconfig.json --noEmit",
     "typecheck:client": "tsc -p packages/client/tsconfig.json --noEmit",
     "format": "biome format --write .",
@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.6",
     "@types/node": "^22.0.0",
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2"

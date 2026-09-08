@@ -37,12 +37,12 @@ export interface RpcError {
   details?: Record<string, unknown>;
 }
 
-// ---------- 1. 配置读写（client 拿 token/hubUrl 这些） ----------
+// ---------- 1. 配置读写（client 拿 token/serverUrl 这些） ----------
 
 export interface TalkSettings {
-  hubUrl: string;
+  serverUrl: string;
   handle: string;
-  /** token 是 secret，client 侧请求 Hub API 时不要直接带，走 host 代签？MVP 先直接返回给 client（同机可信），之后改成代发 */
+  /** token 是 secret，client 侧请求 Server API 时不要直接带，走 host 代签？MVP 先直接返回给 client（同机可信），之后改成代发 */
   token: string;
   autoReconnect: boolean;
   share: {

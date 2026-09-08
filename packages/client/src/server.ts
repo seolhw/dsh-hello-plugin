@@ -1,5 +1,5 @@
 // ================================================================
-// Hub REST client（浏览器端直连 Cloudflare Hub）
+// Server REST client（浏览器端直连 @dsh-talk/server 后端）
 // 所有调用类型严格复用 @dsh-talk/types/api 的路由契约
 // ================================================================
 
@@ -11,7 +11,7 @@ import type {
   GetMyCommunitiesResponse,
 } from "@dsh-talk/types/api";
 
-export class HubApiError extends Error {
+export class ServerApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
@@ -26,7 +26,7 @@ export class HubApiError extends Error {
 const errorMessage = (data: ApiError | null, text: string): string =>
   data?.message ?? (text.length > 0 ? text : "request failed");
 
-export class HubClient {
+export class ServerClient {
   readonly baseUrl: string;
   token: string | null;
 
@@ -70,7 +70,7 @@ export class HubClient {
 
     if (!res.ok) {
       const err = data as ApiError | null;
-      throw new HubApiError(
+      throw new ServerApiError(
         res.status,
         err?.code ?? "INTERNAL",
         errorMessage(err, text),

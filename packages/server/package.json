@@ -2,7 +2,7 @@
   "name": "@dsh-talk/server",
   "version": "0.0.1",
   "private": true,
-  "description": "dsh-talk Cloudflare Hub: Hono Worker + D1 + R2 + Durable Object",
+  "description": "dsh-talk Cloudflare Server: Hono Worker + D1 + R2 + Durable Object",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
@@ -13,8 +13,8 @@
     "db:drop": "drizzle-kit drop",
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
-    "db:apply-local": "wrangler d1 migrations apply talkhub --local",
-    "db:apply-remote": "wrangler d1 migrations apply talkhub --remote",
+    "db:apply-local": "wrangler d1 migrations apply dsh-talk-server --local",
+    "db:apply-remote": "wrangler d1 migrations apply dsh-talk-server --remote",
     "test": "echo TODO"
   },
   "dependencies": {

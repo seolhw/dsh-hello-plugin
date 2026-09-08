@@ -1,5 +1,5 @@
 // ===============================================================
-// Hub WebSocket 协议
+// Server WebSocket 协议
 // 连接：GET /ws 升级，URL 参数：
 //   ?token=<jwt-or-bearer-token>    身份令牌（也可以走 Sec-WebSocket-Protocol header）
 //   ?compression=0                  预留

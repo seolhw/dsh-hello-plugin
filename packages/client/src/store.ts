@@ -725,6 +725,32 @@ export async function loadOlderMessages(): Promise<void> {
   }
 }
 
+/** 从正文里抽取形如 `@handle` 的 token（前一个字符不是词字符，避免匹配邮箱 a@b） */
+function mentionHandlesOf(text: string): string[] {
+  const matches = text.match(/(?<![\p{L}\p{N}_])@([\p{L}\p{N}_]+)/gu) ?? [];
+  return matches.map((token) => token.replace(/^@/, ""));
+}
+
+/** 组 createMessage 请求体：附件与 @mention 只在有值时带上（exactOptionalPropertyTypes） */
+function buildMessageBody(
+  content: string,
+  attachments: MessageAttachmentPut[],
+): {
+  content: string;
+  attachments?: MessageAttachmentPut[];
+  mentionHandles?: string[];
+} {
+  const body: {
+    content: string;
+    attachments?: MessageAttachmentPut[];
+    mentionHandles?: string[];
+  } = { content };
+  if (attachments.length > 0) body.attachments = attachments;
+  const handles = [...new Set(mentionHandlesOf(content))];
+  if (handles.length > 0) body.mentionHandles = handles;
+  return body;
+}
+
 /**
  * 发消息：先逐个 PUT 附件拿 r2Key，再走 REST 创建；WS live 时事件回填，否则本地补一条。
  * @returns 是否成功入队（成功时调用方应清空输入与附件）
@@ -747,10 +773,7 @@ export async function sendMessage(content: string, files: File[] = []): Promise<
         mimeType: up.mimeType ?? (file.type.length > 0 ? file.type : null),
       });
     }
-    const created = await server.createMessage(
-      channelId,
-      attachments.length > 0 ? { content: text, attachments } : { content: text },
-    );
+    const created = await server.createMessage(channelId, buildMessageBody(text, attachments));
     if (!state.view.live) {
       upsertMessage(created as MessageItem, true);
     }

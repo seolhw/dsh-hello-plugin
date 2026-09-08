@@ -20,7 +20,7 @@ import {
   Pill,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { Channel, MessageAttachment } from "@dsh-talk/types/entities";
-import type { ChangeEvent, CSSProperties, ReactElement, UIEvent } from "react";
+import type { ChangeEvent, CSSProperties, ReactElement, ReactNode, UIEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   backToCommunities,
@@ -343,6 +343,39 @@ function ChannelList(): ReactElement | null {
   );
 }
 
+// ---------------- 文本渲染（@mention 高亮） ----------------
+
+function renderMentions(text: string, selfHandle: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const re = /@([\p{L}\p{N}_]+)/gu;
+  let last = 0;
+  let index = 0;
+  let match: RegExpExecArray | null = re.exec(text);
+  while (match !== null) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const isSelf = match[1] === selfHandle;
+    nodes.push(
+      <span
+        key={`mention-${index}`}
+        style={{
+          color: isSelf ? "#ffffff" : palette.accent,
+          background: isSelf ? palette.accent : "rgba(91,140,255,0.12)",
+          borderRadius: 4,
+          padding: isSelf ? "0 3px" : "0 2px",
+          fontWeight: 500,
+        }}
+      >
+        {match[0]}
+      </span>,
+    );
+    last = match.index + match[0].length;
+    index += 1;
+    match = re.exec(text);
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
 // ---------------- 附件展示 ----------------
 
 function formatBytes(n: number): string {
@@ -480,6 +513,15 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
           <textarea
             value={draftText}
             onChange={(e) => setDraftText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void saveEdit();
+              } else if (e.key === "Escape") {
+                setDraftText(item.content);
+                setEditing(false);
+              }
+            }}
             style={textAreaEdit}
           />
         ) : (
@@ -491,7 +533,7 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
               lineHeight: 1.55,
             }}
           >
-            {item.content}
+            {renderMentions(item.content, talk.me?.handle ?? "")}
           </div>
         )}
         <AttachmentList attachments={item.attachments ?? []} />

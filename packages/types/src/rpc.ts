@@ -41,8 +41,9 @@ export interface RpcError {
 
 export interface TalkSettings {
   serverUrl: string;
+  /** Better Auth username 的本地回显缓存（@handle），不再参与认证 */
   handle: string;
-  /** token 是 secret，client 侧请求 Server API 时不要直接带，走 host 代签？MVP 先直接返回给 client（同机可信），之后改成代发 */
+  /** Better Auth 会话 token（secret）：登录成功 set-auth-token 得到，client 请求 Server 时带 Bearer */
   token: string;
   autoReconnect: boolean;
   share: {

@@ -4,9 +4,8 @@
 // ================================================================
 
 import type { GetMyCommunitiesResponse } from "@dsh-talk/types/api";
-import type { CSSProperties, FormEvent, ReactElement } from "react";
-import { useState } from "react";
-import { closeTalk, logout, openTalk, refresh, registerIdentity, useTalkState } from "./store";
+import type { CSSProperties, ReactElement } from "react";
+import { closeTalk, logout, openTalk, refresh, useTalkState } from "./store";
 
 // ---------- 极简样式 ----------
 
@@ -45,18 +44,6 @@ const panelStyle: CSSProperties = {
   boxShadow: "0 12px 40px rgba(0,0,0,.45)",
 };
 
-const fieldStyle: CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "8px 10px",
-  marginTop: 6,
-  marginBottom: 12,
-  borderRadius: 8,
-  border: `1px solid ${COLORS.border}`,
-  background: "rgba(255,255,255,0.04)",
-  color: COLORS.text,
-};
-
 const btnStyle: CSSProperties = {
   border: `1px solid ${COLORS.border}`,
   background: "rgba(255,255,255,0.06)",
@@ -64,12 +51,6 @@ const btnStyle: CSSProperties = {
   padding: "7px 14px",
   borderRadius: 8,
   cursor: "pointer",
-};
-
-const primaryBtn: CSSProperties = {
-  ...btnStyle,
-  background: COLORS.accent,
-  borderColor: COLORS.accent,
 };
 
 const rowStyle: CSSProperties = {
@@ -162,59 +143,6 @@ function CommunityList({ communities }: { communities: GetMyCommunitiesResponse 
   );
 }
 
-function RegisterForm({ serverUrl }: { serverUrl: string }): ReactElement {
-  const { busy } = useTalkState();
-  const [code, setCode] = useState("");
-  const [handle, setHandle] = useState("");
-  const [displayName, setDisplayName] = useState("");
-
-  const submit = (event: FormEvent): void => {
-    event.preventDefault();
-    if (code.trim().length === 0 || handle.trim().length === 0) return;
-    void registerIdentity({
-      inviteCode: code.trim(),
-      handle: handle.trim(),
-      displayName: displayName.trim().length > 0 ? displayName.trim() : null,
-    });
-  };
-
-  return (
-    <form onSubmit={submit}>
-      <p style={{ color: COLORS.muted, fontSize: 12, marginTop: 0 }}>
-        Server：{serverUrl} —— 用一次性平台注册码开通身份，令牌会安全保存在本地 DSH 设置里。
-      </p>
-      <input
-        style={fieldStyle}
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        placeholder="平台注册码（一次性）"
-        autoComplete="off"
-      />
-      <input
-        style={fieldStyle}
-        value={handle}
-        onChange={(e) => setHandle(e.target.value)}
-        placeholder="昵称 @handle（全局唯一）"
-        autoComplete="off"
-      />
-      <input
-        style={fieldStyle}
-        value={displayName}
-        onChange={(e) => setDisplayName(e.target.value)}
-        placeholder="显示名（可选）"
-        autoComplete="off"
-      />
-      <button
-        type="submit"
-        style={{ ...primaryBtn, width: "100%", opacity: busy ? 0.6 : 1 }}
-        disabled={busy}
-      >
-        {busy ? "注册中…" : "开通身份"}
-      </button>
-    </form>
-  );
-}
-
 function ErrorView(): React.ReactElement {
   const { error } = useTalkState();
   return (
@@ -237,7 +165,11 @@ export function TalkOverlay(_props: object): ReactElement | null {
     ) : talk.phase === "error" ? (
       <ErrorView />
     ) : talk.phase === "anon" ? (
-      <RegisterForm serverUrl={talk.settings?.serverUrl ?? "http://127.0.0.1:8787"} />
+      <div style={{ color: COLORS.muted, fontSize: 13 }}>
+        {`尚未登录。登录 / 注册（邮箱 / GitHub）与账号管理 UI 将于下一步接入。当前 Server：${
+          talk.settings?.serverUrl ?? "http://127.0.0.1:8787"
+        }。已有会话 token 时打开面板会自动验证并展示账号。`}
+      </div>
     ) : (
       <div>
         <div

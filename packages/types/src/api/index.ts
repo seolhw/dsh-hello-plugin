@@ -16,11 +16,19 @@ export * from "./shares";
 /**
  * 路由契约（方法 + 路径 → 请求/响应类型）
  *
- *  认证
- *   POST  /api/auth/exchange-invite   ExchangeInviteRequest  → ExchangeInviteResponse
- *   GET   /api/auth/me                —                      → GetMeResponse
- *   PATCH /api/auth/me                UpdateMeRequest        → UpdateMeResponse
- *   POST  /api/auth/logout            —                      → LogoutResponse
+ *  认证（由 Better Auth 提供，路径都在 /api/auth 下；会话 = Bearer Token）
+ *   POST  /api/auth/sign-up/email       邮箱注册（用户名可选）
+ *   POST  /api/auth/sign-in/email       邮箱登录
+ *   POST  /api/auth/sign-in/username    用户名登录（username 插件）
+ *   POST  /api/auth/sign-in/social      GitHub OAuth（provider=github）
+ *   POST  /api/auth/sign-out            登出（吊销会话）
+ *   GET   /api/auth/get-session         当前会话（user + session）
+ *   POST  /api/auth/change-password     修改密码
+ *   POST  /api/auth/update-user         改资料 / 改用户名
+ *   POST  /api/auth/send-verification-email      重发验证邮件
+ *   POST  /api/auth/request-password-reset       忘记密码（发重置邮件）
+ *   POST  /api/auth/reset-password      用 token 重设密码
+ *   （登录/注册成功后，响应头 set-auth-token 即会话 token）
  *
  *  社区
  *   GET   /api/communities/discover   query:DiscoverCommunitiesQuery  → DiscoverCommunitiesResponse

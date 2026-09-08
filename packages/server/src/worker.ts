@@ -1,17 +1,21 @@
 // ================================================================
 // dsh-talk Server Worker 入口
-//   Hono 路由装配 + /ws WebSocket upgrade -> RoomActor (DO)
-//   部署方式：pnpm deploy (wrangler deploy)
-//   本地：pnpm dev (wrangler dev --port 8787)
+//   身份认证：Better Auth 挂载在 /api/auth/*（承载全应用登录/注册/
+//             GitHub OAuth/邮箱验证/改密/找回密码/会话；Bearer token 会话）
+//   业务 REST：/api/communities|channels|messages|shares|r2（用 Better Auth 会话鉴权）
+//   /ws：WebSocket upgrade -> RoomActor (DO)
+// 部署方式：pnpm deploy (wrangler deploy)
+// 本地：pnpm dev (wrangler dev --port 8787)
 // ================================================================
 
+import type { ExecutionContext } from "@cloudflare/workers-types";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import { createBearerAuth, requireUserId, sha256HexAsync } from "./lib/auth";
+import { createBearerAuth, ensureAuthSchema, getAuth, requireUserId } from "./lib/auth";
+import { bindExecutionCtx, unbindExecutionCtx } from "./lib/email";
 import { HttpApiError } from "./lib/errors";
 import { applyGlobalMiddleware } from "./lib/middleware";
 import { notImplemented } from "./lib/response";
-import auth from "./routes/auth";
 import { channelsRoutes, communitiesRoutes } from "./routes/communities";
 import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
 import { r2Routes, sharesRoutes } from "./routes/shares";
@@ -19,7 +23,6 @@ import type { Env, HonoAppVariables } from "./types";
 
 // RoomActor DO 类在同脚本里（wrangler 会通过 [durable_objects] binding 找到）
 export { RoomActor } from "./room";
-export { sha256HexAsync as _keep_sha_ref };
 
 const app = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
 
@@ -35,8 +38,14 @@ app.get("/healthz", (c) =>
   }),
 );
 
-// ----------------- REST API 分组 (/api/*) -----------------
-app.route("/api/auth", auth);
+// ----------------- Better Auth（/api/auth/*，接管身份/会话/注册/找回密码） -----------------
+app.all("/api/auth/*", async (c) => {
+  // 认证表（user/session/account/verification…）首访自举创建（幂等、按 isolate 只跑一次）
+  await ensureAuthSchema(c.env);
+  return getAuth(c.env).handler(c.req.raw);
+});
+
+// ----------------- 业务 REST API 分组 (/api/*) -----------------
 app.route("/api/communities", communitiesRoutes);
 app.route("/api/channels", channelMessagesRoutes); // /api/channels/:id/messages ...
 app.route("/api/channels", channelsRoutes); // /api/channels/:id PATCH/DELETE 叠加
@@ -45,11 +54,9 @@ app.route("/api/shares", sharesRoutes);
 app.route("/api/r2", r2Routes);
 
 // ----------------- WebSocket Upgrade (/ws) -----------------
-// 先做 Bearer 鉴权，再把连接转交给 Durable Object RoomActor
-// 注意：Cloudflare Workers 下要把 101 Upgrade 交给 DO，做法是：
-//   1. 在 Worker 中生成 WebSocketPair & 用 fetch(req, { headers }) 交给 DO（DO 内部 accept）
-//   2. Worker 里也能 acceptWebSocket，但 DO 托管状态更合适
-// 这里直接走：Worker 校验 token → 对 DO 发起一个带 Upgrade 的子 fetch
+// 浏览器 WS 无法自定义 Header，用 ?token=<session token> 做 Bearer 认证；
+// 桌面/服务端直连亦可直接带 Authorization: Bearer。
+// 通过鉴权后把用户身份透传给 Durable Object RoomActor。
 app.get("/ws", createBearerAuth("required"), async (c) => {
   const upgradeHeader = c.req.header("Upgrade");
   if (!upgradeHeader || upgradeHeader !== "websocket") {
@@ -57,9 +64,7 @@ app.get("/ws", createBearerAuth("required"), async (c) => {
   }
   const uid = requireUserId(c);
 
-  // MVP：所有连接路由到同一个 DO id（全局唯一的房间管理器 DO），
-  // 由它内部按 channelId 做 Map 管理。
-  // 另一种路由策略：每个 channelId 一个 DO id（可水平扩展）
+  // MVP：所有连接路由到同一个全局房间管理器 DO id
   const globalRoomId = c.env.ROOM_ACTOR.idFromName("server-default");
   const stub = c.env.ROOM_ACTOR.get(globalRoomId);
 
@@ -69,18 +74,26 @@ app.get("/ws", createBearerAuth("required"), async (c) => {
   const forwardReq = new Request(url.toString(), c.req.raw as unknown as Request);
   forwardReq.headers.set("X-User-Id", uid);
   forwardReq.headers.set("X-Conn-Id", crypto.randomUUID());
-  // handle 后面 M1 时从 DB 查；MVP 直接用 id 占位
+  // 展示名/头像在 RoomActor 需要时再查认证库；MVP 先传 id
   forwardReq.headers.set("X-Handle", uid);
 
   return stub.fetch(forwardReq) as Promise<Response>;
 });
 
 // 给 DO 自己暴露一个 /ws/actor/connect 的握手路径（room.ts 的 handleConnect）
-// Hono 里注册成返回 501 占位的 404 即可，因为真正处理这个路径的是 stub.fetch 命中的 DO.fetch
 // DO.fetch 不经过 Hono，这里仅占位避免 404 fallback 误打
 app.get("/ws/actor/connect", (c) =>
   notImplemented(c, "this path handled by RoomActor DO directly"),
 );
 
-// ----------------- 导出 -----------------
-export default app;
+// ----------------- Worker 模块入口（绑定 waitUntil 供邮件后台投递） -----------------
+export default {
+  async fetch(request: Request, env: Env, executionCtx: ExecutionContext): Promise<Response> {
+    bindExecutionCtx(request, executionCtx);
+    try {
+      return await app.fetch(request, env, executionCtx);
+    } finally {
+      unbindExecutionCtx(request);
+    }
+  },
+};

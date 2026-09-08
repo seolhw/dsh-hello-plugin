@@ -32,12 +32,14 @@ export function applyGlobalMiddleware(app: Hono<{ Bindings: Env; Variables: Hono
     "*",
     cors({
       origin: (origin) => {
-        // MVP：允许所有；P1 收窄到 DSH 官方域名 + localhost
+        // Bearer token 为主要认证手段（跨源请求不带 Cookie），MVP 全放开；
+        // 若日后启用跨源 Cookie 会话需收窄到 trustedOrigins + 显式 origin。
         return origin ?? "*";
       },
       allowHeaders: ["Authorization", "Content-Type", "X-Requested-With"],
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      exposeHeaders: ["X-Request-Id"],
+      // set-auth-token：Better Auth bearer 插件在登录/注册响应头里回会话 token
+      exposeHeaders: ["X-Request-Id", "set-auth-token"],
       credentials: false,
       maxAge: 86400,
     }),

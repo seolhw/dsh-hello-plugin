@@ -1,5 +1,5 @@
 name = "dsh-talk-server"
-main = "packages/server/src/worker.ts"
+main = "src/worker.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
@@ -31,13 +31,9 @@ bindings = [
 tag = "v1-room-actor"
 new_classes = ["RoomActor"]
 
-# ---------- 环境变量（dev 默认值；生产用 wrangler secret put 覆盖） ----------
-[vars]
-COMMUNITY_CREATE_DAILY_LIMIT = "3"
-MAX_COMMUNITIES_PER_USER = "10"
-ADMIN_HANDLES = ""
-MAX_MESSAGE_LENGTH = "4000"
-MAX_SHARE_BYTES = "52428800"
-# 注意：AUTH_INVITE_CODES 含秘密，不要写死在 toml 里，用以下方式注入：
-#   本地：AUTH_INVITE_CODES="xxx,yyy" pnpm dev
-#   生产：wrangler secret put AUTH_INVITE_CODES
+# ---------- 环境变量（生产用 wrangler secret put；本地 pnpm dev 自动把 .env 同步到 .dev.vars） ----------
+# 只保留密钥/凭据类变量；业务限额/策略均为代码常量（见 src/constants.ts 与 src/lib/auth.ts）：
+#   BETTER_AUTH_SECRET   会话签名密钥（≥32 字符，必填）
+#   GITHUB_CLIENT_ID     配置后即出现「GitHub 登录」（回调 http://localhost:8787/api/auth/callback/github）
+#   GITHUB_CLIENT_SECRET
+#   RESEND_API_KEY       事务邮件（邮箱验证 / 找回密码）

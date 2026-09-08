@@ -1,63 +1,243 @@
 // ================================================================
-// Bearer Token 鉴权中间件
-// MVP：令牌是 32 字节随机 hex（注册码换令牌时生成），
-//      DB 存 SHA-256(token)，请求头 Authorization: Bearer <token>
-// TODO(P1)：JWT / 令牌过期 / 吊销列表
+// Better Auth 装配 + 应用鉴权中间件（Bearer Token 会话）
+//
+// 以 Better Auth 作为整个应用的身份/认证/授权地基：
+//   - emailAndPassword：邮箱 + 密码
+//   - username 插件：用户名 + 密码（注册时邮箱必填、用户名可选）
+//   - github social provider：GitHub OAuth 登录（配置了凭据才启用）
+//   - bearer 插件：纯 API/桌面端通过 Authorization: Bearer <session token>
+//     认证；登录成功响应头 set-auth-token 即会话 token
+//   - emailVerification / sendResetPassword：邮箱验证 + 忘记密码（Resend 发送）
+//   - database: env.DB（Cloudflare D1 原生适配，Kysely 内建）
+// 认证表（user/session/account/verification）由 better-auth/db/migration
+// 程序化迁移创建，见 ensureAuthSchema()。
 // ================================================================
 
-import type { ID } from "@dsh-talk/types/entities";
+import type { User as AppUser, ID } from "@dsh-talk/types/entities";
+import { betterAuth } from "better-auth";
+import { getMigrations } from "better-auth/db/migration";
+import { bearer, username } from "better-auth/plugins";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Env, HonoAppVariables } from "../types";
+import { dispatchResetPasswordEmail, dispatchVerificationEmail } from "./email";
 import { HttpApiError } from "./errors";
+
+// better-auth 选项类型（不显式 import，避免与实例泛型不一致）
+type BetterAuthOptions = Parameters<typeof betterAuth>[0];
+
+// ================================================================
+// Better Auth 实例装配 & 缓存（每个 isolate 惰性构建一次）
+// ================================================================
+
+// 默认允许回跳/回调的 Host（本地 + workers/pages 预览）。
+// 生产用自定义域名时把域名加到这里即可（避免新增环境变量）。
+const AUTH_ALLOWED_HOSTS = [
+  "localhost:8787",
+  "127.0.0.1:8787",
+  "*.workers.dev",
+  "*.pages.dev",
+] as const;
+
+function buildAuthOptions(env: Env): BetterAuthOptions {
+  const secret = env.BETTER_AUTH_SECRET?.trim();
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      "[auth] BETTER_AUTH_SECRET 未配置或过短（需 ≥32 字符）。" +
+        "本地：写入 packages/server/.dev.vars（或根 .env 由 predev 同步）；生产：wrangler secret put BETTER_AUTH_SECRET",
+    );
+  }
+
+  // 动态 baseURL：按请求 Host 从白名单里挑，GitHub 回调 / 验证链接都用它
+  const baseURL: BetterAuthOptions["baseURL"] = { allowedHosts: [...AUTH_ALLOWED_HOSTS] };
+
+  const githubClientId = env.GITHUB_CLIENT_ID?.trim();
+  const githubClientSecret = env.GITHUB_CLIENT_SECRET?.trim();
+  const socialProviders =
+    githubClientId && githubClientSecret
+      ? { github: { clientId: githubClientId, clientSecret: githubClientSecret } }
+      : undefined;
+
+  return {
+    appName: "dsh-talk",
+    baseURL,
+    secret,
+    database: env.DB,
+    // 邮箱/密码是主体登录方式；忘记密码的邮件发送挂在 emailAndPassword
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 8,
+      maxPasswordLength: 128,
+      // 注册即发验证邮件但不强制验证后登录；如需强制改这里为 true
+      requireEmailVerification: false,
+      // 不 await，交给 runDetached -> waitUntil（Cloudflare 响应返回后仍继续投递）
+      sendResetPassword: async ({ user, url }, request) => {
+        dispatchResetPasswordEmail(env, request, user, url);
+      },
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }, request) => {
+        dispatchVerificationEmail(env, request, user, url);
+      },
+    },
+    ...(socialProviders ? { socialProviders } : {}),
+    plugins: [
+      username(),
+      // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，
+      // 之后所有请求带 Authorization: Bearer <token> 即等价于带 session cookie
+      bearer(),
+    ],
+    advanced: {
+      // 与默认 /api/auth 一致即可；前缀定短一点避免与业务混淆
+      cookiePrefix: "dsh_talk",
+    },
+  };
+}
+
+export function createAuth(env: Env) {
+  return betterAuth(buildAuthOptions(env));
+}
+
+/** 装配好的 Better Auth 实例类型（含 username/bearer 插件的推断） */
+export type Auth = ReturnType<typeof createAuth>;
+
+/** 当前 isolate 内按 Env 缓存 Better Auth 实例（弱引用，测试多实例安全） */
+const authCache = new WeakMap<object, Auth>();
+
+export function getAuth(env: Env): Auth {
+  const cached = authCache.get(env);
+  if (cached) return cached;
+  const auth = createAuth(env);
+  authCache.set(env, auth);
+  return auth;
+}
+
+// ================================================================
+// D1 认证表程序化迁移（Cloudflare 无法直接跑 CLI）
+// 每次 isolate 首次访问时把 user/session/account/verification（含插件字段）建出来，
+// 幂等；如需在生产关闭自动迁移，把这里改为 return Promise.resolve() 并人工执行迁移。
+// ================================================================
+
+const schemaReady = new WeakMap<object, Promise<void>>();
+
+export function ensureAuthSchema(env: Env): Promise<void> {
+  let ready = schemaReady.get(env);
+  if (!ready) {
+    ready = (async () => {
+      const auth = getAuth(env);
+      const { toBeCreated, toBeAdded, runMigrations } = await getMigrations(auth.options);
+      if (toBeCreated.length > 0 || toBeAdded.length > 0) {
+        console.info(
+          `[auth] 创建认证表：created=${toBeCreated.map((t) => t.table).join(",") || "-"} ` +
+            `added=${toBeAdded.map((t) => t.table).join(",") || "-"}`,
+        );
+        await runMigrations();
+      }
+    })();
+    schemaReady.set(env, ready);
+  }
+  return ready;
+}
+
+// ================================================================
+// Session -> 应用 User 实体映射
+// ================================================================
+
+interface BetterAuthUserLike {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified?: boolean;
+  image?: string | null;
+  username?: string | null;
+  createdAt?: unknown;
+}
+
+function toAppUser(user: BetterAuthUserLike): AppUser {
+  const emailPrefix = user.email.split("@")[0] || user.id;
+  const createdAt =
+    typeof user.createdAt === "number"
+      ? user.createdAt
+      : user.createdAt instanceof Date
+        ? user.createdAt.getTime()
+        : typeof user.createdAt === "string"
+          ? Date.parse(user.createdAt)
+          : Date.now();
+  return {
+    id: user.id as ID,
+    handle: user.username?.trim() || emailPrefix,
+    displayName: user.name || null,
+    avatarUrl: user.image ?? null,
+    createdAt,
+  };
+}
+
+export { toAppUser };
+
+export type AuthSessionUser = ReturnType<typeof toAppUser>;
+
+/** better-auth getSession 的返回形态（粗略，够中间件用） */
+interface ResolvedSession {
+  session: { id: string; token: string; expiresAt: Date };
+  user: BetterAuthUserLike;
+}
+
+// ================================================================
+// Bearer / 会话鉴权中间件（替换旧的 tokenHash 鉴权）
+// ================================================================
+
+type HonoContext = Context<{ Bindings: Env; Variables: HonoAppVariables }>;
+
+/** 从请求里取会话 token：优先 Authorization 头，其次 ?token=（WS/桌面端） */
+export function extractSessionToken(c: HonoContext): string | null {
+  const authHeader = c.req.header("Authorization") ?? c.req.header("authorization") ?? "";
+  const match = /^Bearer\s+(.+)$/i.exec(authHeader);
+  if (match?.[1]) return match[1].trim();
+  const queryToken = c.req.query("token");
+  if (queryToken) return queryToken.trim();
+  return null;
+}
 
 export type BearerStrategy = "required" | "optional";
 
-export function sha256Hex(input: string): string {
-  // Cloudflare Workers 全局有 crypto.subtle；MVP 用同步 Digest（字符串长度短，可接受）
-  // 注意：在 Worker 里是 async 的，这里给同步签名留了接口，真正实现在下方 async 函数
-  void input;
-  throw new Error("use sha256HexAsync instead");
-}
-
-export async function sha256HexAsync(input: string): Promise<string> {
-  const enc = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
 export function createBearerAuth(strategy: BearerStrategy = "required") {
   return createMiddleware<{ Bindings: Env; Variables: HonoAppVariables }>(async (c, next) => {
-    const authHeader = c.req.header("Authorization") ?? "";
-    const m = /^Bearer\s+(.+)$/i.exec(authHeader);
-    const token = m?.[1]?.trim() ?? null;
+    const token = extractSessionToken(c);
+    // 认证表必须已就绪，否则 getSession 会因表缺失而 500
+    await ensureAuthSchema(c.env);
 
-    if (!token) {
-      if (strategy === "optional") return next();
-      throw HttpApiError.unauthorized("missing bearer token");
+    // raw headers 里含 Cookie；把 header/query 里的 bearer 合成进去再验
+    const headers = new Headers(c.req.raw.headers);
+    if (token) headers.set("authorization", `Bearer ${token}`);
+    const session = (await getAuth(c.env).api.getSession({ headers })) as ResolvedSession | null;
+
+    if (session) {
+      c.set("userId", session.user.id as ID);
+      c.set("currentUser", toAppUser(session.user));
+      return next();
     }
 
-    // TODO(M1 implement)：查 users.token_hash = sha256(token)
-    //   const hash = await sha256HexAsync(token);
-    //   const row = await c.env.DB
-    //     .prepare("SELECT id, handle, display_name, avatar_url, created_at FROM users WHERE token_hash = ?")
-    //     .bind(hash)
-    //     .first<User>();
-    //   if (!row) throw HttpApiError.unauthorized("invalid token");
-
-    // 骨架阶段：把 token 内容 itself 作为 userId（MVP 占位 501）
-    const fakeUserId: ID = `u|${token.slice(0, 16)}`;
-    c.set("userId", fakeUserId);
-
-    return next();
+    if (strategy === "optional" && !token) {
+      return next();
+    }
+    throw HttpApiError.unauthorized("invalid or missing session token");
   });
 }
 
-/** 已通过 auth 中间件后，直接从 ctx 取 userId（保证非空） */
+/** 通过鉴权后直接从 ctx 取 userId（保证非空） */
 export function requireUserId(c: Context<{ Bindings: Env; Variables: HonoAppVariables }>): ID {
   const id = c.var.userId;
   if (!id) throw HttpApiError.unauthorized("no user");
   return id;
+}
+
+/** 取当前登录用户实体（非空；等价 requireUserId 但拿完整资料） */
+export function requireCurrentUser(
+  c: Context<{ Bindings: Env; Variables: HonoAppVariables }>,
+): AppUser {
+  const user = c.var.currentUser;
+  if (!user) throw HttpApiError.unauthorized("no user");
+  return user;
 }

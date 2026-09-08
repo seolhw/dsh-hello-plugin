@@ -12,15 +12,16 @@ export interface Env {
   R2: R2Bucket;
   ROOM_ACTOR: DurableObjectNamespace;
 
-  // ---------- [vars] ----------
-  COMMUNITY_CREATE_DAILY_LIMIT: string;
-  MAX_COMMUNITIES_PER_USER: string;
-  ADMIN_HANDLES: string;
-  MAX_MESSAGE_LENGTH: string;
-  MAX_SHARE_BYTES: string;
+  // ---------- Better Auth 密钥（本地放 packages/server/.dev.vars / 根 .env；生产用 wrangler secret put） ----------
+  /** 会话签名密钥，≥32 字符，必填 */
+  BETTER_AUTH_SECRET?: string;
 
-  // ---------- Secrets（wrangler secret put / 环境变量注入） ----------
-  AUTH_INVITE_CODES?: string;
+  // ---------- GitHub OAuth（配置了才启用 github 登录） ----------
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+
+  // ---------- Resend 事务邮件 ----------
+  RESEND_API_KEY?: string;
 }
 
 // Hono ctx.set(...) 注入的变量

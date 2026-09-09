@@ -27,6 +27,7 @@ import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
 import { notificationsRoutes } from "./routes/notifications";
 import { r2ObjectReadRoutes, r2UploadRoutes } from "./routes/r2";
 import { sharesRoutes } from "./routes/shares";
+import { channelThreadsRoutes, threadRoutes } from "./routes/threads";
 import type { Env, HonoAppVariables } from "./types";
 
 // ChannelActor DO 类在同脚本里（wrangler 经 durable_objects binding + exports 找到）
@@ -71,6 +72,8 @@ app.all("/api/auth/*", async (c) => {
 app.route("/api/communities", communitiesRoutes);
 app.route("/api/channels", channelMessagesRoutes); // /api/channels/:id/messages ...
 app.route("/api/channels", channelsRoutes); // /api/channels/:id PATCH/DELETE 叠加
+app.route("/api/channels", channelThreadsRoutes); // /api/channels/:channelId/threads（讨论组创建/列表）
+app.route("/api/threads", threadRoutes); // /api/threads/:id 讨论组生命周期/已读
 app.route("/api/messages", messagesRoutes);
 app.route("/api/shares", sharesRoutes);
 app.route("/api/invites", invitesRoutes); // /api/invites/:id/accept|decline

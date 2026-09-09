@@ -7,7 +7,7 @@
 import type { MemberRole } from "@dsh-talk/types/entities";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db";
-import { type CommunityMemberRow, communityMembers } from "../db/schema";
+import { type CommunityMemberRow, communityBans, communityMembers } from "../db/schema";
 import { HttpApiError } from "./errors";
 
 export type { CommunityMemberRow };
@@ -24,6 +24,27 @@ export async function getMembership(
     .where(and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, userId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/** 是否被该社区封禁 */
+export async function isCommunityBanned(
+  db: Db,
+  communityId: string,
+  userId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: communityBans.userId })
+    .from(communityBans)
+    .where(and(eq(communityBans.communityId, communityId), eq(communityBans.userId, userId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** 加入/接受邀请前的封禁检查 */
+export async function requireNotBanned(db: Db, communityId: string, userId: string): Promise<void> {
+  if (await isCommunityBanned(db, communityId, userId)) {
+    throw HttpApiError.forbidden("你已被该社区封禁，暂时无法加入");
+  }
 }
 
 /** 必须有成员身份（浏览私密社区/频道消息/成员列表的最低门槛） */

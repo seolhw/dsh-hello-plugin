@@ -10,7 +10,7 @@
 
 import type { CreateShareRequest, ListSharesQuery } from "@dsh-talk/types/api";
 import type { Share, ShareKind, User } from "@dsh-talk/types/entities";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
 import {
@@ -177,11 +177,11 @@ api.post(
       await db.select().from(communities).where(eq(communities.id, channel.communityId)).limit(1)
     )[0];
 
-    // 取该频道最近 200 条消息（旧→新）
+    // 取该频道最近 200 条主频道直接消息（旧→新；不含讨论组内的消息）
     const rows = await db
       .select()
       .from(messages)
-      .where(eq(messages.channelId, channelId))
+      .where(and(eq(messages.channelId, channelId), isNull(messages.threadId)))
       .orderBy(asc(messages.createdAt))
       .limit(200);
 

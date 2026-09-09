@@ -8,15 +8,28 @@
 
 import type {
   AuthUser,
+  BanCommunityMemberRequest,
+  ChannelOnlineMember,
+  CommunityBanItem,
+  CreateMessageRequest,
+  CreateThreadRequest,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   InboxItem,
   ListMembersResponse,
   MessageAttachmentPut,
+  SearchMessageResult,
   SignUpEmailRequest,
+  ThreadSummary,
   UpdateUserRequest,
 } from "@dsh-talk/types/api";
-import type { ID, MemberRole, Message, User } from "@dsh-talk/types/entities";
+import {
+  type ID,
+  MESSAGE_RETRACT_MS,
+  type MemberRole,
+  type Message,
+  type User,
+} from "@dsh-talk/types/entities";
 import type { TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { useEffect, useReducer } from "react";
@@ -35,11 +48,22 @@ export type MessageItem = Message & {
 
 export type CommunityDetail = GetCommunityResponse;
 
+/** @ 自动补全用的社区成员精简信息（由 /members 映射而来） */
+export interface MemberLite {
+  userId: ID;
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  role: MemberRole;
+}
+
 export interface ViewState {
   communityId: ID | null;
   community: CommunityDetail | null;
   communityLoading: boolean;
   channelId: ID | null;
+  /** 当前打开的讨论组 id（null = 正在看主频道直接消息）。依附于 channelId */
+  threadId: ID | null;
   /** 按时间升序渲染（旧→新，最新在底部） */
   messages: MessageItem[];
   nextCursor: string | null;
@@ -48,7 +72,16 @@ export interface ViewState {
   sending: boolean;
   /** 当前频道 WS 是否 live */
   live: boolean;
+  /** WS hello 报告的当前频道在线连接数（近似展示，打开面板时再精确拉取） */
+  onlineCount: number;
+  /** 当前正在引用的消息（回复目标；位于 composer 上方提示条） */
+  replyingTo: MessageItem | null;
+  /** 跳转高亮目标：消息加载后滚动定位并短暂高亮，随后清除 */
+  focusMessageId: string | null;
   drafts: Record<string, string>;
+  /** 当前社区成员缓存（@ 提及自动补全用；进入社区时拉一次） */
+  members: MemberLite[];
+  membersLoading: boolean;
 }
 
 export interface TalkState {
@@ -79,13 +112,19 @@ const INITIAL_VIEW: ViewState = {
   community: null,
   communityLoading: false,
   channelId: null,
+  threadId: null,
   messages: [],
   nextCursor: null,
   messagesLoading: false,
   loadingOlder: false,
   sending: false,
   live: false,
+  onlineCount: 0,
+  replyingTo: null,
+  focusMessageId: null,
   drafts: {},
+  members: [],
+  membersLoading: false,
 };
 
 const INITIAL: TalkState = {
@@ -626,15 +665,20 @@ export async function openCommunity(communityId: string): Promise<void> {
     community: null,
     communityLoading: true,
     channelId: null,
+    threadId: null,
     messages: [],
     nextCursor: null,
     live: false,
+    onlineCount: 0,
+    replyingTo: null,
+    focusMessageId: null,
   });
   try {
     const detail = await server.getCommunity(communityId);
     patchView({ community: detail, communityLoading: false });
-    // 若当前用户在社区里，进入第一个频道
+    // 若当前用户在社区里，进入第一个频道，并预取成员列表供 @ 补全
     if (detail.myRole) {
+      void refreshCommunityMembers(communityId);
       const first = detail.channels[0];
       if (first) void selectChannel(first.id);
     }
@@ -826,11 +870,76 @@ export async function kickMember(userId: string): Promise<boolean> {
   }
 }
 
+// ------- 封禁（owner/admin；被封用户无法重新加入，可解封） -------
+
+/** 按成员行封禁（userId）；服务端会同时把 TA 移出成员 */
+export async function banUser(userId: string, reason?: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    const body: BanCommunityMemberRequest = { userId };
+    if (reason?.trim()) body.reason = reason.trim();
+    const res = await server.banUser(communityId, body);
+    notify(`已封禁 @${res.user.handle}`);
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 按 @handle / 邮箱封禁（用于封禁非成员用户） */
+export async function banUserByHandle(handleOrEmail: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.banUser(communityId, { handleOrEmail: handleOrEmail.trim() });
+    notify("已封禁该用户");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 拉取该社区封禁列表（含用户快照） */
+export async function listBannedUsers(): Promise<CommunityBanItem[]> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return [];
+  try {
+    const res = await server.listBans(communityId);
+    return res.items;
+  } catch {
+    return [];
+  }
+}
+
+/** 解封 */
+export async function unbanUser(userId: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.unbanUser(communityId, userId);
+    notify("已解封该用户");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
 /** 新建频道（owner/admin），创建后自动进入 */
 export async function createChannel(input: {
   name: string;
   topic?: string;
-  kind?: "text" | "announcement" | "help";
+  kind?: "text" | "announcement" | "forum";
 }): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
@@ -839,7 +948,7 @@ export async function createChannel(input: {
     const body: {
       name: string;
       topic?: string | null;
-      kind?: "text" | "announcement" | "help";
+      kind?: "text" | "announcement" | "forum";
     } = { name: input.name };
     if (input.topic !== undefined) body.topic = input.topic;
     if (input.kind !== undefined) body.kind = input.kind;
@@ -860,7 +969,7 @@ export async function updateChannelById(
   patch: {
     name?: string;
     topic?: string | null;
-    kind?: "text" | "announcement" | "help";
+    kind?: "text" | "announcement" | "forum";
   },
 ): Promise<boolean> {
   const server = serverOf();
@@ -884,10 +993,74 @@ export async function deleteChannelById(channelId: string): Promise<boolean> {
     await server.deleteChannel(channelId);
     if (state.view.channelId === channelId) {
       closeRealtime();
-      patchView({ channelId: null, messages: [], nextCursor: null, live: false });
+      patchView({
+        channelId: null,
+        threadId: null,
+        messages: [],
+        nextCursor: null,
+        live: false,
+      });
     }
     await reloadCommunityDetail();
     notify("频道已删除");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+// ---------------- 讨论组（thread）操作 ----------------
+
+/** 在主频道创建讨论组（可带起点消息）；成功后打开它 */
+export async function createThreadInChannel(
+  channelId: string,
+  input: { name: string; starterMessageId?: string },
+): Promise<ThreadSummary | null> {
+  const server = serverOf();
+  if (!server) return null;
+  try {
+    const body: CreateThreadRequest = { name: input.name.trim() };
+    if (input.starterMessageId) body.starterMessageId = input.starterMessageId;
+    const created = await server.createThread(channelId, body);
+    notify(`已创建讨论组「${created.name}」`);
+    await reloadCommunityDetail();
+    await openThread({ id: created.id, channelId });
+    return created;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 手动归档 / 恢复讨论组活跃 */
+export async function setThreadArchived(threadId: string, archived: boolean): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    if (archived) await server.archiveThread(threadId);
+    else await server.reopenThread(threadId);
+    await reloadCommunityDetail();
+    notify(archived ? "讨论组已归档（24h 无人发言也会自动归档）" : "讨论组已恢复活跃");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 删除讨论组（发起人或 owner/admin）；正打开时先退回主频道 */
+export async function deleteThreadById(threadId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.deleteThread(threadId);
+    if (state.view.threadId === threadId) {
+      const parent = state.view.channelId;
+      if (parent) await selectChannel(parent);
+    }
+    await reloadCommunityDetail();
+    notify("讨论组已删除");
     return true;
   } catch (error) {
     notify(errorText(error));
@@ -912,26 +1085,33 @@ function closeRealtime(): void {
   if (state.view.live) patchView({ live: false });
 }
 
-function wsUrl(channelId: string): string {
+function wsUrl(roomId: string): string {
   const settings = state.settings;
   const base = (settings?.serverUrl ?? "http://127.0.0.1:8787").replace(/^http/, "ws");
   const token = settings?.token ?? "";
-  return `${base}/ws?token=${encodeURIComponent(token)}&channelId=${encodeURIComponent(channelId)}`;
+  return `${base}/ws?token=${encodeURIComponent(token)}&channelId=${encodeURIComponent(roomId)}`;
 }
 
-function connectChannel(channelId: string): void {
+/** 当前正在看的「房间」：讨论组优先，否则主频道 */
+function roomIdOf(): string | null {
+  const { threadId, channelId } = state.view;
+  return threadId ?? channelId;
+}
+
+/** 连接某个房间（主频道或讨论组；各自一个 DO 实例 = 一条 WS） */
+function connectChannel(roomId: string): void {
   closeRealtime();
   const settings = state.settings;
-  socket = new TalkSocket(wsUrl(channelId), {
+  socket = new TalkSocket(wsUrl(roomId), {
     onFrame: (frame) => handleServerFrame(frame),
     onClose: () => {
       socket = null;
-      if (!state.open || state.view.channelId !== channelId) return;
+      if (!state.open || roomIdOf() !== roomId) return;
       patchView({ live: false });
       if (settings?.autoReconnect && reconnectTimer === null) {
         reconnectTimer = window.setTimeout(() => {
           reconnectTimer = null;
-          if (state.open && state.view.channelId === channelId) connectChannel(channelId);
+          if (state.open && roomIdOf() === roomId) connectChannel(roomId);
         }, 3000);
       }
     },
@@ -942,23 +1122,26 @@ function connectChannel(channelId: string): void {
   socket.connect();
 }
 
-/** 服务端帧分发：hello（心跳开启）/ 消息事件（仅当属于当前频道） */
+/** 服务端帧分发：hello（心跳开启）/ 消息事件（仅当属于当前房间） */
 function handleServerFrame(frame: ServerFrame): void {
+  const roomId = roomIdOf();
+  if (frame.type === "evt.hello") {
+    patchView({ live: true, onlineCount: frame.payload.onlineCount });
+    socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
+    return;
+  }
+  if (roomId === null) return;
   switch (frame.type) {
-    case "evt.hello":
-      patchView({ live: true });
-      socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
-      return;
     case "evt.message.new":
-      if (frame.payload.channelId !== state.view.channelId) return;
+      if (frame.payload.channelId !== roomId) return;
       upsertMessage(frame.payload.message as MessageItem, true);
       return;
     case "evt.message.updated":
-      if (frame.payload.channelId !== state.view.channelId) return;
+      if (frame.payload.channelId !== roomId) return;
       upsertMessage(frame.payload.message as MessageItem, true);
       return;
     case "evt.message.deleted":
-      if (frame.payload.channelId !== state.view.channelId) return;
+      if (frame.payload.channelId !== roomId) return;
       removeMessage(frame.payload.messageId);
       return;
     default:
@@ -993,11 +1176,15 @@ export async function selectChannel(channelId: string): Promise<void> {
   closeRealtime();
   patchView({
     channelId,
+    threadId: null,
     messages: [],
     nextCursor: null,
     messagesLoading: true,
     loadingOlder: false,
     live: false,
+    onlineCount: 0,
+    replyingTo: null,
+    focusMessageId: null,
   });
   try {
     const page = await server.listMessages(channelId, { limit: 50, direction: "desc" });
@@ -1023,18 +1210,91 @@ export async function selectChannel(channelId: string): Promise<void> {
   }
 }
 
-/** 向上翻更早消息 */
+/** 更新本地 community.threads 中的某条讨论组摘要（未读归零/计数推进等即时反馈） */
+function patchThreadSummary(threadId: string, patch: Partial<ThreadSummary>): void {
+  const community = state.view.community;
+  if (!community?.threads.some((t) => t.id === threadId)) return;
+  patchView({
+    community: {
+      ...community,
+      threads: community.threads.map((t) => (t.id === threadId ? { ...t, ...patch } : t)),
+    },
+  });
+}
+
+/** 打开讨论组：切到依附频道 → 拉该讨论组的消息 → 上报已读 → 连讨论组实时房间 */
+export async function openThread(thread: { id: string; channelId: string }): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  if (state.view.channelId !== thread.channelId) await selectChannel(thread.channelId);
+  const threadId = thread.id;
+  closeRealtime();
+  patchView({
+    threadId,
+    messages: [],
+    nextCursor: null,
+    messagesLoading: true,
+    loadingOlder: false,
+    live: false,
+    onlineCount: 0,
+    replyingTo: null,
+    focusMessageId: null,
+  });
+  try {
+    const page = await server.listMessages(thread.channelId, {
+      limit: 50,
+      direction: "desc",
+      threadId,
+    });
+    const items = [...page.items].reverse();
+    patchView({ messages: items, nextCursor: page.nextCursor, messagesLoading: false });
+    const newest = items[items.length - 1];
+    if (newest) {
+      try {
+        await server.markThreadRead(threadId, { lastReadMessageId: newest.id });
+        patchThreadSummary(threadId, { unreadCount: 0, unreadMentions: 0 });
+      } catch {
+        // 已读上报失败不影响浏览
+      }
+    }
+    connectChannel(threadId);
+  } catch (error) {
+    patchView({ messagesLoading: false, live: false });
+    notify(errorText(error));
+  }
+}
+
+/** 从讨论组退回它依附的主频道 */
+export async function closeThread(): Promise<void> {
+  const channelId = state.view.channelId;
+  if (channelId) await selectChannel(channelId);
+}
+
+/** 拉取当前房间在线成员（讨论组房间暂不做 REST 拉取，仅主频道可用） */
+export async function fetchChannelOnline(): Promise<ChannelOnlineMember[]> {
+  const server = serverOf();
+  const channelId = state.view.channelId;
+  if (!server || !channelId || state.view.threadId) return [];
+  try {
+    const res = await server.channelOnline(channelId);
+    return res.members;
+  } catch {
+    return [];
+  }
+}
+
+/** 向上翻更早消息（主频道或当前讨论组各自翻页） */
 export async function loadOlderMessages(): Promise<void> {
   const server = serverOf();
-  const { channelId, nextCursor, loadingOlder, messages } = state.view;
+  const { channelId, threadId, nextCursor, loadingOlder, messages } = state.view;
   if (!server || !channelId || !nextCursor || loadingOlder) return;
   patchView({ loadingOlder: true });
   try {
-    const page = await server.listMessages(channelId, {
-      cursor: nextCursor,
-      limit: 50,
-      direction: "desc",
-    });
+    const common = { cursor: nextCursor, limit: 50, direction: "desc" as const };
+    const page =
+      threadId !== null
+        ? await server.listMessages(channelId, { ...common, threadId })
+        : await server.listMessages(channelId, common);
     const older = [...page.items].reverse();
     const merged = [...older, ...messages];
     patchView({
@@ -1096,11 +1356,29 @@ export async function sendMessage(content: string, files: File[] = []): Promise<
         mimeType: up.mimeType ?? (file.type.length > 0 ? file.type : null),
       });
     }
-    const created = await server.createMessage(channelId, buildMessageBody(text, attachments));
+    const request: CreateMessageRequest = { ...buildMessageBody(text, attachments) };
+    if (state.view.replyingTo) request.replyToId = state.view.replyingTo.id;
+    const sentThreadId = state.view.threadId;
+    if (sentThreadId !== null) request.threadId = sentThreadId;
+    const created = await server.createMessage(channelId, request);
     if (!state.view.live) {
       upsertMessage(created as MessageItem, true);
     }
-    patchView({ sending: false });
+    // 讨论组内发言：同步本地摘要计数/活跃并确保状态为活跃
+    if (sentThreadId !== null) {
+      const current = state.view.community?.threads.find((t) => t.id === sentThreadId);
+      if (current) {
+        patchThreadSummary(sentThreadId, {
+          messageCount: current.messageCount + 1,
+          lastMessageId: created.id,
+          lastActivityAt: created.createdAt,
+          status: "active",
+          archivedAt: null,
+          updatedAt: created.createdAt,
+        });
+      }
+    }
+    patchView({ sending: false, replyingTo: null });
     return true;
   } catch (error) {
     patchView({ sending: false });
@@ -1127,17 +1405,25 @@ export async function deleteMessage(messageId: string): Promise<void> {
   try {
     await server.deleteMessage(messageId);
     if (!state.view.live) removeMessage(messageId);
+    // 删除讨论组内的消息时同步回退本地计数
+    const threadId = state.view.threadId;
+    if (threadId !== null) {
+      const current = state.view.community?.threads.find((t) => t.id === threadId);
+      if (current && current.messageCount > 0) {
+        patchThreadSummary(threadId, { messageCount: current.messageCount - 1 });
+      }
+    }
   } catch (error) {
     notify(errorText(error));
     throw error;
   }
 }
 
-/** 设置当前频道输入草稿（内存） */
+/** 设置当前房间（主频道/讨论组各自独立）的输入草稿（内存） */
 export function setDraft(text: string): void {
-  const channelId = state.view.channelId;
-  if (!channelId) return;
-  patchView({ drafts: { ...state.view.drafts, [channelId]: text } });
+  const room = state.view.threadId ?? state.view.channelId;
+  if (!room) return;
+  patchView({ drafts: { ...state.view.drafts, [room]: text } });
 }
 
 /** 把当前频道最近消息打成会话快照，返回包体下载链接 */
@@ -1175,10 +1461,126 @@ export async function cloneToLocal(downloadUrl: string): Promise<string | null> 
   }
 }
 
-/** 当前用户能否改/删一条消息（作者本人 或 社区 owner/admin） */
-export function canModify(item: MessageItem): boolean {
+/** 我在当前社区的角色 */
+export function myRole(): MemberRole | null {
+  return state.view.community?.myRole ?? null;
+}
+
+/** 是否当前社区 owner/admin */
+export function isModerator(): boolean {
+  const role = myRole();
+  return role === "owner" || role === "admin";
+}
+
+/** 能否编辑：作者本人（随时）或社区 owner/admin */
+export function canEditMessage(item: MessageItem): boolean {
   if (state.me === null) return false;
   if (item.authorId === state.me.id) return true;
-  const role = state.view.community?.myRole;
-  return role === "owner" || role === "admin";
+  return isModerator();
+}
+
+/** 能否撤回/删除：作者仅在发送 2 分钟内；owner/admin 随时可删 */
+export function canRetractMessage(item: MessageItem): boolean {
+  if (state.me === null) return false;
+  if (item.authorId === state.me.id) return Date.now() - item.createdAt <= MESSAGE_RETRACT_MS;
+  return isModerator();
+}
+
+// ---------------- 回复 / 定位高亮 ----------------
+
+/** 选中某条消息作为回复目标（composer 上方会出现提示条） */
+export function replyToMessage(item: MessageItem): void {
+  patchView({ replyingTo: item });
+}
+
+/** 取消回复 */
+export function cancelReply(): void {
+  patchView({ replyingTo: null });
+}
+
+/** 清除跳转高亮标记（高亮动画结束后调用） */
+export function clearMessageFocus(): void {
+  if (state.view.focusMessageId !== null) patchView({ focusMessageId: null });
+}
+
+/**
+ * 打开某条消息所在房间（主频道或讨论组）并定位：目标不在首屏则向上翻页
+ * （最多 10 页）寻找，找到后短暂高亮。
+ * @returns 是否成功定位
+ */
+export async function revealMessage(
+  channelId: string,
+  messageId: string,
+  threadId: string | null = null,
+): Promise<boolean> {
+  try {
+    const targetThread = threadId ?? null;
+    if (state.view.channelId !== channelId || state.view.threadId !== targetThread) {
+      if (targetThread) await openThread({ id: targetThread, channelId });
+      else await selectChannel(channelId);
+    }
+    let guard = 0;
+    while (
+      guard < 10 &&
+      state.view.nextCursor !== null &&
+      !state.view.messages.some((m) => m.id === messageId)
+    ) {
+      await loadOlderMessages();
+      guard += 1;
+    }
+    if (!state.view.messages.some((m) => m.id === messageId)) return false;
+    patchView({ focusMessageId: messageId });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------- 成员列表（@ 补全数据源） ----------------
+
+function toMemberLite(item: ListMembersResponse["items"][number]): MemberLite {
+  return {
+    userId: item.userId,
+    handle: item.user.handle,
+    displayName: item.user.displayName,
+    avatarUrl: item.user.avatarUrl,
+    role: item.role,
+  };
+}
+
+/** 拉取当前社区成员到 view.members（缓存，供 @ 自动补全） */
+export async function refreshCommunityMembers(communityId: string): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  if (state.view.communityId !== communityId) return;
+  patchView({ membersLoading: true });
+  try {
+    const res = await server.listMembers(communityId, { limit: 200 });
+    if (state.view.communityId !== communityId) return; // 已切走则丢弃
+    patchView({ members: res.items.map(toMemberLite), membersLoading: false });
+  } catch {
+    if (state.view.communityId === communityId) patchView({ membersLoading: false });
+  }
+}
+
+// ---------------- 消息搜索 ----------------
+
+/** 在当前社区搜索消息（返回 null 表示失败，错误已 toast） */
+export async function searchCommunityMessages(
+  q: string,
+  cursor?: string,
+): Promise<{ items: SearchMessageResult[]; nextCursor: string | null } | null> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return null;
+  try {
+    const res =
+      cursor === undefined
+        ? await server.searchMessages(communityId, q, { limit: 30 })
+        : await server.searchMessages(communityId, q, { cursor, limit: 30 });
+    return { items: res.items, nextCursor: res.nextCursor };
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
 }

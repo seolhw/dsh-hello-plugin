@@ -8,13 +8,13 @@ import type { AcceptInviteResponse } from "@dsh-talk/types/api";
 import type { MemberRole } from "@dsh-talk/types/entities";
 import { asc, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { type InviteRow, channels, communityMembers, communities, invites } from "../db/schema";
-import { getMembership } from "../lib/access";
+import { channels, communities, communityMembers, type InviteRow, invites } from "../db/schema";
+import { getMembership, requireNotBanned } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { finalizePendingInvites } from "../lib/invites";
-import { type AppCtx, emptyOk } from "../lib/response";
+import { emptyOk } from "../lib/response";
 import type { Env, HonoAppVariables } from "../types";
 
 const invitesApi = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
@@ -30,7 +30,11 @@ async function loadInviteOr404(db: ReturnType<typeof dbOf>, inviteId: string): P
 }
 
 async function listChannels(db: ReturnType<typeof dbOf>, communityId: string) {
-  return db.select().from(channels).where(eq(channels.communityId, communityId)).orderBy(asc(channels.position));
+  return db
+    .select()
+    .from(channels)
+    .where(eq(channels.communityId, communityId))
+    .orderBy(asc(channels.position));
 }
 
 // --- POST /:id/accept —— 接受邀请并加入社区 ---
@@ -53,6 +57,7 @@ invitesApi.post("/:id/accept", async (c) => {
 
   const existing = await getMembership(db, communityRow.id, userId);
   if (!existing) {
+    await requireNotBanned(db, communityRow.id, userId);
     await db.insert(communityMembers).values({
       communityId: communityRow.id,
       userId,

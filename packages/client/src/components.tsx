@@ -11,7 +11,14 @@ import { useEffect } from "react";
 import { AuthScreen } from "./components/AuthScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { pageRoot, palette } from "./components/styles";
-import { activateTalk, deactivateTalk, dismissToast, refresh, refreshInboxUnread, useTalkState } from "./store";
+import {
+  activateTalk,
+  deactivateTalk,
+  dismissToast,
+  refresh,
+  refreshInboxUnread,
+  useTalkState,
+} from "./store";
 
 /** 居中提示视图 */
 function Centered({ children }: { children: ReactElement }): ReactElement {

@@ -18,25 +18,29 @@ import {
   Modal,
   writeClipboard,
 } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { CommunityBanItem } from "@dsh-talk/types/api";
 import type { Channel, MemberRole, User } from "@dsh-talk/types/entities";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
+  banUser,
   createChannel,
   deleteChannelById,
   deleteCommunity,
   inviteMember,
   kickMember,
   leaveCommunity,
+  listBannedUsers,
   listMembers,
   notify,
   setMemberRole,
+  unbanUser,
   updateChannelById,
   updateCommunity,
   uploadImage,
   useTalkState,
 } from "../store";
-import { Avatar, AvatarPicker, palette, smallText } from "./styles";
+import { Avatar, AvatarPicker, palette, smallText, timeLabel } from "./styles";
 
 const isModerator = (role: MemberRole | null | undefined): boolean =>
   role === "owner" || role === "admin";
@@ -426,17 +430,24 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const me = talk.me;
   const myRole = talk.view.community?.myRole ?? null;
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [bans, setBans] = useState<CommunityBanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const isOwner = myRole === "owner";
   const moder = isModerator(myRole);
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
     setLoading(true);
-    void listMembers().then((items) => {
-      setMembers(items as MemberRow[]);
+    void Promise.all([listMembers(), listBannedUsers()]).then(([ms, bs]) => {
+      if (cancelled) return;
+      setMembers(ms as MemberRow[]);
+      setBans(bs);
       setLoading(false);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   async function act(userId: string, role: MemberRole, label: string): Promise<void> {
@@ -449,6 +460,27 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
     if (!window.confirm(`把 ${user.handle} 移出社区？`)) return;
     const ok = await kickMember(user.id);
     if (ok) setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
+  }
+
+  async function ban(user: User): Promise<void> {
+    if (
+      !window.confirm(
+        `封禁 @${user.handle}？封禁会同时将其移出社区，且之后无法通过邀请码/邀请再加入（可在下方解封）。`,
+      )
+    ) {
+      return;
+    }
+    const ok = await banUser(user.id);
+    if (ok) {
+      setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
+      void listBannedUsers().then(setBans);
+    }
+  }
+
+  async function unban(item: CommunityBanItem): Promise<void> {
+    if (!window.confirm(`解封 @${item.user.handle}？解封后 TA 可重新加入社区。`)) return;
+    const ok = await unbanUser(item.userId);
+    if (ok) setBans((prev) => prev.filter((b) => b.userId !== item.userId));
   }
 
   return (
@@ -535,6 +567,15 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                     >
                       移除
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => void ban(m.user)}
+                      aria-label="封禁成员"
+                      title="封禁（同时移出成员并禁止再次加入）"
+                    >
+                      封禁
+                    </Button>
                   </span>
                 ) : null}
               </div>
@@ -542,6 +583,63 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
           })}
         </div>
       )}
+      {bans.length > 0 ? (
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 650,
+              color: palette.caption,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              padding: "2px 2px 0",
+            }}
+          >
+            已封禁用户（{bans.length}）
+          </div>
+          {bans.map((b) => (
+            <div
+              key={b.userId}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "7px 10px",
+                borderRadius: 10,
+                background: palette.inputBg,
+                border: `1px solid ${palette.border}`,
+              }}
+            >
+              <Avatar label={b.user.handle} src={b.user.avatarUrl} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  @{b.user.handle}
+                  {b.reason ? (
+                    <span style={{ color: palette.caption, fontSize: 11 }}> · {b.reason}</span>
+                  ) : null}
+                </div>
+                <div style={{ ...smallText, fontSize: 11 }}>封禁于 {timeLabel(b.createdAt)}</div>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void unban(b)}
+                aria-label={`解封 ${b.user.handle}`}
+              >
+                解封
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </Modal>
   );
 }
@@ -583,7 +681,7 @@ function ChannelDialog({
   const isEdit = channel !== undefined;
   const [name, setName] = useState(channel?.name ?? "");
   const [topic, setTopic] = useState(channel?.topic ?? "");
-  const [kind, setKind] = useState<"text" | "announcement" | "help">(channel?.kind ?? "text");
+  const [kind, setKind] = useState<"text" | "announcement" | "forum">(channel?.kind ?? "text");
   const [busy, setBusy] = useState(false);
 
   async function save(): Promise<void> {
@@ -600,7 +698,7 @@ function ChannelDialog({
       const body: {
         name: string;
         topic?: string;
-        kind?: "text" | "announcement" | "help";
+        kind?: "text" | "announcement" | "forum";
       } = {
         name: name.trim(),
         kind,
@@ -647,7 +745,7 @@ function ChannelDialog({
             id="talk-channel-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="频道名，如 general / help"
+            placeholder="频道名，如 general / 公告 / 话题"
           />
         </div>
         <div style={fieldBlock}>
@@ -680,10 +778,10 @@ function ChannelDialog({
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(kind === "help" ? pillKeyActive : {}) }}
-              onClick={() => setKind("help")}
+              style={{ ...pillKey, ...(kind === "forum" ? pillKeyActive : {}) }}
+              onClick={() => setKind("forum")}
             >
-              求助
+              话题
             </button>
           </div>
           <span style={dialogHint}>
@@ -691,7 +789,7 @@ function ChannelDialog({
               ? "全员自由发言。"
               : kind === "announcement"
                 ? "仅所有者/管理员可发，普通成员只读。"
-                : "提问消息可标记「已解决」，适合问答。"}
+                : "频道里只列话题，点进话题才聊天（24h 无人回复自动归档）。"}
           </span>
         </div>
       </div>

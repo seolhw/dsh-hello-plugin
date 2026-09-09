@@ -57,6 +57,7 @@ export type ApiErrorCode =
   | "COMMUNITY_DAILY_LIMIT"
   | "COMMUNITY_TOTAL_LIMIT"
   | "RATE_LIMITED"
+  | "RETRACT_EXPIRED"
   | "INTERNAL";
 
 /** 空成功响应（200 / 204） */

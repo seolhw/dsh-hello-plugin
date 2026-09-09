@@ -11,6 +11,12 @@ export type ID = string;
 /** Unix 毫秒时间戳 */
 export type TimestampMs = number;
 
+/**
+ * 消息可「撤回」（作者删除）的有效窗口。
+ * 超过该时间后作者不能删除自己的消息，只能编辑（moderator 删除不受此限）。
+ */
+export const MESSAGE_RETRACT_MS = 2 * 60 * 1000;
+
 // ====================== 用户 ======================
 
 export interface User {
@@ -51,9 +57,10 @@ export interface Community {
 // ====================== 频道 ======================
 
 /**
- * 频道定位（互斥）：普通文字 / 公告（仅 owner/admin 可发）/ 求助（消息可标记「已解决」）
+ * 频道定位（互斥）：普通文字（直接聊天 + 可开临时讨论）/
+ * 公告（仅 owner/admin 可发）/ 话题（forum：不直接聊天，先建话题再进话题里聊）
  */
-export type ChannelKind = "text" | "announcement" | "help";
+export type ChannelKind = "text" | "announcement" | "forum";
 
 export interface Channel {
   id: ID;
@@ -109,14 +116,6 @@ export interface MessageShareCardRef {
   coverUrl: string | null;
 }
 
-/** help 频道提问的解决状态 */
-export interface HelpResolution {
-  resolvedBy: ID;
-  resolvedAt: TimestampMs;
-  /** 标记时引用的解答消息 ID（可选） */
-  answerMessageId: ID | null;
-}
-
 export interface Message {
   id: ID;
   channelId: ID;
@@ -129,12 +128,54 @@ export interface Message {
   mentions: ID[];
   /** 分享卡片（0 或 1 条；目前一条消息只挂一张卡片） */
   shareCard: MessageShareCardRef | null;
-  /** help 频道里的「已解决」标记 */
-  resolution: HelpResolution | null;
   /** 引用/回复的父消息 ID */
   replyToId: ID | null;
+  /** 所属讨论组（thread）id；null = 直接发在主频道 */
+  threadId: ID | null;
   createdAt: TimestampMs;
   updatedAt: TimestampMs | null;
+}
+
+// ====================== 讨论组（thread） ======================
+
+/** 讨论组生命周期：活跃 / 已归档（24h 无新消息自动归档，可再发言恢复） */
+export type ThreadStatus = "active" | "archived";
+
+export interface Thread {
+  id: ID;
+  /** 所属社区 */
+  communityId: ID;
+  /** 依附的主频道 */
+  channelId: ID;
+  name: string;
+  /** 创建讨论时点选的主频道消息（null = 手动新建的空白讨论组） */
+  starterMessageId: ID | null;
+  /** 发起人 userId（弱引用） */
+  createdBy: ID;
+  /** 发起人的快照（改名不改历史，方便列表展示） */
+  creatorHandle: string;
+  creatorDisplayName: string | null;
+  creatorAvatarUrl: string | null;
+  /** 起点消息正文摘要（空白讨论组为 null） */
+  starterSnippet: string | null;
+  status: ThreadStatus;
+  /** 讨论内消息总数（含起点引用消息？不含：只统计本线程消息行） */
+  messageCount: number;
+  lastMessageId: ID | null;
+  /** 最近一次活跃时间（创建 / 新消息触发；自动归档依据） */
+  lastActivityAt: TimestampMs;
+  createdAt: TimestampMs;
+  updatedAt: TimestampMs;
+  /** 归档时间（active 时为 null） */
+  archivedAt: TimestampMs | null;
+}
+
+/** 讨论组已读状态（用户 x 讨论组） */
+export interface ThreadReadState {
+  userId: ID;
+  threadId: ID;
+  lastReadMessageId: ID | null;
+  lastReadAt: TimestampMs | null;
 }
 
 // ====================== 分享（session / workflow） ======================

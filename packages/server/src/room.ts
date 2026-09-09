@@ -96,16 +96,25 @@ export class ChannelActor extends DurableObject<Env> {
     }
     this.channelId = channelId;
 
-    // 鉴权唯一入口：频道存在 + 调用方是该社区成员（D1 为准）
-    const allowed = await this.env.DB.prepare(
-      `SELECT 1 FROM channels c
-       JOIN community_members m ON m.community_id = c.community_id
-       WHERE c.id = ? AND m.user_id = ? LIMIT 1`,
-    )
-      .bind(this.channelId, userId)
-      .first();
+    // 鉴权唯一入口：房间存在 + 调用方是该社区成员（D1 为准）
+    // roomId 既可能是主频道，也可能是讨论组（thread）——两种都放行到对应 DO 实例
+    const allowed =
+      (await this.env.DB.prepare(
+        `SELECT 1 FROM channels c
+         JOIN community_members m ON m.community_id = c.community_id
+         WHERE c.id = ? AND m.user_id = ? LIMIT 1`,
+      )
+        .bind(this.channelId, userId)
+        .first()) ??
+      (await this.env.DB.prepare(
+        `SELECT 1 FROM threads t
+         JOIN community_members m ON m.community_id = t.community_id
+         WHERE t.id = ? AND m.user_id = ? LIMIT 1`,
+      )
+        .bind(this.channelId, userId)
+        .first());
     if (!allowed) {
-      return new Response("forbidden: not a member of this channel's community", { status: 403 });
+      return new Response("forbidden: not a member of this room's community", { status: 403 });
     }
 
     const pair = new WebSocketPair();

@@ -8,6 +8,7 @@
 // ================================================================
 
 import type {
+  BanCommunityMemberRequest,
   CreateChannelRequest,
   CreateCommunityRequest,
   CreateInviteRequest,
@@ -28,16 +29,25 @@ import {
   channelReadStates,
   channels,
   communities,
+  communityBans,
   communityMembers,
   messages,
 } from "../db/schema";
-import { getMembership, requireMember, requireModerator, requireOwner } from "../lib/access";
+import {
+  getMembership,
+  isCommunityBanned,
+  requireMember,
+  requireModerator,
+  requireNotBanned,
+  requireOwner,
+} from "../lib/access";
 import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId, newInviteCode, newSlug } from "../lib/ids";
 import { createCommunityInvite, finalizePendingInvites } from "../lib/invites";
 import { type AppCtx, emptyOk } from "../lib/response";
+import { listThreadSummaries } from "../lib/threads";
 import { fetchUserById, fetchUsersByIds, findAuthUserByHandleOrEmail } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
@@ -176,7 +186,7 @@ communitiesApi.get("/mine", async (c) => {
       .where(
         and(
           eq(channels.communityId, communityRow.id),
-          sql`EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = ${channels.id} AND m.created_at > COALESCE((SELECT rs.last_read_at FROM channel_read_states rs WHERE rs.channel_id = ${channels.id} AND rs.user_id = ${userId}), 0))`,
+          sql`EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = ${channels.id} AND m.thread_id IS NULL AND m.created_at > COALESCE((SELECT rs.last_read_at FROM channel_read_states rs WHERE rs.channel_id = ${channels.id} AND rs.user_id = ${userId}), 0))`,
         ),
       );
     const unreadMentionsRow = await db
@@ -298,7 +308,14 @@ communitiesApi.get("/:id", async (c) => {
   }
   const myRole = membership?.role ?? null;
   const chans = await listChannels(db, communityId);
-  return c.json({ ...mapCommunity(row), channels: chans.map(mapChannel), myRole });
+  // 讨论组仅成员可见（含未读聚合）；公开访客拿空数组
+  const threadSummaries = membership ? await listThreadSummaries(db, { communityId }, userId) : [];
+  return c.json({
+    ...mapCommunity(row),
+    channels: chans.map(mapChannel),
+    threads: threadSummaries,
+    myRole,
+  });
 });
 
 // --- PATCH /:id —— 改社区（owner/admin） ---
@@ -380,6 +397,7 @@ async function joinCommunity(
   userId: string,
   communityRow: CommunityRow,
 ): Promise<Response> {
+  await requireNotBanned(db, communityRow.id, userId);
   const existing = await getMembership(db, communityRow.id, userId);
   if (!existing) {
     await db.insert(communityMembers).values({
@@ -449,6 +467,9 @@ communitiesApi.post("/:id/invites", async (c) => {
   }
   if (found.user.id === actorId) {
     throw HttpApiError.badRequest("不能邀请自己");
+  }
+  if (await isCommunityBanned(db, communityId, found.user.id)) {
+    throw HttpApiError.badRequest("该用户已被封禁，无法邀请");
   }
 
   const invite = await createCommunityInvite({
@@ -686,6 +707,128 @@ communitiesApi.delete("/:id/members/:userId", async (c) => {
       .set({ memberCount: Math.max(0, row.memberCount - 1) })
       .where(eq(communities.id, communityId));
   return emptyOk(c);
+});
+
+// --- GET /:id/bans —— 封禁列表（owner/admin，时间倒序） ---
+communitiesApi.get("/:id/bans", async (c) => {
+  const db = dbOf(c);
+  const actorId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const communityRow = (
+    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+  )[0];
+  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await requireModerator(db, communityId, actorId);
+
+  const rows = await db
+    .select()
+    .from(communityBans)
+    .where(eq(communityBans.communityId, communityId))
+    .orderBy(desc(communityBans.createdAt));
+  const users = await fetchUsersByIds(
+    c.env.DB,
+    rows.map((r) => r.userId),
+  );
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const items = rows
+    .filter((r) => userById.has(r.userId))
+    .map((r) => ({
+      communityId: r.communityId,
+      userId: r.userId,
+      user: userById.get(r.userId) as User,
+      bannedBy: r.bannedBy,
+      reason: r.reason,
+      createdAt: r.createdAt,
+    }));
+  return c.json({ items });
+});
+
+// --- POST /:id/bans —— 封禁：移出成员 + 记录封禁（owner/admin；不能封 owner/自己） ---
+communitiesApi.post("/:id/bans", async (c) => {
+  const db = dbOf(c);
+  const actorId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const communityRow = (
+    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+  )[0];
+  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await requireModerator(db, communityId, actorId);
+
+  const body = await jsonBody<BanCommunityMemberRequest>(c);
+  const byUserId = body.userId?.trim() ?? "";
+  const who = (body.handleOrEmail ?? "").trim();
+  if (!byUserId && !who) throw HttpApiError.badRequest("userId 或 handleOrEmail 必填其一");
+  let targetId: string;
+  let targetUser: User;
+  if (byUserId) {
+    const target = await fetchUserById(c.env.DB, byUserId);
+    if (!target) throw HttpApiError.notFound("user not found");
+    targetId = byUserId;
+    targetUser = target;
+  } else {
+    const found = await findAuthUserByHandleOrEmail(c.env.DB, who);
+    if (!found) {
+      throw HttpApiError.notFound("未找到该用户：请输入对方的 @handle 或注册邮箱");
+    }
+    targetId = found.user.id;
+    targetUser = found.user;
+  }
+  if (targetId === communityRow.ownerId) throw HttpApiError.badRequest("不能封禁 owner");
+  if (targetId === actorId) throw HttpApiError.badRequest("不能封禁自己");
+
+  // 仍在该社区 → 同时移出成员
+  const membership = await getMembership(db, communityId, targetId);
+  if (membership && membership.role !== "owner") {
+    await db
+      .delete(communityMembers)
+      .where(
+        and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, targetId)),
+      );
+    await db
+      .update(communities)
+      .set({ memberCount: Math.max(0, communityRow.memberCount - 1) })
+      .where(eq(communities.id, communityId));
+  }
+
+  const now = Date.now();
+  await db
+    .insert(communityBans)
+    .values({
+      communityId,
+      userId: targetId,
+      bannedBy: actorId,
+      reason: body.reason?.trim() || null,
+      createdAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [communityBans.communityId, communityBans.userId],
+      set: { bannedBy: actorId, reason: body.reason?.trim() || null, createdAt: now },
+    });
+  return c.json({
+    communityId,
+    userId: targetId,
+    user: targetUser,
+    bannedBy: actorId,
+    reason: body.reason?.trim() || null,
+    createdAt: now,
+  });
+});
+
+// --- DELETE /:id/bans/:userId —— 解封（owner/admin） ---
+communitiesApi.delete("/:id/bans/:userId", async (c) => {
+  const db = dbOf(c);
+  const actorId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const targetId = c.req.param("userId");
+  const communityRow = (
+    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+  )[0];
+  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await requireModerator(db, communityId, actorId);
+  await db
+    .delete(communityBans)
+    .where(and(eq(communityBans.communityId, communityId), eq(communityBans.userId, targetId)));
+  return c.json({ ok: true });
 });
 
 // ================================================================

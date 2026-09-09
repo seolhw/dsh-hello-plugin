@@ -10,6 +10,8 @@ import type {
   AcceptInviteResponse,
   ApiError,
   AuthUser,
+  BanCommunityMemberRequest,
+  BanCommunityMemberResponse,
   ChangePasswordRequest,
   CreateChannelRequest,
   CreateChannelResponse,
@@ -21,22 +23,28 @@ import type {
   CreateMessageResponse,
   CreateShareRequest,
   CreateShareResponse,
+  CreateThreadRequest,
+  CreateThreadResponse,
   DeclineInviteResponse,
   DeleteChannelResponse,
   DeleteCommunityResponse,
+  GetChannelOnlineResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   GetReadStateResponse,
   GetSessionResponse,
+  GetThreadReadStateResponse,
   JoinByInviteRequest,
   JoinByInviteResponse,
   JoinCommunityResponse,
   LeaveCommunityResponse,
+  ListCommunityBansResponse,
   ListMembersQuery,
   ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
   ListNotificationsResponse,
+  ListThreadsResponse,
   MarkAllNotificationsReadResponse,
   MarkNotificationReadResponse,
   RemoveMemberResponse,
@@ -45,11 +53,13 @@ import type {
   ResetPasswordRequest,
   ResetPasswordWithOTPRequest,
   ResetPasswordWithOTPResponse,
+  SearchMessagesResponse,
   SendVerificationEmailRequest,
   SendVerificationOTPRequest,
   SignInEmailRequest,
   SignInUsernameRequest,
   SignUpEmailRequest,
+  ThreadSummary,
   UpdateChannelRequest,
   UpdateChannelResponse,
   UpdateCommunityRequest,
@@ -59,6 +69,9 @@ import type {
   UpdateMessageRequest,
   UpdateMessageResponse,
   UpdateReadStateRequest,
+  UpdateThreadReadStateRequest,
+  UpdateThreadReadStateResponse,
+  UpdateThreadRequest,
   UpdateUserRequest,
   UploadAttachmentResponse,
   VerifyEmailOTPRequest,
@@ -483,6 +496,39 @@ export class ServerClient {
     );
   }
 
+  /** GET /api/communities/:id/bans —— 封禁列表（owner/admin） */
+  listBans(communityId: string): Promise<ListCommunityBansResponse> {
+    return this.call<ListCommunityBansResponse>(
+      "GET",
+      `/api/communities/${communityId}/bans`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/bans —— 封禁（按 userId 或 handleOrEmail） */
+  banUser(
+    communityId: string,
+    body: BanCommunityMemberRequest,
+  ): Promise<BanCommunityMemberResponse> {
+    return this.call<BanCommunityMemberResponse>(
+      "POST",
+      `/api/communities/${communityId}/bans`,
+      body,
+      true,
+    );
+  }
+
+  /** DELETE /api/communities/:id/bans/:userId —— 解封 */
+  unbanUser(communityId: string, userId: string): Promise<Record<string, never>> {
+    return this.call<Record<string, never>>(
+      "DELETE",
+      `/api/communities/${communityId}/bans/${userId}`,
+      undefined,
+      true,
+    );
+  }
+
   /** PATCH /api/channels/:id —— 频道改名/主题/类型（owner/admin） */
   updateChannel(channelId: string, body: UpdateChannelRequest): Promise<UpdateChannelResponse> {
     return this.call<UpdateChannelResponse>("PATCH", `/api/channels/${channelId}`, body, true);
@@ -500,15 +546,17 @@ export class ServerClient {
 
   // ---------- 业务 REST：消息 & 未读 ----------
 
-  /** GET /api/channels/:id/messages —— 历史（desc 新→旧；cursor=某条 createdAt 翻更早） */
+  /** GET /api/channels/:id/messages —— 历史（desc 新→旧；cursor=某条 createdAt 翻更早）
+   *  threadId 传讨论组 id 时返回该讨论组消息；缺省为主频道直接消息 */
   listMessages(
     channelId: string,
-    opts: Pick<ListMessagesQuery, "cursor" | "limit" | "direction"> = {},
+    opts: Pick<ListMessagesQuery, "cursor" | "limit" | "direction" | "threadId"> = {},
   ): Promise<ListMessagesResponse> {
     const query = toQuery({
       cursor: opts.cursor ?? "",
       limit: opts.limit ?? 50,
       direction: opts.direction ?? "desc",
+      threadId: opts.threadId ?? "",
     });
     return this.call<ListMessagesResponse>(
       "GET",
@@ -559,6 +607,110 @@ export class ServerClient {
       "POST",
       `/api/channels/${channelId}/read-state`,
       body,
+      true,
+    );
+  }
+
+  /** GET /api/channels/:id/online —— 该频道当前在线成员（读 DO presence 快照） */
+  channelOnline(channelId: string): Promise<GetChannelOnlineResponse> {
+    return this.call<GetChannelOnlineResponse>(
+      "GET",
+      `/api/channels/${channelId}/online`,
+      undefined,
+      true,
+    );
+  }
+
+  // ---------- 业务 REST：讨论组（thread） ----------
+
+  /** GET /api/channels/:channelId/threads —— 频道讨论组（默认活跃；archived=all 含归档） */
+  listThreads(
+    channelId: string,
+    archived: "all" | undefined = undefined,
+  ): Promise<ListThreadsResponse> {
+    const query = toQuery({ archived: archived ?? "" });
+    return this.call<ListThreadsResponse>(
+      "GET",
+      `/api/channels/${channelId}/threads${query}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/channels/:channelId/threads —— 创建讨论组（可带起点消息） */
+  createThread(channelId: string, body: CreateThreadRequest): Promise<CreateThreadResponse> {
+    return this.call<CreateThreadResponse>(
+      "POST",
+      `/api/channels/${channelId}/threads`,
+      body,
+      true,
+    );
+  }
+
+  /** GET /api/threads/:id —— 讨论组详情（含我未读） */
+  getThread(threadId: string): Promise<ThreadSummary> {
+    return this.call<ThreadSummary>("GET", `/api/threads/${threadId}`, undefined, true);
+  }
+
+  /** PATCH /api/threads/:id —— 改名 */
+  renameThread(threadId: string, body: UpdateThreadRequest): Promise<ThreadSummary> {
+    return this.call<ThreadSummary>("PATCH", `/api/threads/${threadId}`, body, true);
+  }
+
+  /** POST /api/threads/:id/archive —— 手动归档 */
+  archiveThread(threadId: string): Promise<ThreadSummary> {
+    return this.call<ThreadSummary>("POST", `/api/threads/${threadId}/archive`, {}, true);
+  }
+
+  /** POST /api/threads/:id/reopen —— 恢复活跃 */
+  reopenThread(threadId: string): Promise<ThreadSummary> {
+    return this.call<ThreadSummary>("POST", `/api/threads/${threadId}/reopen`, {}, true);
+  }
+
+  /** DELETE /api/threads/:id —— 删除讨论组 */
+  deleteThread(threadId: string): Promise<Record<string, never>> {
+    return this.call<Record<string, never>>("DELETE", `/api/threads/${threadId}`, undefined, true);
+  }
+
+  /** GET /api/threads/:id/read-state —— 我在讨论组的已读 */
+  getThreadReadState(threadId: string): Promise<GetThreadReadStateResponse> {
+    return this.call<GetThreadReadStateResponse>(
+      "GET",
+      `/api/threads/${threadId}/read-state`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/threads/:id/read-state —— 上报读到讨论组的哪条 */
+  markThreadRead(
+    threadId: string,
+    body: UpdateThreadReadStateRequest,
+  ): Promise<UpdateThreadReadStateResponse> {
+    return this.call<UpdateThreadReadStateResponse>(
+      "POST",
+      `/api/threads/${threadId}/read-state`,
+      body,
+      true,
+    );
+  }
+
+  /** GET /api/messages/search —— 社区内消息搜索（按正文模糊匹配，倒序） */
+  searchMessages(
+    communityId: string,
+    q: string,
+    opts: { cursor?: string; limit?: number } = {},
+  ): Promise<SearchMessagesResponse> {
+    const query = toQuery({
+      communityId,
+      q,
+      cursor: opts.cursor ?? "",
+      limit: opts.limit ?? 20,
+    });
+    return this.call<SearchMessagesResponse>(
+      "GET",
+      `/api/messages/search${query}`,
+      undefined,
       true,
     );
   }

@@ -1,25 +1,34 @@
 // ================================================================
-// /api/channels/:id/*（消息/未读）与 /api/messages/:id（改/删/解决）
+// /api/channels/:id/*（消息/未读）与 /api/messages/:id（改/删）
 // 权限模型：
 //   - 身份：Better Auth 会话（Bearer）
 //   - 发消息/看历史/未读：必须是该频道所属社区的成员；
 //     公告频道（kind=announcement）发消息额外要求 owner/admin（普通成员只读）
-//   - 改/删消息：仅消息作者本人，或该社区 owner/admin
-//   - help 解决：提问作者或 owner/admin
+//   - 改消息：仅消息作者本人，或该社区 owner/admin
+//   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）或该社区 owner/admin；
+//     超时后作者只能编辑，不能撤回
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片尚未纳入 MVP
+//   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
 // ================================================================
 
 import type { D1Database } from "@cloudflare/workers-types";
 import type {
   CreateMessageRequest,
+  GetChannelOnlineResponse,
   ListMessagesQuery,
-  ResolveHelpRequest,
+  SearchMessageResult,
   UpdateMessageRequest,
   UpdateReadStateRequest,
 } from "@dsh-talk/types/api";
-import type { ChannelReadState, Message, MessageAttachment, User } from "@dsh-talk/types/entities";
+import {
+  type ChannelReadState,
+  MESSAGE_RETRACT_MS,
+  type Message,
+  type MessageAttachment,
+  type User,
+} from "@dsh-talk/types/entities";
 import type { EvtMessageDeleted, EvtMessageNew, EvtMessageUpdated } from "@dsh-talk/types/ws";
-import { and, asc, desc, eq, gt, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, like, lt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { MAX_ATTACHMENT_NAME, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from "../constants";
 import {
@@ -29,6 +38,8 @@ import {
   type MessageRow,
   messages,
   shares,
+  type ThreadRow,
+  threads,
 } from "../db/schema";
 import { requireMember, requireModerator } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
@@ -37,7 +48,7 @@ import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { broadcastToChannel } from "../lib/realtime";
 import { type AppCtx, emptyOk } from "../lib/response";
-import { fetchUserById, resolveUserIdsByHandles } from "../lib/users";
+import { fetchUserById, fetchUsersByIds, resolveUserIdsByHandles } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
 async function jsonBody<T>(c: AppCtx): Promise<T> {
@@ -82,8 +93,8 @@ function rowToMessage(row: MessageRow): Message {
     attachments: parseJson(row.attachments) ?? [],
     mentions: parseJson<string[]>(row.mentions) ?? [],
     shareCard: parseJson(row.shareCard),
-    resolution: parseJson(row.resolution),
     replyToId: row.replyToId,
+    threadId: row.threadId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -134,6 +145,18 @@ async function requireChannelMember(
   await requireMember(db, channel.communityId, userId);
 }
 
+/** 校验讨论组（thread）属于该频道并返回行；用于列表 ?threadId / 发消息 body.threadId */
+async function loadThreadInChannel(
+  db: ReturnType<typeof dbOf>,
+  channel: ChannelRow,
+  threadId: string,
+): Promise<ThreadRow> {
+  const thread = (await db.select().from(threads).where(eq(threads.id, threadId)).limit(1))[0];
+  if (!thread || thread.channelId !== channel.id || thread.communityId !== channel.communityId)
+    throw HttpApiError.badRequest("threadId 无效（不存在或不属于该频道）");
+  return thread;
+}
+
 // --- GET /:id/messages —— 历史消息（默认倒序 + 游标） ---
 channelMessagesApi.get("/:id/messages", async (c) => {
   const db = dbOf(c);
@@ -149,7 +172,15 @@ channelMessagesApi.get("/:id/messages", async (c) => {
   const direction: "desc" | "asc" = q.direction === "asc" ? "asc" : "desc";
   const cursor = q.cursor && q.cursor.trim().length > 0 ? Number.parseInt(q.cursor, 10) : null;
 
+  // 主频道列表只看直接消息（thread_id IS NULL）；传 ?threadId= 则看该讨论组
+  const rawThread = (q.threadId ?? "").trim();
   const conds = [eq(messages.channelId, channelId)];
+  if (rawThread.length > 0) {
+    const thread = await loadThreadInChannel(db, channel, rawThread);
+    conds.push(eq(messages.threadId, thread.id));
+  } else {
+    conds.push(isNull(messages.threadId));
+  }
   if (cursor !== null && Number.isFinite(cursor)) {
     conds.push(
       direction === "desc" ? lt(messages.createdAt, cursor) : gt(messages.createdAt, cursor),
@@ -193,6 +224,15 @@ channelMessagesApi.post("/:id/messages", async (c) => {
 
   const body = await jsonBody<CreateMessageRequest>(c);
   const d1 = c.env.DB;
+  // 目标讨论组：body.threadId 可选；必须依附本频道（公告频道无讨论组，自然不命中）
+  const thread =
+    body.threadId !== undefined && body.threadId !== null
+      ? await loadThreadInChannel(db, channel, body.threadId)
+      : null;
+  // 话题（forum）频道不在频道内直接聊天，必须先进入某个话题（thread）
+  if (channel.kind === "forum" && !thread)
+    throw HttpApiError.badRequest("话题频道请先进入某个话题再发言");
+  const roomId = thread?.id ?? channelId;
   const content = (body.content ?? "").trim();
   if (content.length > MAX_MESSAGE_LENGTH)
     throw HttpApiError.badRequest(`content 超过 ${MAX_MESSAGE_LENGTH} 字符上限`);
@@ -246,13 +286,20 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     mentions.push(...new Set(resolvedIds));
   }
 
-  // replyTo：必须是同频道消息
+  // replyTo：必须与被回复消息在同一个房间（主频道对主频道 / 同一讨论组内）
   if (body.replyToId) {
     const parent = (
       await db.select().from(messages).where(eq(messages.id, body.replyToId)).limit(1)
     )[0];
-    if (!parent || parent.channelId !== channelId || parent.communityId !== channel.communityId) {
-      throw HttpApiError.badRequest("replyToId 无效（不存在或不在本频道）");
+    const parentThread = parent?.threadId ?? null;
+    const targetThread = thread?.id ?? null;
+    if (
+      !parent ||
+      parent.channelId !== channelId ||
+      parent.communityId !== channel.communityId ||
+      parentThread !== targetThread
+    ) {
+      throw HttpApiError.badRequest("replyToId 无效（不存在、不在本频道或不在本讨论组）");
     }
   }
 
@@ -281,8 +328,8 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     attachments: JSON.stringify(attachments),
     mentions: JSON.stringify(mentions),
     shareCard: shareCard ? JSON.stringify(shareCard) : null,
-    resolution: null,
     replyToId: body.replyToId ?? null,
+    threadId: thread?.id ?? null,
     createdAt: now,
     updatedAt: null,
   });
@@ -291,12 +338,26 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     "message",
   );
   const item = await messageItem(db, d1, created);
+  // 讨论组消息：推进计数/最后活跃；若此前已归档则自动恢复为活跃
+  if (thread) {
+    await db
+      .update(threads)
+      .set({
+        messageCount: thread.messageCount + 1,
+        lastMessageId: messageId,
+        lastActivityAt: now,
+        status: "active",
+        archivedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(threads.id, thread.id));
+  }
   const evt: EvtMessageNew = {
     type: "evt.message.new",
     ts: Date.now(),
-    payload: { channelId, message: item, mentionMe: false },
+    payload: { channelId: roomId, message: item, mentionMe: false },
   };
-  await broadcastToChannel(c.env, channelId, evt);
+  await broadcastToChannel(c.env, roomId, evt);
   return c.json(item, 201);
 });
 
@@ -318,7 +379,7 @@ channelMessagesApi.get("/:id/read-state", async (c) => {
   const lastMessageRow = await db
     .select({ value: sql<number | null>`MAX(created_at)` })
     .from(messages)
-    .where(eq(messages.channelId, channelId));
+    .where(and(eq(messages.channelId, channelId), isNull(messages.threadId)));
   const lastMessageAt = lastMessageRow[0]?.value ?? null;
 
   const state: ChannelReadState = row
@@ -379,6 +440,41 @@ channelMessagesApi.post("/:id/read-state", async (c) => {
   } satisfies ChannelReadState);
 });
 
+// --- GET /:id/online —— 当前在线成员（读频道 DO 的 presence 快照，尽力而为） ---
+channelMessagesApi.get("/:id/online", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const channelId = c.req.param("id");
+  const channel = await loadChannelRow(db, channelId);
+  await requireChannelMember(db, channel, userId);
+
+  // DO 的 presence 只统计当前保持连接的会话；实例被回收/无人在线时返回空快照
+  const stub = c.env.ROOM_ACTOR.get(c.env.ROOM_ACTOR.idFromName(channelId));
+  const res = (await stub.online()) as unknown as {
+    count: number;
+    members: Array<{
+      user_id: string;
+      handle: string;
+      display_name: string | null;
+      avatar_url: string | null;
+      kind: "online" | "away" | "offline";
+      last_seen: number;
+    }>;
+  };
+  const body: GetChannelOnlineResponse = {
+    count: res.count,
+    members: res.members.map((m) => ({
+      userId: m.user_id,
+      handle: m.handle,
+      displayName: m.display_name,
+      avatarUrl: m.avatar_url,
+      presence: m.kind,
+      lastSeen: m.last_seen,
+    })),
+  };
+  return c.json(body);
+});
+
 // ================================================================
 // 消息维度：/api/messages/:id（改/删/解决）
 // ================================================================
@@ -395,8 +491,8 @@ async function loadMessageRow(db: ReturnType<typeof dbOf>, messageId: string): P
   return row;
 }
 
-/** 谁能改/删：作者本人 or 社区 owner/admin */
-async function assertCanModifyMessage(
+/** 谁能改消息：作者本人 or 社区 owner/admin */
+async function assertCanEditMessage(
   db: ReturnType<typeof dbOf>,
   row: MessageRow,
   userId: string,
@@ -405,12 +501,27 @@ async function assertCanModifyMessage(
   await requireModerator(db, row.communityId, userId);
 }
 
+/** 谁能删/撤回：作者仅在发送后 2 分钟内可撤回；owner/admin 随时可删 */
+async function assertCanRetractMessage(
+  db: ReturnType<typeof dbOf>,
+  row: MessageRow,
+  userId: string,
+): Promise<void> {
+  if (row.authorId === userId) {
+    if (Date.now() - row.createdAt > MESSAGE_RETRACT_MS) {
+      throw new HttpApiError(403, "RETRACT_EXPIRED", "消息已发送超过 2 分钟，只能编辑，不能撤回");
+    }
+    return;
+  }
+  await requireModerator(db, row.communityId, userId);
+}
+
 // --- PATCH /:id —— 改消息（作者或 owner/admin） ---
 messagesApi.patch("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const row = await loadMessageRow(db, c.req.param("id"));
-  await assertCanModifyMessage(db, row, userId);
+  await assertCanEditMessage(db, row, userId);
   const body = await jsonBody<UpdateMessageRequest>(c);
   if (body.content === undefined) throw HttpApiError.badRequest("content required");
   const content = body.content.trim();
@@ -422,72 +533,107 @@ messagesApi.patch("/:id", async (c) => {
     "message",
   );
   const item = await messageItem(db, c.env.DB, updated);
+  const roomId = row.threadId ?? row.channelId;
   const evt: EvtMessageUpdated = {
     type: "evt.message.updated",
     ts: Date.now(),
-    payload: { channelId: row.channelId, message: item },
+    payload: { channelId: roomId, message: item },
   };
-  await broadcastToChannel(c.env, row.channelId, evt);
+  await broadcastToChannel(c.env, roomId, evt);
   return c.json(item);
 });
 
-// --- DELETE /:id —— 删消息（作者或 owner/admin） ---
+// --- DELETE /:id —— 撤回消息（作者限 2 分钟内；owner/admin 不受限） ---
 messagesApi.delete("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const row = await loadMessageRow(db, c.req.param("id"));
-  await assertCanModifyMessage(db, row, userId);
+  await assertCanRetractMessage(db, row, userId);
   await db.delete(messages).where(eq(messages.id, row.id));
+  // 讨论组消息被删除时回退计数
+  if (row.threadId) {
+    await db
+      .update(threads)
+      .set({ messageCount: sql`MAX(0, ${threads.messageCount} - 1)`, updatedAt: Date.now() })
+      .where(eq(threads.id, row.threadId));
+  }
+  const roomId = row.threadId ?? row.channelId;
   const evt: EvtMessageDeleted = {
     type: "evt.message.deleted",
     ts: Date.now(),
-    payload: { channelId: row.channelId, messageId: row.id, deletedBy: userId },
+    payload: { channelId: roomId, messageId: row.id, deletedBy: userId },
   };
-  await broadcastToChannel(c.env, row.channelId, evt);
+  await broadcastToChannel(c.env, roomId, evt);
   return emptyOk(c);
 });
 
-// --- POST /:id/resolve —— help 频道解决/取消 ---
-messagesApi.post("/:id/resolve", async (c) => {
+// --- GET /search —— 社区内消息全文搜索（成员可用；倒序 + cursor 分页） ---
+messagesApi.get("/search", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
-  const row = await loadMessageRow(db, c.req.param("id"));
-  const body = await jsonBody<ResolveHelpRequest>(c);
+  const communityId = (c.req.query("communityId") ?? "").trim();
+  const q = (c.req.query("q") ?? "").trim();
+  if (!communityId) throw HttpApiError.badRequest("communityId required");
+  if (q.length === 0) return c.json({ items: [], nextCursor: null, count: 0 });
+  await requireMember(db, communityId, userId);
 
-  const channel = (
-    await db.select().from(channels).where(eq(channels.id, row.channelId)).limit(1)
-  )[0];
-  if (channel?.kind !== "help")
-    throw HttpApiError.badRequest("只有求助（kind=help）频道的消息可以标记解决状态");
+  const rawLimit = c.req.query("limit") ?? "";
+  const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 20, 1), 50);
+  const rawCursor = c.req.query("cursor") ?? "";
+  const cursor = rawCursor.trim().length > 0 ? Number.parseInt(rawCursor, 10) : null;
 
-  // 权限：提问作者 or 社区 owner/admin
-  if (row.authorId !== userId) {
-    await requireModerator(db, row.communityId, userId);
+  const conds = [eq(messages.communityId, communityId), like(messages.content, `%${q}%`)];
+  if (cursor !== null && Number.isFinite(cursor)) conds.push(lt(messages.createdAt, cursor));
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(...conds))
+    .orderBy(desc(messages.createdAt))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const users = await fetchUsersByIds(c.env.DB, [...new Set(page.map((r) => r.authorId))]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const channelRows = page.length
+    ? await db
+        .select()
+        .from(channels)
+        .where(
+          inArray(
+            channels.id,
+            page.map((r) => r.channelId),
+          ),
+        )
+    : [];
+  const channelById = new Map(channelRows.map((ch) => [ch.id, ch]));
+
+  // 命中在讨论组里的消息：带上讨论组摘要便于客户端跳到对应房间
+  const threadIds = [
+    ...new Set(page.map((r) => r.threadId).filter((x): x is string => x !== null)),
+  ];
+  const threadRows = threadIds.length
+    ? await db.select().from(threads).where(inArray(threads.id, threadIds))
+    : [];
+  const threadById = new Map(threadRows.map((t) => [t.id, t]));
+
+  const items: SearchMessageResult[] = [];
+  for (const row of page) {
+    const author = userById.get(row.authorId);
+    const channel = channelById.get(row.channelId);
+    if (!author || !channel) continue;
+    const thread = row.threadId ? threadById.get(row.threadId) : undefined;
+    items.push({
+      ...rowToMessage(row),
+      author,
+      channel: { id: channel.id, name: channel.name, kind: channel.kind },
+      thread: thread ? { id: thread.id, name: thread.name } : null,
+    });
   }
-
-  let resolution: Message["resolution"] = null;
-  if (body.resolved) {
-    if (body.answerMessageId) {
-      const answer = (
-        await db.select().from(messages).where(eq(messages.id, body.answerMessageId)).limit(1)
-      )[0];
-      if (!answer || answer.channelId !== row.channelId) {
-        throw HttpApiError.badRequest("answerMessageId 不存在或不在本频道");
-      }
-    }
-    resolution = {
-      resolvedBy: userId,
-      resolvedAt: Date.now(),
-      answerMessageId: body.answerMessageId ?? null,
-    };
-  }
-  await db
-    .update(messages)
-    .set({ resolution: resolution ? JSON.stringify(resolution) : null, updatedAt: Date.now() })
-    .where(eq(messages.id, row.id));
-  const updated = await mustRow(
-    db.select().from(messages).where(eq(messages.id, row.id)).limit(1),
-    "message",
-  );
-  return c.json(await messageItem(db, c.env.DB, updated));
+  const last = page[page.length - 1];
+  return c.json({
+    items,
+    nextCursor: hasMore && last ? String(last.createdAt) : null,
+    count: page.length,
+  });
 });

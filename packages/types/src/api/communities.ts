@@ -1,5 +1,14 @@
-import type { Channel, Community, CommunityMember, MemberRole, User } from "../entities";
+import type {
+  Channel,
+  Community,
+  CommunityMember,
+  ID,
+  MemberRole,
+  TimestampMs,
+  User,
+} from "../entities";
 import type { OffsetPaginated, OffsetPaginationQuery } from "./common";
+import type { ThreadSummary } from "./threads";
 
 // ===============================================================
 // /api/communities/*  ——  社区 CRUD / 加入 / 邀请码 / 频道
@@ -42,6 +51,8 @@ export type CreateCommunityResponse = Community & {
 /** GET /api/communities/:id —— 取社区详情（已加入 or 公开） */
 export type GetCommunityResponse = Community & {
   channels: Channel[];
+  /** 该社区全部讨论组（成员视角带未读；公开访客为 []） */
+  threads: ThreadSummary[];
   /** 我在其中的角色；未加入且公开时 = null；私有未加入 = 403 */
   myRole: MemberRole | null;
 };
@@ -79,7 +90,7 @@ export type DeleteCommunityResponse = { ok: true };
 /** POST /api/communities/:id/channels —— 新增频道（owner/admin） */
 export interface CreateChannelRequest {
   name: string;
-  kind?: "text" | "announcement" | "help";
+  kind?: "text" | "announcement" | "forum";
   topic?: string | null;
   /** 插到什么位置；不传 = 末尾 */
   position?: number;
@@ -92,7 +103,7 @@ export interface UpdateChannelRequest {
   name?: string;
   topic?: string | null;
   position?: number;
-  kind?: "text" | "announcement" | "help";
+  kind?: "text" | "announcement" | "forum";
 }
 
 export type UpdateChannelResponse = Channel;
@@ -120,3 +131,32 @@ export type UpdateMemberRoleResponse = CommunityMember & { user: User };
 
 /** DELETE /api/communities/:id/members/:userId —— 踢人（owner/admin，不能踢 owner） */
 export type RemoveMemberResponse = { ok: true };
+
+// ------- 封禁（成员被移出后阻止重新加入；owner/admin） ----------------
+
+/** 单条封禁：操作者 + 被封用户快照 + 理由/时间 */
+export interface CommunityBanItem {
+  communityId: ID;
+  userId: ID;
+  user: User;
+  bannedBy: ID;
+  reason: string | null;
+  createdAt: TimestampMs;
+}
+
+/** GET /api/communities/:id/bans —— 封禁列表（时间倒序） */
+export type ListCommunityBansResponse = { items: CommunityBanItem[] };
+
+/** POST /api/communities/:id/bans —— 封禁（同时把其移出成员，若在社内） */
+export interface BanCommunityMemberRequest {
+  /** 按成员行封禁时可直接传 userId（优先）；二者必填其一 */
+  userId?: ID;
+  /** 按 @handle 或注册邮箱封禁（与邀请一致） */
+  handleOrEmail?: string;
+  /** 可选封禁理由（展示用） */
+  reason?: string;
+}
+export type BanCommunityMemberResponse = CommunityBanItem;
+
+/** DELETE /api/communities/:id/bans/:userId —— 解封 */
+export type UnbanCommunityMemberResponse = { ok: true };

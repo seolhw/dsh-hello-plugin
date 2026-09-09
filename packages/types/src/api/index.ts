@@ -9,6 +9,7 @@ export * from "./inbox";
 export * from "./messages";
 export * from "./r2";
 export * from "./shares";
+export * from "./threads";
 
 // ---------------------------------------------------------------
 // 路由总表（仅供人阅读的「契约目录」，非运行时用）
@@ -65,7 +66,6 @@ export * from "./shares";
  *   POST   /api/channels/:id/messages          CreateMessageRequest     → CreateMessageResponse
  *   PATCH  /api/messages/:id                   UpdateMessageRequest     → UpdateMessageResponse
  *   DELETE /api/messages/:id                   —                        → DeleteMessageResponse
- *   POST   /api/messages/:id/resolve           ResolveHelpRequest       → ResolveHelpResponse
  *
  *  未读
  *   GET    /api/channels/:id/read-state        —                        → GetReadStateResponse

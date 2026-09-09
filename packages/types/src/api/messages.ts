@@ -1,4 +1,4 @@
-import type { ChannelReadState, ID, Message, User } from "../entities";
+import type { ChannelKind, ChannelReadState, ID, Message, User } from "../entities";
 import type { CursorPaginated, CursorPaginationQuery, EmptyResponse } from "./common";
 import type { MessageAttachmentPut } from "./r2";
 
@@ -6,9 +6,10 @@ import type { MessageAttachmentPut } from "./r2";
 // /api/channels/:id/*  ——  频道消息 & 未读
 // ===============================================================
 
-/** GET /api/channels/:id/messages —— 历史消息（倒序 = 最新在前；倒序翻页靠 cursor） */
+/** GET /api/channels/:id/messages —— 历史消息（倒序 = 最新在前；倒序翻页靠 cursor）
+ *  传 ?threadId=<讨论组 id> 时返回该讨论组的消息；不传只返回主频道直接消息 */
 export interface ListMessagesQuery extends CursorPaginationQuery {
-  /** 可选：只看某个线程（未来 P1）；MVP 留空 */
+  /** 只看某条讨论组（thread）内的消息；留空 = 主频道 */
   threadId?: ID | null;
   /** 默认倒序（新→旧）。传 asc = 旧→新 */
   direction?: "desc" | "asc";
@@ -27,6 +28,8 @@ export interface CreateMessageRequest {
   mentionHandles?: string[];
   /** 回复的父消息 */
   replyToId?: ID | null;
+  /** 发到某条讨论组（thread）里；空 = 发在主频道 */
+  threadId?: ID | null;
   /** 挂一张分享卡片（通过 POST /api/shares 先创建，拿 id） */
   shareId?: ID | null;
 }
@@ -42,17 +45,6 @@ export type UpdateMessageResponse = Message & { author: User };
 /** DELETE /api/messages/:id —— 删消息（作者 or admin） */
 export type DeleteMessageResponse = EmptyResponse;
 
-// ------- #help 解决闭环 --------------------------------------------------
-
-/** POST /api/messages/:id/resolve —— 标记/取消 help 提问已解决（提问作者 + 社区 admin/owner） */
-export interface ResolveHelpRequest {
-  resolved: boolean;
-  /** 引用哪条消息作为「答案」（可选） */
-  answerMessageId?: ID | null;
-}
-
-export type ResolveHelpResponse = Message & { author: User };
-
 // ------- 未读 -----------------------------------------------------------
 
 /** GET /api/channels/:id/read-state —— 我在该频道的未读 */
@@ -63,3 +55,47 @@ export interface UpdateReadStateRequest {
   lastReadMessageId: ID;
 }
 export type UpdateReadStateResponse = ChannelReadState;
+
+// ------- 在线成员（读频道 DO 的 presence 快照，仅含当前保持连接的会话） -------
+
+export interface ChannelOnlineMember {
+  userId: ID;
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  presence: "online" | "away" | "offline";
+  /** 最近活跃时间（unix ms） */
+  lastSeen: number;
+}
+
+/** GET /api/channels/:id/online —— 该频道当前在线成员 */
+export type GetChannelOnlineResponse = {
+  count: number;
+  members: ChannelOnlineMember[];
+};
+
+// ------- 消息搜索（社区范围内按内容模糊匹配） -------
+
+/** 搜索命中项：消息 + 作者 + 所属频道摘要（命中在讨论组内时附带 thread） */
+export interface SearchMessageResult extends Message {
+  author: User;
+  channel: {
+    id: ID;
+    name: string;
+    kind: ChannelKind;
+  };
+  /** 命中讨论组内的消息时给出；null = 命中主频道直接消息 */
+  thread: {
+    id: ID;
+    name: string;
+  } | null;
+}
+
+/** GET /api/messages/search —— 社区内消息搜索 */
+export interface SearchMessagesQuery extends CursorPaginationQuery {
+  communityId: ID;
+  /** 搜索关键词（匹配消息正文；倒序返回） */
+  q: string;
+}
+
+export type SearchMessagesResponse = CursorPaginated<SearchMessageResult>;

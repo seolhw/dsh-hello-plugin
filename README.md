@@ -1,273 +1,200 @@
 # dsh-talk
 
-> 把「社区」装进 DSH —— 面向 DSH 用户与开发者的类 Discord 社区插件：频道实时聊天、提问求助、分享工作流（workflow）与一键克隆会话，全程无需跳出 DSH。
+> 把「社区」装进 DSH —— 在 DeepSeek Harness 里直接和同好聊天、提问求助、发通知，社区内容与你的 Agent 工作区不再割裂。
 
-*A Discord-like community living inside DSH (DeepSeek Harness): real-time channels, Q&A with a resolution loop, and sharing workflows or full agent sessions that others can clone — one click, identical trajectory, on their own machine.*
-
----
-
-## 它解决什么问题
-
-DSH 用户与开发者今天要「跳出 DSH」才能获得社区支持：
-
-| 痛点 | dsh-talk 的答案 |
-| --- | --- |
-| 遇到问题要在 Discord / 微信群 / 论坛之间来回切，上下文丢失 | 在 DSH 内直接进入频道提问、贴代码、被解答，`#help` 有解决闭环 |
-| 「帮我看看我这个会话为什么这样」只能截图、口述 | 分享一个链接/卡片，对方一键克隆：本地生成记录与整个轨迹完全一致的会话副本，可直接打开查看甚至继续 |
-| 好用的 workflow 无法分发、无法复用 | 以纯 JSON 载荷 `{meta, script, args}` 分享 workflow，对方本地一键运行 |
-| 社区内容与自己的 Agent 工作区割裂 | 分享/克隆/运行全部发生在本地 DSH 与社区 Server 之间，产出留在自己的工作区 |
-| 默认只有单一官方群，圈子无法生长 | 任何注册用户都能自建社区（类 Discord「服务器」）：公开可被「发现」加入，或发社区邀请码私有加入 |
-
-> 目标场景：多社区（自行创建 / 「发现」加入 / 私有邀请码加入），社区内 `#general` 闲聊、`#help` 求助解答、`#showcase` 分享工作流与「会话克隆」卡片、`#announcements` 社区公告。
+一个面向 DSH 用户的类 Discord 社区插件：注册一个社区账号后，就可以在 DSH 面板里自建或加入社区，实时聊天、贴图传文件、`@` 提醒、管理成员，全程不需要跳出 DSH。
 
 ---
 
-## 架构总览
+## 功能清单
+
+### 账号与身份
+- [x] 邮箱注册：注册后发送 **6 位验证码**，验证通过才能登录
+- [x] 邮箱 + 密码登录，会话安全保存（Bearer）
+- [x] 忘记密码：通过邮箱验证码在面板内**直接重置密码**（无需打开邮件链接）
+- [x] 修改用户名、上传 / 更换头像
+- [x] 退出登录
+
+### 社区
+- [x] 一键创建社区（公开 / 私有），自动生成**固定不变**的邀请码与默认频道
+- [x] 公开社区直接加入；私有社区凭邀请码加入
+- [x] 我的社区列表：未读频道数 + `@` 提及未读数一目了然
+- [x] 编辑社区名称 / 简介 / 可见性 / 头像
+- [x] 成员管理：成员列表与搜索、设为 / 降级管理员、移除成员、**转让所有权**
+- [x] 所有者可**删除社区**（频道、消息、成员级联清除）
+- [x] 加入 / 自建社区数上限（各 10 个），防止滥用
+
+### 频道
+- [x] 三种互斥频道定位，侧边栏按类型区分图标：
+  - 文字 —— 全员自由发言
+  - 公告 —— **仅所有者 / 管理员可发**，普通成员只读
+  - 求助 —— 用于提问问答（「已解决」闭环 API 就绪）
+- [x] 频道的创建、改名、改主题、改类型、删除、排序
+
+### 消息
+- [x] 文本消息，`@成员` 提及并高亮提醒
+- [x] 附件：图片（内联预览）与任意文件（下载），一条消息最多 4 个
+- [x] 编辑 / 删除消息（作者本人，或所在社区的所有者 / 管理员）
+- [x] 实时收发：新消息、编辑、删除即时同步到所有在线成员
+
+### 实时与未读
+- [x] 每个频道一条 WebSocket 长连接，心跳保活、断线自动重连
+- [x] 频道头部显示当前**在线人数**，点开可看在线成员与状态
+- [x] 已读状态上报；社区栏未读气泡与 `@` 提及提醒
+
+### 邀请与站内信
+- [x] 邀请已注册用户加入（用户名或邮箱）→ 对方收到**站内信 + 邮件**
+- [x] 收件箱：接受 / 拒绝邀请、已处理状态、一键全部已读、铃铛未读角标
+
+### 会话快照分享
+- [x] 把一个频道的最新消息打包成可下载的**会话快照**，链接可分享给他人
+- [x] 本机 host 支持把分享包流式下载、落到本地克隆目录
+
+> 说明：消息搜索、回复 / 引用交互、求助「已解决」标记 UI、workflow 分发等能力仍在打磨中，暂未列入功能清单。
+
+---
+
+## 使用它需要什么
+
+- **DSH 本体**：`npx @deepseek-ai/dsh`
+- **一个 dsh-talk Server**：官方会提供一个公共地址；也可以按下面的「自托管 Server」自己在本地或 Cloudflare 上跑一个。
+- 首次使用在插件设置里填好 `serverUrl` 后，面板内用邮箱注册账号即可。
+
+> 发信依赖 Resend 等事务邮件（验证码 / 重置密码 / 邀请邮件）。若 Server 未配置发信，请改看服务端日志里打印的验证码。
+
+---
+
+## 快速开始（本地跑通全栈）
+
+### 0. 环境
+
+- Node.js ≥ 20、pnpm ≥ 9、[Wrangler](https://developers.cloudflare.com/workers/wrangler/)
+- DSH：`npx @deepseek-ai/dsh`
+
+### 1. 启动 Server
+
+```bash
+# 仓库根目录
+pnpm install
+pnpm dev:server      # Hono Worker，默认 http://127.0.0.1:8787
+```
+
+认证密钥写入仓库根 `.env`（predev 自动同步到 `packages/server/.dev.vars`，**不要提交**）：
+
+```bash
+BETTER_AUTH_SECRET=一个不少于32字符的随机串   # 必填
+RESEND_API_KEY=re_xxx                        # 可选：配了才真正发邮件
+# BETTER_AUTH_URL=http://127.0.0.1:8787      # 可选：对外地址
+```
+
+首次启动前生成并应用数据库迁移：
+
+```bash
+cd packages/server
+pnpm db:generate     # 由 schema 生成迁移 SQL
+pnpm db:apply-local  # 写入本地 D1
+```
+
+### 2. 构建并载入插件
+
+```bash
+pnpm build    # host/client 产物写入 lib/
+pnpm dev      # overlay 模式：自动打包并启动 DSH Web（默认 http://127.0.0.1:3080）
+```
+
+侧栏底部出现 **dsh-talk（社区）** 入口即加载成功；改源码后 `pnpm dev` 会自动重打包，刷新页面即可。
+
+### 3. 开始使用
+
+1. 打开 dsh-talk 面板 → **注册**一个邮箱账号，查收 6 位验证码完成邮箱验证；
+2. **创建**第一个社区（公开），或在 **「＋ 加入」** 里输入别人的邀请码加入私有社区；
+3. 在社区里 **新建频道**（文字 / 公告 / 求助），进入频道聊天、传图、`@` 人；
+4. 拉上第二个用户连同一个 Server 验证实时互通；忘记密码可以随时用「忘记密码？」通过验证码找回。
+
+> 单机联调两台「用户」时，请使用两个独立的 DSH profile（不同端口、不同配置目录），连接同一个 Server。
+
+---
+
+## 架构一览
 
 ```mermaid
 flowchart LR
     subgraph A["用户 A 的 DSH（本地）"]
         UI["dsh-talk 聊天面板（client）"]
-        HOST["dsh-talk host<br/>会话克隆 / workflow 运行 / 本地缓存"]
+        HOST["dsh-talk host<br/>本地配置 / 克隆会话"]
         UI <--> HOST
     end
     subgraph C["Cloudflare（Server）"]
-        API["Worker API<br/>REST + WebSocket"]
-        DO["Durable Object<br/>RoomActor（每频道实时广播）"]
-        D1[("D1<br/>用户 / 社区 / 频道 / 消息 / 分享")]
-        R2[("R2<br/>附件 & 会话克隆包")]
+        API["Worker<br/>REST + WebSocket"]
+        DO["Durable Object<br/>每频道实时广播"]
+        D1[("D1<br/>用户 / 社区 / 频道 / 消息 / 邀请")]
+        R2[("R2<br/>附件 / 分享包")]
         API --> DO
         API <--> D1
         API <--> R2
     end
-    subgraph B["用户 B 的 DSH（本地）"]
-        UI2["dsh-talk 聊天面板（client）"]
-        HOST2["dsh-talk host"]
-        UI2 <--> HOST2
-    end
     UI -- "WSS + REST（Bearer）" --> API
-    UI2 -- "WSS + REST（Bearer）" --> API
 ```
 
-### 双插件分工（DSH 客户端插件标准形态）
-
-DSH 插件天然分为两个运行环境，本项目通过 `package.json` 的 `exports` 与 `dsh.client` 声明同时提供两份产物：
-
-- **client（浏览器）**：聊天 UI、与 Server 的 WebSocket 长连接、未读状态、分享卡片、R2 预签名直传。
-- **host（Node.js）**：插件配置（`ctx.settings` 命名空间 `talk`）、克隆恢复器（把分享包写回本地 DSH 会话持久化与索引）、workflow 运行器、本地缓存（`ctx.storageDomain` 自定义 domain `talk`）。
-
-client 需要 host 能力时走 host 在 `webServer` 上注册的同源接口（当前：`/api/talk/config` 读写 token/serverUrl 等配置，语义见 `@dsh-talk/types/rpc` 的 `SettingsRpc`）；克隆/运行 workflow 等重活后续按需扩展。
-
-### Server（Cloudflare 全家桶，无任何第三方云依赖）
-
-一个 Server 承载多个社区（层级 **Server → 社区 → 频道**，社区即 Discord 的「服务器」，可由注册用户自行创建）：
-
-- **Worker**：提供 REST + WebSocket 入口
-- **Durable Object（RoomActor）**：每个频道一个实例，负责连接管理与实时广播
-- **D1**：用户 / 社区 / 频道 / 消息 / 分享等元数据（源真）
-- **R2**：图片附件与会话 / 工作流分享包
-
-Server 代码在本仓库 `packages/server/` 目录下（独立工程，支持自托管）。
+- **client（浏览器）**：聊天界面、WebSocket 实时连接、附件直传、站内信。
+- **host（Node.js）**：在 DSH 本地保存 serverUrl / token 等设置、把会话快照下载到本地。
+- **server（Cloudflare）**：唯一的数据中心——REST + WebSocket API、每频道一个 Durable Object 做实时扇出、D1 存业务数据、R2 存附件与分享包；完全自包含，可自托管。
 
 ---
 
-## 仓库结构
+## 常见配置
+
+### 插件设置（DSH 设置页）
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `serverUrl` | `http://127.0.0.1:8787` | Server 地址；生产填 `https://<你的域名>` |
+| `handle` | `""` | 当前账号用户名（登录后自动写入） |
+| `token` | `""`（secret） | 会话令牌，登录后自动写入 |
+| `autoReconnect` | `true` | WebSocket 断线自动重连 |
+| `share.maxSizeMb` | `50` | 本地快照体积上限 |
+
+### Server 环境变量
+
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | 是 | 会话签名密钥，≥ 32 字符 |
+| `BETTER_AUTH_URL` | 否 | 认证对外地址（邮箱链接基于它）；缺省按请求 Host 推导 |
+| `RESEND_API_KEY` | 否 | 事务邮件发送密钥；未配置时验证码只打印到服务端日志 |
+
+其余业务限额（单条消息 4000 字、单附件 25 MiB、每条 4 个附件、单分享包 50 MiB、每人加入 / 自建社区各 10 个等）在 `packages/server/src/constants.ts` 中集中维护。
+
+---
+
+## 仓库结构（给开发者）
 
 ```
 dsh-talk/
 ├── packages/
-│   ├── host/             # DSH 插件 host（Node.js：注册 talk 配置 + /api/talk/config）
-│   │   ├── src/index.ts  # 入口：ctx.settings 命名空间 'talk' + webServer 路由
-│   │   ├── package.json  # 包名 @dsh-talk/host
-│   │   └── tsconfig.json
-│   ├── client/           # DSH 插件 client（浏览器 React UI + 连接层，源码打进 lib/client.js）
-│   │   ├── src/
-│   │   │   ├── index.ts      # client 入口：sidebar「社区」入口 + shell.overlay 面板
-│   │   │   ├── augment.ts    # 类型化 slot 接入（拉入官方 SlotMap 合并）
-│   │   │   ├── components.tsx# 面板 UI（身份注册 / 我的社区列表）
-│   │   │   ├── store.ts      # UI store：host 配置 → Server 身份 → 我的社区
-│   │   │   ├── server.ts     # Server REST client（复用 @dsh-talk/types/api 契约）
-│   │   │   ├── ws.ts         # Server WebSocket client（复用 @dsh-talk/types/ws 契约）
-│   │   │   └── config.ts     # 同源读 /api/talk/config（取 token/serverUrl）
-│   │   ├── package.json      # 包名 @dsh-talk/client
-│   │   └── tsconfig.json
-│   ├── types/            # ⭐ 全栈共享类型包（接口定义都在这里）
-│   │   ├── src/
-│   │   │   ├── entities.ts      User/Community/Channel/Message/Share 等 D1 实体
-│   │   │   ├── api/*            Server REST API 请求/响应类型 + 路由契约注释
-│   │   │   ├── ws.ts            Server WebSocket 帧协议（client↔server）
-│   │   │   ├── rpc.ts           DSH 插件 client↔host RPC 接口
-│   │   │   └── index.ts         barrel 导出
-│   │   ├── package.json         包名 @dsh-talk/types
-│   │   └── tsconfig.json
-│   └── server/           # ⭐ Cloudflare Server（Hono Worker + D1 + R2 + Durable Object）
-│       ├── wrangler.jsonc    # Wrangler 配置（D1 / R2 / DO bindings）
-│       ├── drizzle.config.ts # drizzle-kit 配置（sqlite 方言 + 迁移目录）
-│       ├── src/
-│       │   ├── worker.ts     # Hono 入口：全局中间件 + 路由装配 + /ws upgrade
-│       │   ├── room.ts       # RoomActor（Durable Object，每频道实时广播）
-│       │   ├── types.ts      # Env / Hono Variables 类型
-│       │   ├── db/
-│       │   │   ├── schema.ts # ⭐ Drizzle ORM schema（8 张表 + 索引 + 行类型）
-│       │   │   └── index.ts  # createDbForWorker(D1) / createDbForLocal(sqlite 路径)
-│       │   ├── lib/          # errors / response / auth / db 注入 / middleware 通用
-│       │   └── routes/       # auth / communities / messages / shares / r2 分组
-│       ├── package.json      # 包名 @dsh-talk/server，依赖 hono + @dsh-talk/types
-│       └── tsconfig.json
-├── lib/                  # 打包产物：host lib/index.{mjs,cjs} + 浏览器 lib/client.js
-├── tsdown.config.ts      # 双入口打包：host（packages/host）+ client（packages/client）
-├── cordis.yml            # 本地开发 overlay：insert id `dsh-talk` → ./lib/index.mjs
-├── cordis.patch.yml      # 发布 bundle patch：insert id `dsh-talk` → 包名 `dsh-talk`
-├── pnpm-workspace.yaml   # packages/* workspace + 供应链检查策略（见下方「供应链检查」）
-├── biome.json            # Biome 配置：格式 + lint + import 排序
-├── tsconfig.json
-└── package.json          # 双面插件壳：host/client 源码来自 packages，由 tsdown 打产物
+│   ├── host/      # DSH 插件 host：注册 talk 设置 + 本地接口
+│   ├── client/    # DSH 插件 client：React 聊天界面 + 连接层
+│   ├── types/     # ⭐ 全栈共享类型：实体 / REST / WebSocket / RPC 契约
+│   └── server/    # ⭐ Cloudflare Server：Hono Worker + D1 + R2 + Durable Object
+├── lib/           # 打包产物（host + client）
+├── tsdown.config.ts / cordis.yml / cordis.patch.yml
+├── biome.json     # 格式 / lint / import 排序
+└── package.json
 ```
 
----
-
-## 快速开始（本地开发）
-
-### 0. 前置
-
-- Node.js ≥ 20、pnpm ≥ 9
-- [Wrangler](https://developers.cloudflare.com/workers/wrangler/)（跑 Server 无需 Cloudflare 账号）
-- DSH 本体：`npx @deepseek-ai/dsh`
-
-> 注意：本仓库声明的 `@deepseek-ai/dsh-tools` 等 peer 依赖版本为 `0.1.3-alpha.2`，如本地实测 DSH 版本不同，请先 `pnpm run update` 对齐（见下方开发指南）。
-
-### 1. 本地启动 Server
+常用命令（在仓库根目录执行）：
 
 ```bash
-# 仓库根目录
-pnpm install        # 安装 host + types + server 三个 workspace 包
-pnpm dev:server     # = pnpm --filter @dsh-talk/server dev，默认 http://127.0.0.1:8787
+pnpm build                # host/client 打包到 lib/
+pnpm dev                  # watch + overlay 启动 DSH Web
+pnpm dev:server           # 本地启动 Server
+pnpm typecheck            # 全 workspace 类型检查
+pnpm lint / pnpm check    # Biome 质量检查
+pnpm --filter @dsh-talk/server db:generate   # 改 schema 后生成迁移
+pnpm --filter @dsh-talk/server db:apply-local
+pnpm --filter @dsh-talk/server test:smoke    # WebSocket 冒烟测试（需本地 Server 已启动）
 ```
 
-认证 key（`BETTER_AUTH_SECRET` 必填；`BETTER_AUTH_URL` / `RESEND_API_KEY` 按需）放仓库根 `.env`，`pnpm dev:server` 的 predev 会自动同步进 `packages/server/.dev.vars`（勿提交；生产用 `wrangler secret put`）。具体键说明见 `wrangler.jsonc` 底部注释。
-
-首次跑 Server 前用 Drizzle 生成迁移并写入本地 D1：
-
-```bash
-cd packages/server
-pnpm db:generate       # 对比 src/db/schema.ts → 生成 SQL 到 drizzle/
-# 方式 A（本地 Drizzle studio/快速开发）：连到本地 SQLite
-#   pnpm db:up
-# 方式 B（对齐 Cloudflare D1）：用 wrangler 把迁移写入本地 D1
-pnpm db:apply-local
-```
-
-> 迁移生成后，也可手工执行 SQL 文件：`wrangler d1 execute dsh-talk-server --local --file=./drizzle/0000_xxxx.sql`
-
-### 2. 启动 DSH 并加载插件
-
-本地开发用 **overlay**（`--patch ./cordis.yml`）把插件插入 boot 树，不改动任何 profile：
-
-```bash
-# 仓库根目录
-pnpm install
-pnpm build         # host/client 产物进 lib/（cordis.yml 的 name 指向 ./lib/index.mjs）
-pnpm dev           # watch：自动打包并重启 DSH web（--patch ./cordis.yml）
-```
-
-> 为什么 overlay 指向 `./lib/index.mjs` 而不是 `./packages/host/src/index.ts`：client 半边由 web shell 扫描每个 loader row 的「最近 package.json」的 `dsh.client` 声明来发现；指向 packages/host 会命中 `@dsh-talk/host`（无 `dsh.client`），只有 host 日志、GUI 不出现 UI。指向仓库根产物则命中根包 `dsh-talk`（带 `dsh.client` + `exports["./client"]`），host 与 client 同时加载。
-
-打开 DSH Web GUI（默认 http://127.0.0.1:3080），侧栏底部出现 **dsh-talk（社区）** 入口。`pnpm dev` 已内置 watch：改源码后自动重打包并重启，刷新浏览器页面即可看到改动。
-
-### 3. 首次连接
-
-1. 打开 dsh-talk 面板 → 「注册身份」：输入**平台注册码**与昵称（如 `alice`）→ Server 返回令牌并自动写入本地设置；
-2. 创建第一个社区（自动获得默认频道），或从「发现」加入公开社区 / 输入社区邀请码加入私有社区；
-3. 进入社区内的 `#general`，用第二个用户验证实时互通：同机联调请再起一个独立的 DSH profile（不同端口、不同配置树，另用一个平台注册码）连接同一个 Server；
-4. 两个用户都能在 `#showcase` 发布分享卡片、在 `#help` 提问并标记已解决。
-
----
-
-## 配置
-
-### 插件设置（DSH 内设置页 + `ctx.settings` 命名空间 `talk`）
-
-| 键 | 类型 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `serverUrl` | string | `http://127.0.0.1:8787` | Server 地址；生产环境填 `https://<你的域名>` |
-| `handle` | string | `""` | 社区昵称（平台注册码换取令牌时写入） |
-| `token` | string（secret） | `""` | 社区访问令牌，`settings` 用户层覆盖 |
-| `autoReconnect` | boolean | `true` | WebSocket 断线自动重连 |
-| `share.maxSizeMb` | number | `50` | 本地上传体积上限（需 ≤ 服务端上限） |
-
-### Server 环境变量（`packages/server/`）
-
-| 变量 | 说明 | 默认 |
-| --- | --- | --- |
-| `AUTH_INVITE_CODES` | 逗号分隔的**平台注册码**（仅用于开通账号，单次使用） | 必填（dev 可种子） |
-| `COMMUNITY_CREATE_DAILY_LIMIT` | 每用户每日可创建社区数 | `3` |
-| `MAX_COMMUNITIES_PER_USER` | 每用户累计可创建社区数上限 | `10` |
-| `ADMIN_HANDLES` | 逗号分隔的平台管理员昵称 | `""` |
-| `MAX_MESSAGE_LENGTH` | 单条消息字符上限 | `4000` |
-| `MAX_SHARE_BYTES` | 单分享包体积上限 | `52428800`（50 MiB） |
-
----
-
-## 开发指南
-
-### 脚本
-
-```bash
-pnpm build        # 双入口打包：host → lib/index.{mjs,cjs}，client → lib/client.js
-pnpm dev          # watch：监听源码自动打包，产物更新即重启 dsh web（--patch ./cordis.yml）
-pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
-
-# 类型检查
-pnpm typecheck        # types + server + host + client 全量
-pnpm typecheck:server # 只查 server
-pnpm typecheck:plugin # 只查 host（packages/host/）
-pnpm typecheck:client # 只查 client（packages/client/）
-
-# 代码质量（Biome）
-pnpm lint         # lint 只报告
-pnpm lint:fix     # lint 自动修复
-pnpm format       # biome format --write .
-pnpm check        # 一键 format + lint + import 排序，并写回
-pnpm check:ci     # 严格模式（CI）：任何差异 / 告警都失败
-```
-
-### 供应链检查（为什么「完全禁用」）
-
-pnpm v11+ 默认开启供应商检查：新依赖要满足「发布年龄 ≥ 1440 分钟」、每次 install 还会对 lockfile 全表复验（报错形如 `Lockfile failed supply-chain policy check`）。dsh-talk 依赖大量 `@deepseek-ai/*` 的 alpha 预发布包（发布即需安装），因此通过 [pnpm-workspace.yaml](file:///e:/dsh-talk/pnpm-workspace.yaml) 显式关闭：
-
-```yaml
-minimumReleaseAge: 0      # 发布年龄要求 = 0：任意版本发布后立即允许安装
-trustLockfile: true       # 信任 lockfile，跳过整表供应链复验
-```
-
-> 注意：该配置放在 `pnpm-workspace.yaml`（pnpm v11+ 生效）；`minimum-release-age-exclude` 白名单式做法仅对 pnpm ≤ v10 的 `.npmrc` 生效，本项目已不再使用。
-
-### 双包约定（实现时必须满足）
-
-1. `package.json`：`exports` 增加 `"./client"`（浏览器入口），并声明 `"dsh": { "client": { "inject": [...], "platform": "web" } }`；
-2. 浏览器 UI 挂载走 slot 机制（`ctx.slots.register` / `ctx.slots.inject`），入口孔位以 `sidebar.footer.action`（列表槽）等 DSH 内置孔位为参考锚点；
-3. 插件语言包用 `ctx.locale.register('talk', 'zh'|'en', …)` 注册，UI 文案先做 `zh`，`en` 同步补齐；
-4. host 能力（克隆恢复、workflow 运行）一律要求用户确认，禁止静默执行。
-
-### 共享类型包 `@dsh-talk/types`
-
-所有接口定义集中在 [packages/types/](file:///e:/dsh-talk/packages/types)：
-
-| 文件 | 内容 |
-| --- | --- |
-| `src/entities.ts` | D1 表对应的实体类型（User / Community / Channel / Message / Share…） |
-| `src/api/*` | Server REST API 请求/响应类型 + 路由契约总表注释 |
-| `src/ws.ts` | Server WebSocket 协议帧：请求/应答/推送（含联合类型 `ClientFrame` / `ServerFrame`） |
-| `src/rpc.ts` | DSH 插件 client ↔ host 的 RPC 方法签名总接口 `TalkHostRpc` |
-
-根 `package.json` 已通过 `"@dsh-talk/types": "workspace:*"` 直接依赖，写 host / server / client 时直接 `import type { … } from "@dsh-talk/types"` 或子路径即可。
-
-### 本地联调注意
-
-- 本地开发一律走 `--patch ./cordis.yml` 的 overlay（见快速开始），不改动 profile；overlay 的 name 指向仓库根 `./lib/index.mjs`——其最近的 package.json（根包 dsh-talk）声明了 `dsh.client`，web shell 才会发现浏览器半边（`lib/client.js`）；
-- 改 host / client 源码后无需手动 `pnpm build`：`pnpm dev` 会 watch 打包并自动重启，刷新 DSH Web 页即生效（不要叠加同 id 的 profile 层或重复 overlay，否则报 `duplicate loader entry id: dsh-talk`）；
-- `cordis.patch.yml` 是发布形态的 bundle patch（包内 `dsh.bundle.patch` 指向），insert id `dsh-talk` → 包名 `dsh-talk`；
-- 双用户联调需使用两个独立的 DSH profile（不同端口、不同配置目录），避免数据冲突。
+约定：改共享接口先改 `packages/types`；变更数据库先 `db:generate` 并审查 SQL；提交信息用 `feat(server): …` / `fix(client): …` 风格。
 
 ---
 

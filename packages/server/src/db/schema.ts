@@ -60,6 +60,24 @@ export const communityMembers = sqliteTable(
   ],
 );
 
+// ---------- 社区封禁（成员被移出后仍阻止重新加入） ----------
+export const communityBans = sqliteTable(
+  "community_bans",
+  {
+    communityId: $id("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    userId: $id("user_id"), // 弱引用 better-auth user.id
+    bannedBy: $id("banned_by"), // 封禁操作者（owner/admin）
+    reason: text("reason"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.communityId, t.userId] }),
+    index("idx_community_bans_time").on(t.communityId, desc(t.createdAt)),
+  ],
+);
+
 // ---------- 频道 ----------
 export const channels = sqliteTable(
   "channels",
@@ -69,7 +87,7 @@ export const channels = sqliteTable(
       .notNull()
       .references(() => communities.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["text", "announcement", "help"] })
+    kind: text("kind", { enum: ["text", "announcement", "forum"] })
       .notNull()
       .default("text"),
     position: integer("position", { mode: "number" }).notNull().default(0),
@@ -78,6 +96,57 @@ export const channels = sqliteTable(
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
   (t) => [index("idx_channels_community_position").on(t.communityId, asc(t.position))],
+);
+
+// ---------- 讨论组（thread：依附主频道、可归档的临时子空间） ----------
+export const threads = sqliteTable(
+  "threads",
+  {
+    id: text("id").primaryKey(),
+    communityId: $id("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    channelId: $id("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    starterMessageId: text("starter_message_id"),
+    createdBy: $id("created_by"), // 弱引用 better-auth user.id
+    creatorHandle: text("creator_handle").notNull(),
+    creatorDisplayName: text("creator_display_name"),
+    creatorAvatarUrl: text("creator_avatar_url"),
+    starterSnippet: text("starter_snippet"),
+    status: text("status", { enum: ["active", "archived"] })
+      .notNull()
+      .default("active"),
+    messageCount: integer("message_count", { mode: "number" }).notNull().default(0),
+    lastMessageId: text("last_message_id"),
+    lastActivityAt: integer("last_activity_at", { mode: "number" }).notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+    archivedAt: integer("archived_at", { mode: "number" }),
+  },
+  (t) => [
+    index("idx_threads_channel_status").on(t.channelId, t.status, desc(t.lastActivityAt)),
+    index("idx_threads_community_status").on(t.communityId, t.status, desc(t.lastActivityAt)),
+  ],
+);
+
+// ---------- 讨论组已读状态（用户 x 讨论组） ----------
+export const threadReadStates = sqliteTable(
+  "thread_read_states",
+  {
+    userId: $id("user_id"), // 弱引用 better-auth user.id
+    threadId: $id("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    lastReadMessageId: text("last_read_message_id"),
+    lastReadAt: integer("last_read_at", { mode: "number" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.threadId] }),
+    index("idx_thread_readstate_user").on(t.userId),
+  ],
 );
 
 // ---------- 消息 ----------
@@ -96,15 +165,15 @@ export const messages = sqliteTable(
     attachments: text("attachments"), // JSON: MessageAttachment[]
     mentions: text("mentions"), // JSON: string[] (userId list)
     shareCard: text("share_card"), // JSON: MessageShareCardRef | null
-    resolution: text("resolution"), // JSON: HelpResolution | null
     replyToId: text("reply_to_id"), // FK 弱引用，避免循环删除复杂
+    threadId: text("thread_id").references(() => threads.id, { onDelete: "cascade" }), // 属于哪条讨论组（null=主频道直接消息）
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }),
   },
   (t) => [
     index("idx_messages_channel_time").on(t.channelId, desc(t.createdAt)),
+    index("idx_messages_thread_time").on(t.threadId, desc(t.createdAt)),
     index("idx_messages_author_time").on(t.authorId, desc(t.createdAt)),
-    index("idx_messages_resolution").on(t.channelId, desc(t.createdAt)),
   ],
 );
 
@@ -200,8 +269,14 @@ export type CommunityRow = typeof communities.$inferSelect;
 export type NewCommunity = typeof communities.$inferInsert;
 export type CommunityMemberRow = typeof communityMembers.$inferSelect;
 export type NewCommunityMember = typeof communityMembers.$inferInsert;
+export type CommunityBanRow = typeof communityBans.$inferSelect;
+export type NewCommunityBan = typeof communityBans.$inferInsert;
 export type ChannelRow = typeof channels.$inferSelect;
 export type NewChannel = typeof channels.$inferInsert;
+export type ThreadRow = typeof threads.$inferSelect;
+export type NewThread = typeof threads.$inferInsert;
+export type ThreadReadStateRow = typeof threadReadStates.$inferSelect;
+export type NewThreadReadState = typeof threadReadStates.$inferInsert;
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type ShareRow = typeof shares.$inferSelect;

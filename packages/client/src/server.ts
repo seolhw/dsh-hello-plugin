@@ -270,9 +270,11 @@ export class ServerClient {
     return this.call<{ status: boolean }>("POST", "/api/auth/change-password", body, true);
   }
 
-  /** POST /api/auth/update-user —— 改资料/改用户名 */
-  updateUser(body: UpdateUserRequest): Promise<{ user: AuthUser }> {
-    return this.call<{ user: AuthUser }>("POST", "/api/auth/update-user", body, true);
+  /** POST /api/auth/update-user —— 改资料/改用户名。
+   * 注意：Better Auth 该端点仅返回 { status: true }，不含 user；
+   * 需要更新后的 user 请再调 getSession()。 */
+  updateUser(body: UpdateUserRequest): Promise<{ status: boolean }> {
+    return this.call<{ status: boolean }>("POST", "/api/auth/update-user", body, true);
   }
 
   /** POST /api/auth/send-verification-email —— 重发验证邮件 */

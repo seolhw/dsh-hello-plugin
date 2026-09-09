@@ -6,10 +6,13 @@
 // 部署：pnpm deploy (wrangler deploy)
 // ================================================================
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dsh-talk",
   "main": "src/worker.ts",
   "compatibility_date": "2025-01-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "workers_dev": true,
   "preview_urls": true,
   // ---------- 本地开发（wrangler dev --port 8787） ----------
@@ -20,7 +23,6 @@
   "routes": [
     {
       "pattern": "dsh-talk-api.huiwang.fun",
-      "zone_name": "huiwang.fun",
       "custom_domain": true,
       "enabled": true,
       "previews_enabled": false

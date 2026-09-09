@@ -22,7 +22,13 @@ const KEY_PREFIX = "att";
 
 /** 公开读 URL（key 不可枚举；同源 Worker 代取） */
 function objectReadUrl(c: AppCtx, key: string): string {
-  const origin = new URL(c.req.url).origin;
+  // 注意：不要用 new URL(c.req.url).origin。
+  //   wrangler dev 配置了 routes.custom_domain 时，Miniflare（mf-original-hostname 头）
+  //   会把请求 host 改写为生产域名，导致本地 c.req.url 变成 生产域名，
+  //   存进数据库的图片 URL 会指向生产 R2（本地 key 自然 404）。
+  // 因此优先用同一 Worker 的对外地址 BETTER_AUTH_URL；未配置时再回退到请求 URL。
+  const base = c.env.BETTER_AUTH_URL?.trim() || c.req.url;
+  const origin = new URL(base).origin;
   return `${origin}/api/r2/objects/${key}`;
 }
 

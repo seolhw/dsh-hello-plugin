@@ -185,6 +185,12 @@ function toUser(auth: AuthUser): User {
   };
 }
 
+/** update-user 只回 { status: true }，要拿更新后的 user 得再拉一次会话 */
+async function refreshedUser(server: ServerClient): Promise<User | null> {
+  const session = await server.getSession();
+  return session?.user ? toUser(session.user) : null;
+}
+
 /** 通知条（自动消失） */
 export function notify(message: string): void {
   setState({ toast: message });
@@ -374,8 +380,12 @@ export async function updateUserName(username: string): Promise<boolean> {
   }
   try {
     const body: UpdateUserRequest = { username: trimmed };
-    const res = await server.updateUser(body);
-    const me = toUser(res.user);
+    await server.updateUser(body);
+    const me = (await refreshedUser(server)) ?? state.me;
+    if (!me) {
+      notify("无法获取最新用户信息");
+      return false;
+    }
     try {
       const next = await hostConfigSet({ handle: me.handle });
       setState({ me, settings: next });
@@ -415,8 +425,13 @@ export async function updateUserAvatar(file: File): Promise<boolean> {
   const url = await uploadImage(file);
   if (!url) return false;
   try {
-    const res = await server.updateUser({ image: url });
-    setState({ me: toUser(res.user) });
+    await server.updateUser({ image: url });
+    const me = (await refreshedUser(server)) ?? state.me;
+    if (!me) {
+      notify("无法获取最新用户信息");
+      return false;
+    }
+    setState({ me });
     notify("头像已更新");
     return true;
   } catch (error) {
@@ -430,8 +445,13 @@ export async function removeUserAvatar(): Promise<boolean> {
   const server = serverOf();
   if (!server) return false;
   try {
-    const res = await server.updateUser({ image: null });
-    setState({ me: toUser(res.user) });
+    await server.updateUser({ image: null });
+    const me = (await refreshedUser(server)) ?? state.me;
+    if (!me) {
+      notify("无法获取最新用户信息");
+      return false;
+    }
+    setState({ me });
     notify("已移除头像");
     return true;
   } catch (error) {

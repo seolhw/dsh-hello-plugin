@@ -11,7 +11,6 @@ import {
   IconCloseOutline16,
   IconDownloadOutline16,
   IconEditOutline16,
-  IconLinkOutline16,
   IconLoadingOutline16,
   IconPaperclipOutline16,
   IconPlusOutline16,
@@ -508,13 +507,11 @@ function CommunityMetaCard({
 }
 
 function CommunitiesRail({
-  onJoin,
-  onCreate,
+  onAdd,
   onInbox,
   onEditProfile,
 }: {
-  onJoin: () => void;
-  onCreate: () => void;
+  onAdd: () => void;
   onInbox: () => void;
   onEditProfile: () => void;
 }): ReactElement {
@@ -553,18 +550,9 @@ function CommunitiesRail({
         <button
           type="button"
           style={railAction}
-          onClick={onJoin}
-          aria-label="用邀请码加入"
-          title="用邀请码加入"
-        >
-          <IconLinkOutline16 />
-        </button>
-        <button
-          type="button"
-          style={railAction}
-          onClick={onCreate}
-          aria-label="创建社区"
-          title="创建社区"
+          onClick={onAdd}
+          aria-label="加入或创建社区"
+          title="加入或创建社区"
         >
           <IconPlusOutline16 />
         </button>
@@ -2707,24 +2695,36 @@ function OnlineMembersModal({
   );
 }
 
-// ---------------- 弹窗：创建 / 加入 ----------------
+// ---------------- 弹窗：加入 / 创建（合并单入口，顶部 tab 切换） ----------------
 
-function CreateCommunityModal({
+/** 「加入 / 创建」合并为一个弹窗：顶部 tab 切换，默认「加入」 */
+function CommunityAddModal({
   open,
   onClose,
 }: {
   open: boolean;
   onClose: () => void;
 }): ReactElement {
+  const [tab, setTab] = useState<"join" | "create">("join");
+  // 加入：邀请码
+  const [code, setCode] = useState("");
+  // 创建：名称 / 简介 / 可见性 / 头像
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [privacy, setPrivacy] = useState<"public" | "private">("public");
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 每次打开重置已上传的头像预览
+  // 每次打开：重置表单，默认落在「加入」
   useEffect(() => {
-    if (open) setIconUrl(null);
+    if (open) {
+      setTab("join");
+      setCode("");
+      setName("");
+      setDescription("");
+      setPrivacy("public");
+      setIconUrl(null);
+    }
   }, [open]);
 
   async function pickIcon(file: File): Promise<void> {
@@ -2733,6 +2733,18 @@ function CreateCommunityModal({
   }
 
   async function submit(): Promise<void> {
+    if (busy) return;
+    if (tab === "join") {
+      if (code.trim().length === 0) return;
+      setBusy(true);
+      const ok = await joinCommunityByCode(code);
+      setBusy(false);
+      if (ok) {
+        setCode("");
+        onClose();
+      }
+      return;
+    }
     if (name.trim().length === 0) return;
     setBusy(true);
     const body: {
@@ -2755,11 +2767,12 @@ function CreateCommunityModal({
     }
   }
 
+  const creating = tab === "create";
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="创建社区"
+      title={creating ? "创建社区" : "加入社区"}
       closeLabel="关闭"
       footer={
         <>
@@ -2768,120 +2781,108 @@ function CreateCommunityModal({
           </Button>
           <Button
             variant="primary"
-            disabled={busy || name.trim().length === 0}
+            disabled={busy || (creating ? name.trim().length === 0 : code.trim().length === 0)}
             onClick={() => void submit()}
           >
-            创建
+            {busy ? (creating ? "创建中…" : "加入中…") : creating ? "创建" : "加入"}
           </Button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={fieldBlock}>
-          <span style={fieldLabel}>社区头像</span>
-          <AvatarPicker
-            src={iconUrl}
-            label={name.trim() || "社区"}
-            size={60}
-            onPick={(file) => void pickIcon(file)}
-            onRemove={() => setIconUrl(null)}
-            uploadLabel="设置头像"
-            removeLabel="移除头像"
-            busy={busy}
-          />
-        </div>
-        <div style={fieldBlock}>
-          <label htmlFor="talk-create-name" style={fieldLabel}>
-            社区名称
-          </label>
-          <Input
-            id="talk-create-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="社区名称"
-          />
-        </div>
-        <div style={fieldBlock}>
-          <label htmlFor="talk-create-desc" style={fieldLabel}>
-            简介
-          </label>
-          <Input
-            id="talk-create-desc"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="简介（可选）"
-          />
-        </div>
-        <div style={fieldBlock}>
-          <span style={fieldLabel}>可见性</span>
-          <div style={pillGroup}>
-            <button
-              type="button"
-              style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
-              onClick={() => setPrivacy("public")}
-            >
-              公开
-            </button>
-            <button
-              type="button"
-              style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
-              onClick={() => setPrivacy("private")}
-            >
-              私有
-            </button>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function JoinModal({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit(): Promise<void> {
-    if (code.trim().length === 0) return;
-    setBusy(true);
-    const ok = await joinCommunityByCode(code);
-    setBusy(false);
-    if (ok) {
-      setCode("");
-      onClose();
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="用邀请码加入"
-      closeLabel="关闭"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            disabled={busy || code.trim().length === 0}
-            onClick={() => void submit()}
+        {/* tab 顶栏：加入（默认）/ 创建 */}
+        <div style={pillGroup}>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "join" ? pillKeyActive : {}) }}
+            onClick={() => setTab("join")}
           >
             加入
-          </Button>
-        </>
-      }
-    >
-      <div style={fieldBlock}>
-        <label htmlFor="talk-join-code" style={fieldLabel}>
-          邀请码
-        </label>
-        <Input
-          id="talk-join-code"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="邀请码，如 ABCD1234"
-        />
+          </button>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "create" ? pillKeyActive : {}) }}
+            onClick={() => setTab("create")}
+          >
+            创建
+          </button>
+        </div>
+        {creating ? (
+          <>
+            <div style={fieldBlock}>
+              <span style={fieldLabel}>社区头像</span>
+              <AvatarPicker
+                src={iconUrl}
+                label={name.trim() || "社区"}
+                size={60}
+                onPick={(file) => void pickIcon(file)}
+                onRemove={() => setIconUrl(null)}
+                uploadLabel="设置头像"
+                removeLabel="移除头像"
+                busy={busy}
+              />
+            </div>
+            <div style={fieldBlock}>
+              <label htmlFor="talk-create-name" style={fieldLabel}>
+                社区名称
+              </label>
+              <Input
+                id="talk-create-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="社区名称"
+              />
+            </div>
+            <div style={fieldBlock}>
+              <label htmlFor="talk-create-desc" style={fieldLabel}>
+                简介
+              </label>
+              <Input
+                id="talk-create-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="简介（可选）"
+              />
+            </div>
+            <div style={fieldBlock}>
+              <span style={fieldLabel}>可见性</span>
+              <div style={pillGroup}>
+                <button
+                  type="button"
+                  style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
+                  onClick={() => setPrivacy("public")}
+                >
+                  公开
+                </button>
+                <button
+                  type="button"
+                  style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
+                  onClick={() => setPrivacy("private")}
+                >
+                  私有
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div style={fieldBlock}>
+            <label htmlFor="talk-join-code" style={fieldLabel}>
+              邀请码
+            </label>
+            <Input
+              id="talk-join-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder="邀请码，如 ABCD1234"
+            />
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -3056,8 +3057,7 @@ function ShareSnapshotModal({
 
 export function HomeScreen(): ReactElement {
   const talk = useTalkState();
-  const [showCreate, setShowCreate] = useState(false);
-  const [showJoin, setShowJoin] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const [showUsername, setShowUsername] = useState(false);
   const inCommunity = talk.view.communityId !== null;
 
@@ -3065,8 +3065,7 @@ export function HomeScreen(): ReactElement {
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       <style>{messageRowCss}</style>
       <CommunitiesRail
-        onJoin={() => setShowJoin(true)}
-        onCreate={() => setShowCreate(true)}
+        onAdd={() => setShowAdd(true)}
         onInbox={() => void openInbox()}
         onEditProfile={() => setShowUsername(true)}
       />
@@ -3092,13 +3091,12 @@ export function HomeScreen(): ReactElement {
             <span style={{ ...smallText, fontSize: 12.5, lineHeight: 1.7 }}>
               从左侧选择一个社区开始聊天，
               <br />
-              或点右上「＋」创建 / 用邀请码加入。
+              点左栏「＋」用邀请码加入，或创建一个新社区。
             </span>
           </div>
         </div>
       )}
-      <CreateCommunityModal open={showCreate} onClose={() => setShowCreate(false)} />
-      <JoinModal open={showJoin} onClose={() => setShowJoin(false)} />
+      <CommunityAddModal open={showAdd} onClose={() => setShowAdd(false)} />
       <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
       <InboxDialog />
     </div>

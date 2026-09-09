@@ -22,6 +22,9 @@ const PLATFORM_MODULES = [
 ] as const;
 
 export default (): UserConfig[] => {
+  // watch（pnpm dev 看门狗）时不能 clean 整个 outDir：host 单独重建会把
+  // 未变动的 client.js 一并删掉，导致 web shell 找不到浏览器半边。
+  const watch = process.env.TSDOWN_WATCH === "1" || process.argv.includes("--watch");
   const configs: UserConfig[] = [
     {
       name: "dsh-talk/host",
@@ -30,7 +33,7 @@ export default (): UserConfig[] => {
       format: ["esm", "cjs"],
       target: "es2022",
       dts: true,
-      clean: true,
+      clean: !watch,
       // cordis / dsh 系 / schemastery 在运行期由 DSH 模块图提供（dev 走 repo node_modules）
       deps: {
         neverBundle: [

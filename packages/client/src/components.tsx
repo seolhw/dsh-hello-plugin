@@ -77,3 +77,8 @@ export function TalkPage(_props: object): ReactElement {
     </div>
   );
 }
+
+
+export function HelloWorld(): ReactElement {
+  return <div>Hello World!</div>;
+}

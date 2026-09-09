@@ -14,15 +14,15 @@
 
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import "./augment";
-import { TalkPage } from "./components";
+import { HelloWorld, TalkPage } from "./components";
 import { refresh } from "./store";
 
 export const inject: string[] = ["slots"];
 
 export function apply(ctx: ClientContext): void {
   try {
-    // 会话页签「社区」：注册进 conversation.view（list/scope=session）。
-    // label 作为页签文字；order 越大越靠右（官方 chat=0，trajectory≈10）。
+    // 会话页签「社区」：注册进 conversation.view（list / scope=session）。
+    // label 作为页签文字；order 越大越靠右（官方 chat = 0，trajectory≈10）。
     ctx.slots.inject("conversation.view", () =>
       ctx.slots.register(
         {
@@ -35,6 +35,7 @@ export function apply(ctx: ClientContext): void {
         TalkPage,
       ),
     );
+
   } catch (error) {
     // 注册失败只降级为诊断输出，绝不让插件 fiber 崩掉整个 GUI。
     console.error("[dsh-talk] slot register failed:", error);

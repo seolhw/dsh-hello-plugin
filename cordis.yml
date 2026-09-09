@@ -7,7 +7,7 @@
 #
 # 注意：name 不能指向 packages/host（最近包是 @dsh-talk/host，没有 dsh.client），
 # 否则只有 host 日志、GUI 不出现插件 UI。
-# 改代码后先 pnpm build，再重启 pnpm dev。
+# pnpm dev 由 scripts/dev.mjs 接管：tsdown --watch 自动打包，产物更新即重启本进程。
 - insert:
     - id: "dsh-talk"
       name: "./lib/index.mjs"

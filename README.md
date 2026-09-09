@@ -167,12 +167,12 @@ pnpm db:apply-local
 # 仓库根目录
 pnpm install
 pnpm build         # host/client 产物进 lib/（cordis.yml 的 name 指向 ./lib/index.mjs）
-pnpm dev           # = npx @deepseek-ai/dsh web --patch ./cordis.yml
+pnpm dev           # watch：自动打包并重启 DSH web（--patch ./cordis.yml）
 ```
 
 > 为什么 overlay 指向 `./lib/index.mjs` 而不是 `./packages/host/src/index.ts`：client 半边由 web shell 扫描每个 loader row 的「最近 package.json」的 `dsh.client` 声明来发现；指向 packages/host 会命中 `@dsh-talk/host`（无 `dsh.client`），只有 host 日志、GUI 不出现 UI。指向仓库根产物则命中根包 `dsh-talk`（带 `dsh.client` + `exports["./client"]`），host 与 client 同时加载。
 
-打开 DSH Web GUI（默认 http://127.0.0.1:3080），侧栏底部出现 **dsh-talk（社区）** 入口。改代码后先 `pnpm build` 再重启 `pnpm dev` 生效。
+打开 DSH Web GUI（默认 http://127.0.0.1:3080），侧栏底部出现 **dsh-talk（社区）** 入口。`pnpm dev` 已内置 watch：改源码后自动重打包并重启，刷新浏览器页面即可看到改动。
 
 ### 3. 首次连接
 
@@ -214,7 +214,7 @@ pnpm dev           # = npx @deepseek-ai/dsh web --patch ./cordis.yml
 
 ```bash
 pnpm build        # 双入口打包：host → lib/index.{mjs,cjs}，client → lib/client.js
-pnpm dev          # 本地起 dsh web，以 --patch ./cordis.yml 插入 dsh-talk
+pnpm dev          # watch：监听源码自动打包，产物更新即重启 dsh web（--patch ./cordis.yml）
 pnpm run update   # 对齐 @deepseek-ai/* peer 依赖版本
 
 # 类型检查
@@ -265,7 +265,7 @@ trustLockfile: true       # 信任 lockfile，跳过整表供应链复验
 ### 本地联调注意
 
 - 本地开发一律走 `--patch ./cordis.yml` 的 overlay（见快速开始），不改动 profile；overlay 的 name 指向仓库根 `./lib/index.mjs`——其最近的 package.json（根包 dsh-talk）声明了 `dsh.client`，web shell 才会发现浏览器半边（`lib/client.js`）；
-- 改 host / client 源码后先 `pnpm build`，再重启 `pnpm dev` 生效（不要叠加同 id 的 profile 层或重复 overlay，否则报 `duplicate loader entry id: dsh-talk`）；
+- 改 host / client 源码后无需手动 `pnpm build`：`pnpm dev` 会 watch 打包并自动重启，刷新 DSH Web 页即生效（不要叠加同 id 的 profile 层或重复 overlay，否则报 `duplicate loader entry id: dsh-talk`）；
 - `cordis.patch.yml` 是发布形态的 bundle patch（包内 `dsh.bundle.patch` 指向），insert id `dsh-talk` → 包名 `dsh-talk`；
 - 双用户联调需使用两个独立的 DSH profile（不同端口、不同配置目录），避免数据冲突。
 

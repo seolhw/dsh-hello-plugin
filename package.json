@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsdown",
-    "dev": "npx @deepseek-ai/dsh web --patch ./cordis.yml",
+    "dev": "node ./scripts/dev.mjs",
     "dev:server": "pnpm --filter @dsh-talk/server dev",
     "deploy:server": "pnpm --filter @dsh-talk/server run deploy",
     "update": "npx npm-check-updates -u --target greatest --dep peer @deepseek-ai/*",

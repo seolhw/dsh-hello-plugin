@@ -1,0 +1,194 @@
+// ================================================================
+// 站内信收件箱：邀请类事件 + 接受/拒绝操作（v1 只承载社区邀请）
+// 打开/关闭由 store.inboxOpen 控制（社区栏铃铛触发 openInbox()）
+// ================================================================
+
+import { Button, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { InboxItem } from "@dsh-talk/types/api";
+import type { CSSProperties, ReactElement } from "react";
+import {
+  acceptInvite,
+  closeInbox,
+  declineInvite,
+  markAllNotificationsRead,
+  useTalkState,
+} from "../store";
+import { Avatar, palette, smallText, timeLabel } from "./styles";
+
+function BellGlyph(): ReactElement {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M8 2.4a3.7 3.7 0 0 0-3.7 3.7c0 2 .6 2.9 1 3.5h5.4c.4-.6 1-1.5 1-3.5A3.7 3.7 0 0 0 8 2.4Z" />
+      <path d="M6.4 12.2a1.7 1.7 0 0 0 3.2 0" />
+    </svg>
+  );
+}
+
+const rowWrap: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "flex-start",
+  padding: "10px 12px",
+  borderRadius: 12,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  accepted: "已接受",
+  declined: "已拒绝",
+};
+
+function InboxRow({ item }: { item: InboxItem }): ReactElement {
+  const talk = useTalkState();
+  const busy = talk.inboxBusyId !== null && item.invite?.id === talk.inboxBusyId;
+  const communityName = item.data?.communityName ?? "";
+  const icon = item.data?.communityIconUrl ?? null;
+  const actionable = item.kind === "invite" && item.invite?.status === "pending";
+
+  return (
+    <div style={rowWrap}>
+      <Avatar label={communityName || "邀"} src={icon} size={34} />
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 650,
+            color: palette.text,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {item.title}
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: palette.secondary,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {item.body}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ ...smallText, fontSize: 11 }}>{timeLabel(item.createdAt)}</span>
+          {!item.isRead ? (
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                background: palette.accent,
+                flex: "0 0 auto",
+              }}
+            />
+          ) : null}
+        </div>
+      </div>
+      <span
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flex: "0 0 auto",
+          paddingTop: 2,
+        }}
+      >
+        {item.kind === "invite" ? (
+          item.invite === null ? (
+            <span style={{ ...smallText, fontSize: 11, color: palette.muted }}>
+              邀请已失效
+            </span>
+          ) : item.invite.status === "pending" ? (
+            <>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                onClick={() => void acceptInvite(item.invite!.id)}
+              >
+                {busy ? "加入中…" : "加入"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  if (window.confirm("拒绝这条社区邀请？")) void declineInvite(item.invite!.id);
+                }}
+              >
+                拒绝
+              </Button>
+            </>
+          ) : (
+            <span style={{ fontSize: 11.5, color: palette.muted }}>
+              {STATUS_LABEL[item.invite.status] ?? item.invite.status}
+            </span>
+          )
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+export function InboxDialog(): ReactElement | null {
+  const talk = useTalkState();
+  const unread = talk.inboxUnread;
+  const hasInvites = talk.notifications.length > 0;
+
+  return (
+    <Modal
+      open={talk.inboxOpen}
+      onClose={() => closeInbox()}
+      title="站内信"
+      closeLabel="关闭"
+      description="社区邀请与重要事件会出现在这里。"
+      footer={
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={unread === 0}
+          onClick={() => void markAllNotificationsRead()}
+        >
+          全部已读
+        </Button>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
+        {talk.inboxLoading ? (
+          <div style={{ ...smallText, padding: "14px 4px" }}>加载中…</div>
+        ) : !hasInvites ? (
+          <div
+            style={{
+              ...smallText,
+              padding: "20px 4px",
+              textAlign: "center",
+              color: palette.muted,
+            }}
+          >
+            暂时没有站内信。
+            <br />
+            当有人邀请你加入社区时，会第一时间出现在这里。
+          </div>
+        ) : (
+          talk.notifications.map((item) => <InboxRow key={item.id} item={item} />)
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+export { BellGlyph };

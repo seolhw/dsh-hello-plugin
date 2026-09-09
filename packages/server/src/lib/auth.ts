@@ -101,15 +101,16 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，
       // 之后所有请求带 Authorization: Bearer <token> 即等价于带 session cookie
       bearer(),
-      // 6 位数字验证码邮箱验证：注册即发送验证码，验证成功自动登录
+      // 6 位数字验证码邮箱验证：注册即发送验证码，验证成功自动登录；
+      // forget-password 类型供「忘记密码」走同一条 OTP 通道（见 email.ts 文案）
       emailOTP({
         otpLength: 6,
         expiresIn: 300,
         allowedAttempts: 5,
         sendVerificationOnSignUp: true,
-        sendVerificationOTP: async ({ email, otp }, ctx) => {
+        sendVerificationOTP: async ({ email, otp, type }, ctx) => {
           const request = ctx?.request as Request | undefined;
-          dispatchVerificationOTPEmail(env, request, email, otp);
+          dispatchVerificationOTPEmail(env, request, email, otp, type);
         },
       }),
     ],

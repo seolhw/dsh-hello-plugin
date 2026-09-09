@@ -7,6 +7,7 @@
 // ================================================================
 
 import type {
+  AcceptInviteResponse,
   ApiError,
   AuthUser,
   ChangePasswordRequest,
@@ -14,11 +15,15 @@ import type {
   CreateChannelResponse,
   CreateCommunityRequest,
   CreateCommunityResponse,
+  CreateInviteRequest,
+  CreateInviteResponse,
   CreateMessageRequest,
   CreateMessageResponse,
   CreateShareRequest,
   CreateShareResponse,
+  DeclineInviteResponse,
   DeleteChannelResponse,
+  DeleteCommunityResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   GetReadStateResponse,
@@ -31,10 +36,15 @@ import type {
   ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
+  ListNotificationsResponse,
+  MarkAllNotificationsReadResponse,
+  MarkNotificationReadResponse,
   RemoveMemberResponse,
+  RequestPasswordResetOTPResponse,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
-  RotateInviteResponse,
+  ResetPasswordWithOTPRequest,
+  ResetPasswordWithOTPResponse,
   SendVerificationEmailRequest,
   SendVerificationOTPRequest,
   SignInEmailRequest,
@@ -281,6 +291,24 @@ export class ServerClient {
     return this.call<{ status: boolean }>("POST", "/api/auth/reset-password", body);
   }
 
+  /** POST /api/auth/email-otp/request-password-reset —— 忘记密码：向邮箱发 6 位重置验证码 */
+  requestPasswordResetOtp(email: string): Promise<RequestPasswordResetOTPResponse> {
+    return this.call<RequestPasswordResetOTPResponse>(
+      "POST",
+      "/api/auth/email-otp/request-password-reset",
+      { email },
+    );
+  }
+
+  /** POST /api/auth/email-otp/reset-password —— 用验证码重设密码（应用内完成） */
+  resetPasswordWithOtp(body: ResetPasswordWithOTPRequest): Promise<ResetPasswordWithOTPResponse> {
+    return this.call<ResetPasswordWithOTPResponse>(
+      "POST",
+      "/api/auth/email-otp/reset-password",
+      body,
+    );
+  }
+
   // ---------- 业务 REST：社区 / 频道 / 成员 ----------
 
   /** GET /api/communities/mine —— 我加入的社区（含未读概览） */
@@ -328,6 +356,16 @@ export class ServerClient {
     );
   }
 
+  /** DELETE /api/communities/:id —— 删除社区（仅 owner；内容级联清除） */
+  deleteCommunity(communityId: string): Promise<DeleteCommunityResponse> {
+    return this.call<DeleteCommunityResponse>(
+      "DELETE",
+      `/api/communities/${communityId}`,
+      undefined,
+      true,
+    );
+  }
+
   /** POST /api/communities/:id/channels —— 新建频道（owner/admin） */
   createChannel(communityId: string, body: CreateChannelRequest): Promise<CreateChannelResponse> {
     return this.call<CreateChannelResponse>(
@@ -351,11 +389,52 @@ export class ServerClient {
     );
   }
 
-  /** POST /api/communities/:id/rotate-invite —— 轮换邀请码（owner/admin） */
-  rotateInvite(communityId: string): Promise<RotateInviteResponse> {
-    return this.call<RotateInviteResponse>(
+  /** POST /api/communities/:id/invites —— 邀请已注册用户入社区（owner/admin） */
+  createInvite(communityId: string, body: CreateInviteRequest): Promise<CreateInviteResponse> {
+    return this.call<CreateInviteResponse>(
       "POST",
-      `/api/communities/${communityId}/rotate-invite`,
+      `/api/communities/${communityId}/invites`,
+      body,
+      true,
+    );
+  }
+
+  /** POST /api/invites/:id/accept —— 接受社区邀请并加入 */
+  acceptInvite(inviteId: string): Promise<AcceptInviteResponse> {
+    return this.call<AcceptInviteResponse>("POST", `/api/invites/${inviteId}/accept`, {}, true);
+  }
+
+  /** POST /api/invites/:id/decline —— 拒绝社区邀请 */
+  declineInvite(inviteId: string): Promise<DeclineInviteResponse> {
+    return this.call<DeclineInviteResponse>("POST", `/api/invites/${inviteId}/decline`, {}, true);
+  }
+
+  /** GET /api/notifications —— 我的站内信（新→旧，带未读数） */
+  listNotifications(
+    opts: { limit?: number; onlyUnread?: boolean } = {},
+  ): Promise<ListNotificationsResponse> {
+    const qs = toQuery({
+      limit: opts.limit ?? 20,
+      onlyUnread: opts.onlyUnread ? "1" : "",
+    });
+    return this.call<ListNotificationsResponse>("GET", `/api/notifications${qs}`, undefined, true);
+  }
+
+  /** POST /api/notifications/:id/read —— 标记一条站内信已读 */
+  markNotificationRead(notificationId: string): Promise<MarkNotificationReadResponse> {
+    return this.call<MarkNotificationReadResponse>(
+      "POST",
+      `/api/notifications/${notificationId}/read`,
+      {},
+      true,
+    );
+  }
+
+  /** POST /api/notifications/read-all —— 全部已读 */
+  markAllNotificationsRead(): Promise<MarkAllNotificationsReadResponse> {
+    return this.call<MarkAllNotificationsReadResponse>(
+      "POST",
+      "/api/notifications/read-all",
       {},
       true,
     );

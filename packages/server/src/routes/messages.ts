@@ -2,7 +2,8 @@
 // /api/channels/:id/*（消息/未读）与 /api/messages/:id（改/删/解决）
 // 权限模型：
 //   - 身份：Better Auth 会话（Bearer）
-//   - 发消息/看历史/未读：必须是该频道所属社区的成员
+//   - 发消息/看历史/未读：必须是该频道所属社区的成员；
+//     公告频道（kind=announcement）发消息额外要求 owner/admin（普通成员只读）
 //   - 改/删消息：仅消息作者本人，或该社区 owner/admin
 //   - help 解决：提问作者或 owner/admin
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片尚未纳入 MVP
@@ -184,6 +185,11 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
   await requireChannelMember(db, channel, userId);
+
+  // 公告频道只有 owner/admin 能发（requireModerator 内部已含成员判定）
+  if (channel.kind === "announcement") {
+    await requireModerator(db, channel.communityId, userId);
+  }
 
   const body = await jsonBody<CreateMessageRequest>(c);
   const d1 = c.env.DB;
@@ -451,7 +457,8 @@ messagesApi.post("/:id/resolve", async (c) => {
   const channel = (
     await db.select().from(channels).where(eq(channels.id, row.channelId)).limit(1)
   )[0];
-  if (!channel?.isHelp) throw HttpApiError.badRequest("只有 help 频道的消息可以标记解决状态");
+  if (channel?.kind !== "help")
+    throw HttpApiError.badRequest("只有求助（kind=help）频道的消息可以标记解决状态");
 
   // 权限：提问作者 or 社区 owner/admin
   if (row.authorId !== userId) {

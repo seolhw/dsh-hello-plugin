@@ -5,6 +5,7 @@
 export * from "./auth";
 export * from "./common";
 export * from "./communities";
+export * from "./inbox";
 export * from "./messages";
 export * from "./r2";
 export * from "./shares";
@@ -36,10 +37,10 @@ export * from "./shares";
  *   POST  /api/communities            CreateCommunityRequest           → CreateCommunityResponse
  *   GET   /api/communities/:id        —                                → GetCommunityResponse
  *   PATCH /api/communities/:id        UpdateCommunityRequest           → UpdateCommunityResponse
- *   POST  /api/communities/:id/rotate-invite  RotateInviteRequest      → RotateInviteResponse
  *   POST  /api/communities/join-by-code      JoinByInviteRequest       → JoinByInviteResponse
  *   POST  /api/communities/:id/join   —                                → JoinCommunityResponse
  *   POST  /api/communities/:id/leave  —                                → LeaveCommunityResponse
+ *   DELETE /api/communities/:id       —                                → DeleteCommunityResponse
  *
  *  频道
  *   POST  /api/communities/:id/channels  CreateChannelRequest       → CreateChannelResponse
@@ -50,6 +51,14 @@ export * from "./shares";
  *   GET   /api/communities/:id/members        query:ListMembersQuery   → ListMembersResponse
  *   PATCH /api/communities/:id/members/:userId/role  UpdateMemberRoleRequest → UpdateMemberRoleResponse
  *   DELETE /api/communities/:id/members/:userId      —                 → RemoveMemberResponse
+ *
+ *  邀请 / 站内信
+ *   POST  /api/communities/:id/invites   CreateInviteRequest       → CreateInviteResponse
+ *   POST  /api/invites/:id/accept        —                         → AcceptInviteResponse
+ *   POST  /api/invites/:id/decline       —                         → DeclineInviteResponse
+ *   GET   /api/notifications             query:ListNotificationsQuery → ListNotificationsResponse
+ *   POST  /api/notifications/:id/read    —                         → MarkNotificationReadResponse
+ *   POST  /api/notifications/read-all    —                         → MarkAllNotificationsReadResponse
  *
  *  消息
  *   GET    /api/channels/:id/messages          query:ListMessagesQuery  → ListMessagesResponse

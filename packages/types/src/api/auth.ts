@@ -124,7 +124,24 @@ export interface VerifyEmailOTPResponse {
   user: AuthUser;
 }
 
-/** POST /api/auth/request-password-reset（忘记密码：发重置邮件） */
+/** POST /api/auth/email-otp/request-password-reset —— 忘记密码：向邮箱发 6 位重置验证码 */
+export interface RequestPasswordResetOTPRequest {
+  email: string;
+}
+
+export type RequestPasswordResetOTPResponse = { success: boolean };
+
+/** POST /api/auth/email-otp/reset-password —— 用验证码重置密码（应用内完成，无需打开邮件链接） */
+export interface ResetPasswordWithOTPRequest {
+  email: string;
+  otp: string;
+  /** 新密码（>= 8 位） */
+  password: string;
+}
+
+export type ResetPasswordWithOTPResponse = { success: boolean };
+
+/** POST /api/auth/request-password-reset（邮箱链接版：发重置邮件，需到浏览器打开链接） */
 export interface RequestPasswordResetRequest {
   email: string;
   redirectTo?: string;

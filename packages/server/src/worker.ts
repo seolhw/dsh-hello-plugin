@@ -22,7 +22,9 @@ import { bindExecutionCtx, unbindExecutionCtx } from "./lib/email";
 import { HttpApiError } from "./lib/errors";
 import { applyGlobalMiddleware } from "./lib/middleware";
 import { channelsRoutes, communitiesRoutes } from "./routes/communities";
+import { invitesRoutes } from "./routes/invites";
 import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
+import { notificationsRoutes } from "./routes/notifications";
 import { r2ObjectReadRoutes, r2UploadRoutes } from "./routes/r2";
 import { sharesRoutes } from "./routes/shares";
 import type { Env, HonoAppVariables } from "./types";
@@ -71,6 +73,8 @@ app.route("/api/channels", channelMessagesRoutes); // /api/channels/:id/messages
 app.route("/api/channels", channelsRoutes); // /api/channels/:id PATCH/DELETE 叠加
 app.route("/api/messages", messagesRoutes);
 app.route("/api/shares", sharesRoutes);
+app.route("/api/invites", invitesRoutes); // /api/invites/:id/accept|decline
+app.route("/api/notifications", notificationsRoutes); // /api/notifications（站内信）
 app.route("/api/r2", r2ObjectReadRoutes); // GET /api/r2/objects/:key（公开读取）
 app.route("/api/r2", r2UploadRoutes); // PUT /api/r2/objects（Bearer 鉴权）
 

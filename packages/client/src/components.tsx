@@ -11,7 +11,7 @@ import { useEffect } from "react";
 import { AuthScreen } from "./components/AuthScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { pageRoot, palette } from "./components/styles";
-import { activateTalk, deactivateTalk, dismissToast, refresh, useTalkState } from "./store";
+import { activateTalk, deactivateTalk, dismissToast, refresh, refreshInboxUnread, useTalkState } from "./store";
 
 /** 居中提示视图 */
 function Centered({ children }: { children: ReactElement }): ReactElement {
@@ -41,11 +41,20 @@ function ErrorView(): ReactElement {
 /** 「社区」页签页：随会话 view 挂载/卸载而激活/释放实时连接 */
 export function TalkPage(_props: object): ReactElement {
   const talk = useTalkState();
+  const ready = talk.phase === "ready";
 
   useEffect(() => {
     activateTalk();
     return () => deactivateTalk();
   }, []);
+
+  // 就绪后周期性地轮询站内信未读数（铃铛角标），有新邀请时尽快亮起
+  useEffect(() => {
+    if (!ready) return;
+    void refreshInboxUnread();
+    const timer = window.setInterval(() => void refreshInboxUnread(), 30000);
+    return () => window.clearInterval(timer);
+  }, [ready]);
 
   let body: ReactElement;
   if (talk.phase === "error") {

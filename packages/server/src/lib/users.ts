@@ -115,3 +115,17 @@ export async function resolveUserIdsByHandles(
   }
   return resolved;
 }
+
+/** 按 @handle 或邮箱精确查一个注册用户；不存在返回 null（发邀请用） */
+export async function findAuthUserByHandleOrEmail(
+  db: D1Database,
+  raw: string,
+): Promise<{ user: User; email: string } | null> {
+  const q = raw.trim().replace(/^@/, "").toLowerCase();
+  if (!q) return null;
+  const row = await db
+    .prepare(`SELECT ${USER_COLUMNS} FROM "user" WHERE username = ? OR email = ?`)
+    .bind(q, q)
+    .first<AuthUserRow>();
+  return row ? { user: toEntityUser(row), email: row.email } : null;
+}

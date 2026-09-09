@@ -35,17 +35,19 @@ import {
   type MessageItem,
   notify,
   openCommunity,
+  openInbox,
   removeUserAvatar,
   selectChannel,
   sendMessage,
   setDraft,
   snapshotChannel,
   updateMessage,
-  updateUserName,
   updateUserAvatar,
+  updateUserName,
   uploadImage,
   useTalkState,
 } from "../store";
+import { BellGlyph, InboxDialog } from "./Inbox";
 import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
 import { Avatar, AvatarPicker, palette, smallText, timeLabel } from "./styles";
 
@@ -166,11 +168,39 @@ const messagesWrap: CSSProperties = {
 
 const msgRow: CSSProperties = {
   display: "flex",
-  gap: 8,
-  padding: "8px 10px",
-  borderRadius: 10,
-  border: `1px solid transparent`,
+  gap: 10,
+  padding: "5px 12px",
+  borderRadius: 8,
+  position: "relative",
 };
+
+/** hover 时浮在消息右上角的操作条（Discord 风格，平时不占位） */
+const msgChip: CSSProperties = {
+  position: "absolute",
+  top: 4,
+  right: 8,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 2,
+  padding: 2,
+  borderRadius: 8,
+  background: palette.elevated,
+  border: `1px solid ${palette.border}`,
+  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+};
+
+/**
+ * 消息行的 hover 表现走 CSS（避免在无交互语义的 div 上绑鼠标事件）：
+ * 平时整行无底色，hover 淡显；操作条默认隐藏，hover / 键盘聚焦到行内时显示。
+ */
+const messageRowCss = `
+  .dsht-msg-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .dsht-msg-row.is-mentioned { background: var(--dsw-alias-state-business-tertiary); }
+  .dsht-msg-row .dsht-msg-actions { opacity: 0; pointer-events: none; }
+  .dsht-msg-row:hover .dsht-msg-actions,
+  .dsht-msg-row:focus-within .dsht-msg-actions,
+  .dsht-msg-actions.is-open { opacity: 1; pointer-events: auto; }
+`;
 
 const creatorRow: CSSProperties = {
   display: "flex",
@@ -356,12 +386,6 @@ const fieldLabel: CSSProperties = {
   fontWeight: 500,
 };
 
-const ROLE_LABELS: Record<MemberRole, string> = {
-  owner: "所有者",
-  admin: "管理员",
-  member: "成员",
-};
-
 const PRIVACY_LABELS: Record<Community["privacy"], string> = {
   public: "公开",
   private: "私密",
@@ -393,7 +417,7 @@ function CommunityMetaCard({
             {community.name}
           </div>
           <div style={{ fontSize: 11, color: palette.caption }}>
-            {PRIVACY_LABELS[community.privacy]} · {ROLE_LABELS[community.role]}成员
+            {PRIVACY_LABELS[community.privacy]}
           </div>
         </div>
       </div>
@@ -426,7 +450,6 @@ function CommunityMetaCard({
         }}
       >
         <span>{community.memberCount} 名成员</span>
-        {community.slug ? <span>#{community.slug}</span> : null}
       </div>
     </div>
   );
@@ -435,15 +458,18 @@ function CommunityMetaCard({
 function CommunitiesRail({
   onJoin,
   onCreate,
+  onInbox,
   onEditProfile,
 }: {
   onJoin: () => void;
   onCreate: () => void;
+  onInbox: () => void;
   onEditProfile: () => void;
 }): ReactElement {
   const talk = useTalkState();
   const current = talk.view.communityId;
   const me = talk.me;
+  const unreadLabel = talk.inboxUnread > 99 ? "99+" : String(talk.inboxUnread);
   return (
     <div style={rail}>
       <span style={railMark} title="dsh-talk 社区">
@@ -458,6 +484,20 @@ function CommunitiesRail({
           marginTop: 6,
         }}
       >
+        <button
+          type="button"
+          style={railAction}
+          onClick={onInbox}
+          aria-label="站内信"
+          title="站内信"
+        >
+          <span style={railAvatar}>
+            <BellGlyph />
+            {talk.inboxUnread > 0 ? (
+              <span style={{ ...railBubble, top: -5, right: -7 }}>{unreadLabel}</span>
+            ) : null}
+          </span>
+        </button>
         <button
           type="button"
           style={railAction}
@@ -798,14 +838,7 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
   }
 
   return (
-    <div
-      style={{
-        ...msgRow,
-        borderColor: mentionedMe ? "var(--dsw-alias-state-business-tertiary)" : undefined,
-        background: mine ? palette.hover : undefined,
-        cursor: "default",
-      }}
-    >
+    <div className={`dsht-msg-row${mentionedMe ? " is-mentioned" : ""}`} style={msgRow}>
       <Avatar label={item.author.handle} src={item.author.avatarUrl} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -847,7 +880,7 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
         <AttachmentList attachments={item.attachments ?? []} />
       </div>
       {allowEdit ? (
-        <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <span className={`dsht-msg-actions${editing ? " is-open" : ""}`} style={msgChip}>
           {editing ? (
             <>
               <Button
@@ -907,6 +940,10 @@ function ChatPane(): ReactElement | null {
   const [shareOpen, setShareOpen] = useState(false);
 
   const draft = channelId ? (talk.view.drafts[channelId] ?? "") : "";
+
+  // 公告频道仅 owner/admin 可发；其余频道所有成员可发
+  const myRole = community?.myRole ?? null;
+  const canPost = channel?.kind !== "announcement" || myRole === "owner" || myRole === "admin";
 
   function onScroll(event: UIEvent<HTMLDivElement>): void {
     const el = event.currentTarget;
@@ -1062,8 +1099,14 @@ function ChatPane(): ReactElement | null {
               >
                 #
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>还没有消息</span>
-              <span style={{ fontSize: 12 }}>来说第一句吧。</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>
+                {channel?.kind === "announcement" && !canPost ? "暂无公告" : "还没有消息"}
+              </span>
+              <span style={{ fontSize: 12 }}>
+                {channel?.kind === "announcement" && !canPost
+                  ? "公告由所有者/管理员发布。"
+                  : "来说第一句吧。"}
+              </span>
             </div>
           ) : (
             <>
@@ -1087,73 +1130,96 @@ function ChatPane(): ReactElement | null {
         </div>
 
         <div style={composerWrap}>
-          <Button
-            size="md"
-            variant="ghost"
-            icon={<IconPaperclipOutline16 />}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={talk.view.sending}
-            aria-label="添加附件"
-            title="添加附件"
-          />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-            {pendingFiles.length > 0 ? (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {pendingFiles.map((f, i) => (
-                  <span key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`} style={pendingChip}>
-                    <span
-                      style={{
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {f.name}
-                    </span>
-                    <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
-                      {formatBytes(f.size)}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<IconCloseOutline16 />}
-                      onClick={() => removePending(i)}
-                      aria-label={`移除 ${f.name}`}
-                    />
-                  </span>
-                ))}
+          {canPost ? (
+            <>
+              <Button
+                size="md"
+                variant="ghost"
+                icon={<IconPaperclipOutline16 />}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={talk.view.sending}
+                aria-label="添加附件"
+                title="添加附件"
+              />
+              <div
+                style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}
+              >
+                {pendingFiles.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {pendingFiles.map((f, i) => (
+                      <span
+                        key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`}
+                        style={pendingChip}
+                      >
+                        <span
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {f.name}
+                        </span>
+                        <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+                          {formatBytes(f.size)}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<IconCloseOutline16 />}
+                          onClick={() => removePending(i)}
+                          aria-label={`移除 ${f.name}`}
+                        />
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  placeholder={`在 #${channel?.name ?? ""} 发消息…`}
+                  style={textArea}
+                />
               </div>
-            ) : null}
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void submit();
+              <Button
+                variant="primary"
+                size="md"
+                icon={<IconSendOutline16 />}
+                disabled={
+                  talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)
                 }
+                onClick={() => void submit()}
+                aria-label="发送"
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={(e) => pickFiles(e)}
+                style={{ display: "none" }}
+                aria-hidden
+                tabIndex={-1}
+              />
+            </>
+          ) : (
+            <span
+              style={{
+                ...smallText,
+                fontSize: 12,
+                flex: 1,
+                textAlign: "center",
+                padding: "10px 0",
               }}
-              placeholder={`在 #${channel?.name ?? ""} 发消息…`}
-              style={textArea}
-            />
-          </div>
-          <Button
-            variant="primary"
-            size="md"
-            icon={<IconSendOutline16 />}
-            disabled={talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)}
-            onClick={() => void submit()}
-            aria-label="发送"
-          />
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            onChange={(e) => pickFiles(e)}
-            style={{ display: "none" }}
-            aria-hidden
-            tabIndex={-1}
-          />
+            >
+              公告频道仅所有者/管理员可发布，普通成员只读。
+            </span>
+          )}
         </div>
       </div>
       <ShareSnapshotModal
@@ -1521,9 +1587,11 @@ export function HomeScreen(): ReactElement {
 
   return (
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <style>{messageRowCss}</style>
       <CommunitiesRail
         onJoin={() => setShowJoin(true)}
         onCreate={() => setShowCreate(true)}
+        onInbox={() => void openInbox()}
         onEditProfile={() => setShowUsername(true)}
       />
       {inCommunity ? (
@@ -1556,6 +1624,7 @@ export function HomeScreen(): ReactElement {
       <CreateCommunityModal open={showCreate} onClose={() => setShowCreate(false)} />
       <JoinModal open={showJoin} onClose={() => setShowJoin(false)} />
       <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
+      <InboxDialog />
     </div>
   );
 }

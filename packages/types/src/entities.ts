@@ -41,7 +41,7 @@ export interface Community {
   iconUrl: string | null;
   /** 横幅 URL（大卡头图） */
   bannerUrl: string | null;
-  /** 私有社区需要邀请码加入；owner 可轮换 */
+  /** 加入码（创建社区时生成、固定不变；公开社区也可通过它定向加入） */
   inviteCode: string | null;
   memberCount: number;
   createdAt: TimestampMs;
@@ -50,7 +50,10 @@ export interface Community {
 
 // ====================== 频道 ======================
 
-export type ChannelKind = "text" | "announcement";
+/**
+ * 频道定位（互斥）：普通文字 / 公告（仅 owner/admin 可发）/ 求助（消息可标记「已解决」）
+ */
+export type ChannelKind = "text" | "announcement" | "help";
 
 export interface Channel {
   id: ID;
@@ -60,10 +63,6 @@ export interface Channel {
   /** 同一社区内的排序，越小越靠前 */
   position: number;
   topic: string | null;
-  /** 是否 help 频道（提问后有「已解决」闭环） */
-  isHelp: boolean;
-  /** 是否 showcase 频道（发分享卡片的默认落点） */
-  isShowcase: boolean;
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
 }
@@ -174,4 +173,55 @@ export interface ChannelReadState {
   lastReadAt: TimestampMs | null;
   /** 该频道里 @我 且未读的消息数 */
   unreadMentions: number;
+}
+
+// ====================== 社区邀请 ======================
+
+/** 邀请状态：pending → accepted / declined（社区被删时随邀请整行级联清除） */
+export type InviteStatus = "pending" | "accepted" | "declined";
+
+export interface CommunityInvite {
+  id: ID;
+  communityId: ID;
+  /** 发起邀请的用户 id（owner/admin） */
+  inviterId: ID;
+  /** 被邀请的用户 id */
+  inviteeUserId: ID;
+  /** 被邀请人注册邮箱（发信快照；对外响应不携带，避免二次泄露） */
+  inviteeEmail: string;
+  status: InviteStatus;
+  createdAt: TimestampMs;
+  /** 处理时间（accepted/declined），未处理为 null */
+  respondedAt: TimestampMs | null;
+}
+
+// ====================== 站内信（事件收件箱） ======================
+
+/** v1 只有「邀请」这类事件，后续按需扩展该联合 */
+export type NotificationKind = "invite";
+
+/** kind = invite 时 data 的快照字段（建信时写死，防止关联对象被删后无法展示） */
+export interface InviteNotificationData {
+  inviteId: ID;
+  communityId: ID;
+  communityName: string;
+  communityIconUrl: string | null;
+  inviterId: ID;
+  inviterHandle: string;
+}
+
+/** 各 kind 对应的 data 联合；目前只有邀请一种 */
+export type NotificationData = InviteNotificationData;
+
+export interface Notification {
+  id: ID;
+  /** 收件人 userId */
+  userId: ID;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  /** kind 相关的快照数据（按 kind 解码） */
+  data: NotificationData | null;
+  isRead: boolean;
+  createdAt: TimestampMs;
 }

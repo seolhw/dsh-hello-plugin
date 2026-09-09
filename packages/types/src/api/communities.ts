@@ -58,16 +58,6 @@ export interface UpdateCommunityRequest {
 
 export type UpdateCommunityResponse = Community;
 
-/** POST /api/communities/:id/rotate-invite —— 换邀请码（owner / admin） */
-export interface RotateInviteRequest {
-  /** 旧码立即失效？默认 true */
-  invalidateOld?: boolean;
-}
-
-export interface RotateInviteResponse {
-  inviteCode: string;
-}
-
 /** POST /api/communities/join-by-code —— 用邀请码加入私有社区（公开社区直接 POST /join） */
 export interface JoinByInviteRequest {
   inviteCode: string;
@@ -81,29 +71,28 @@ export type JoinCommunityResponse = Community & { channels: Channel[]; myRole: M
 /** POST /api/communities/:id/leave —— 退出（owner 不能退，必须先转移） */
 export type LeaveCommunityResponse = { ok: true };
 
+/** DELETE /api/communities/:id —— 删除社区（仅 owner；成员/频道/消息/未读/邀请级联清理） */
+export type DeleteCommunityResponse = { ok: true };
+
 // ------- 频道 ----------------------------------------------------------------
 
 /** POST /api/communities/:id/channels —— 新增频道（owner/admin） */
 export interface CreateChannelRequest {
   name: string;
-  kind?: "text" | "announcement";
+  kind?: "text" | "announcement" | "help";
   topic?: string | null;
   /** 插到什么位置；不传 = 末尾 */
   position?: number;
-  isHelp?: boolean;
-  isShowcase?: boolean;
 }
 
 export type CreateChannelResponse = Channel;
 
-/** PATCH /api/channels/:id —— 改频道（名、位置、topic、isHelp 等） */
+/** PATCH /api/channels/:id —— 改频道（名、位置、topic、kind） */
 export interface UpdateChannelRequest {
   name?: string;
   topic?: string | null;
   position?: number;
-  isHelp?: boolean;
-  isShowcase?: boolean;
-  kind?: "text" | "announcement";
+  kind?: "text" | "announcement" | "help";
 }
 
 export type UpdateChannelResponse = Channel;

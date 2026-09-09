@@ -69,13 +69,11 @@ export const channels = sqliteTable(
       .notNull()
       .references(() => communities.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
-    kind: text("kind", { enum: ["text", "announcement"] })
+    kind: text("kind", { enum: ["text", "announcement", "help"] })
       .notNull()
       .default("text"),
     position: integer("position", { mode: "number" }).notNull().default(0),
     topic: text("topic"),
-    isHelp: integer("is_help", { mode: "boolean" }).notNull(),
-    isShowcase: integer("is_showcase", { mode: "boolean" }).notNull(),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
   },
@@ -153,6 +151,50 @@ export const channelReadStates = sqliteTable(
   ],
 );
 
+// ---------- 社区邀请 ----------
+export const invites = sqliteTable(
+  "invites",
+  {
+    id: text("id").primaryKey(),
+    communityId: $id("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    inviterId: $id("inviter_id"), // 弱引用 better-auth user.id（发起人，owner/admin）
+    inviteeUserId: $id("invitee_user_id"), // 弱引用 better-auth user.id（被邀请人）
+    inviteeEmail: text("invitee_email").notNull(),
+    status: text("status", { enum: ["pending", "accepted", "declined"] })
+      .notNull()
+      .default("pending"),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+    respondedAt: integer("responded_at", { mode: "number" }),
+  },
+  (t) => [
+    index("idx_invites_invitee_status").on(t.inviteeUserId, t.status),
+    index("idx_invites_community_status").on(t.communityId, t.status),
+  ],
+);
+
+// ---------- 站内信（事件收件箱；v1 只有 invite） ----------
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: text("id").primaryKey(),
+    userId: $id("user_id"), // 弱引用 better-auth user.id（收件人）
+    communityId: text("community_id").references(() => communities.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["invite"] }).notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    data: text("data"), // JSON: NotificationData（kind 相关快照）
+    isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    index("idx_notifications_user_time").on(t.userId, desc(t.createdAt)),
+    index("idx_notifications_user_unread").on(t.userId, t.isRead),
+    index("idx_notifications_community").on(t.communityId),
+  ],
+);
+
 // ---------- 行类型推断导出 ----------
 export type CommunityRow = typeof communities.$inferSelect;
 export type NewCommunity = typeof communities.$inferInsert;
@@ -166,3 +208,7 @@ export type ShareRow = typeof shares.$inferSelect;
 export type NewShare = typeof shares.$inferInsert;
 export type ChannelReadStateRow = typeof channelReadStates.$inferSelect;
 export type NewChannelReadState = typeof channelReadStates.$inferInsert;
+export type InviteRow = typeof invites.$inferSelect;
+export type NewInvite = typeof invites.$inferInsert;
+export type NotificationRow = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;

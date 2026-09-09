@@ -11,7 +11,9 @@ import {
   cancelVerification,
   login,
   register,
+  requestPasswordResetOtp,
   resendVerificationOtp,
+  resetPasswordWithOtp,
   useTalkState,
   verifyOtp,
 } from "../store";
@@ -155,6 +157,203 @@ function Field({
   );
 }
 
+/** 忘记密码：邮箱 → 收验证码 → 设置新密码（全程在面板内完成，无需打开邮件链接） */
+function ForgotPasswordCard({
+  initialEmail,
+  onDone,
+}: {
+  initialEmail: string;
+  onDone: () => void;
+}): ReactElement {
+  const [email, setEmail] = useState(initialEmail);
+  const [otp, setOtp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [stage, setStage] = useState<"request" | "reset" | "done">("request");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function request(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await requestPasswordResetOtp(email);
+      setStage("reset");
+      setOtp("");
+      setNewPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitReset(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await resetPasswordWithOtp({ email, otp, password: newPassword });
+      setStage("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const passwordToggle = (
+    <button
+      type="button"
+      onClick={() => setShowPassword((prev) => !prev)}
+      style={{
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        color: palette.accent,
+        fontSize: 11,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      {showPassword ? "隐藏" : "显示"}
+    </button>
+  );
+
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={brandMark}>T</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>重置密码</div>
+          <div style={{ ...fieldHint, fontSize: 12.5 }}>
+            {stage === "done" ? "密码已更新" : "通过邮箱验证码找回账号"}
+          </div>
+        </div>
+      </div>
+
+      {stage === "done" ? (
+        <>
+          <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+            密码已重置成功，请使用新密码重新登录。
+          </div>
+          <Button variant="primary" size="md" style={{ width: "100%" }} onClick={onDone}>
+            返回登录
+          </Button>
+        </>
+      ) : (
+        <form
+          onSubmit={stage === "request" ? (e) => void request(e) : (e) => void submitReset(e)}
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          {stage === "request" ? (
+            <>
+              <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+                输入注册邮箱，我们会向它发送一封 6 位验证码邮件。
+              </div>
+              <Field label="邮箱" htmlFor="talk-reset-email">
+                <Input
+                  id="talk-reset-email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  type="email"
+                  autoComplete="email"
+                  autoFocus
+                  required
+                />
+              </Field>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+                验证码已发送至 <strong style={{ color: palette.text }}>{email}</strong>，5
+                分钟内有效；若该邮箱未注册则不会收到邮件。
+              </div>
+              <Field label="验证码" htmlFor="talk-reset-otp">
+                <Input
+                  id="talk-reset-otp"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                  placeholder="6 位数字"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  required
+                />
+              </Field>
+              <Field label="新密码" htmlFor="talk-reset-password" right={passwordToggle}>
+                <Input
+                  id="talk-reset-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                />
+                <span style={fieldHint}>至少 8 位</span>
+              </Field>
+            </>
+          )}
+
+          {error ? (
+            <div style={errorBanner}>
+              <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
+                <IconWarningOutline16 size={14} />
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
+            </div>
+          ) : null}
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={
+              busy ||
+              (stage === "request"
+                ? email.trim().length === 0
+                : otp.trim().length !== 6 || newPassword.length < 8)
+            }
+            style={{ width: "100%" }}
+          >
+            {busy ? "请稍候…" : stage === "request" ? "发送验证码" : "重置密码"}
+          </Button>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            {stage === "reset" ? (
+              <button
+                type="button"
+                style={busy ? linkButtonDisabled : linkButton}
+                disabled={busy}
+                onClick={() => {
+                  setStage("request");
+                  setError("");
+                }}
+              >
+                换个邮箱
+              </button>
+            ) : (
+              <span />
+            )}
+            <button
+              type="button"
+              style={busy ? linkButtonDisabled : linkButton}
+              disabled={busy}
+              onClick={onDone}
+            >
+              返回登录
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export function AuthScreen(): ReactElement {
   const talk = useTalkState();
   const [mode, setMode] = useState<Mode>("login");
@@ -168,6 +367,7 @@ export function AuthScreen(): ReactElement {
   const [otp, setOtp] = useState("");
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpError, setOtpError] = useState("");
+  const [forgot, setForgot] = useState(false);
 
   const pendingEmail = talk.pendingEmail;
 
@@ -320,6 +520,10 @@ export function AuthScreen(): ReactElement {
     );
   }
 
+  if (forgot) {
+    return <ForgotPasswordCard initialEmail={account.trim()} onDone={() => setForgot(false)} />;
+  }
+
   return (
     <div style={card}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -377,6 +581,21 @@ export function AuthScreen(): ReactElement {
           />
           {mode === "register" ? <span style={fieldHint}>至少 8 位</span> : null}
         </Field>
+
+        {mode === "login" ? (
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              style={linkButton}
+              onClick={() => {
+                setForgot(true);
+                setError("");
+              }}
+            >
+              忘记密码？
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
           <div style={errorBanner}>

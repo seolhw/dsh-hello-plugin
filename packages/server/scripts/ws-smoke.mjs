@@ -237,6 +237,36 @@ const outsider = await signup("chout");
 await expectWsRejected(outsider, channelId);
 console.log("ok: 非成员直连频道被拒");
 
+// —— 权限：公告频道只有 owner/admin 能发 ——
+const annId = comm.json.channels.find((ch) => ch.kind === "announcement")?.id;
+assert(annId, "建社区时自动生成公告频道");
+const memberAnnounce = await call(
+  "POST",
+  `/api/channels/${annId}/messages`,
+  { content: "member should be rejected" },
+  tokenB,
+);
+assert(memberAnnounce.status === 403, "普通成员发公告被拒（403）");
+const ownerAnnounce = await call(
+  "POST",
+  `/api/channels/${annId}/messages`,
+  { content: "owner announcement" },
+  tokenA,
+);
+assert(ownerAnnounce.status === 201, "owner 发公告成功");
+
+// —— 权限：只有 owner 能删除社区（级联清频道/消息/成员） ——
+const delByMember = await call("DELETE", `/api/communities/${comm.json.id}`, undefined, tokenB);
+assert(delByMember.status === 403, "非 owner 删除社区被拒（403）");
+const delByOwner = await call("DELETE", `/api/communities/${comm.json.id}`, undefined, tokenA);
+assert(delByOwner.status === 200, "owner 删除社区成功");
+const goneComm = await call("GET", `/api/communities/${comm.json.id}`, undefined, tokenB);
+assert(goneComm.status === 404, "删除后社区 404");
+const mineB = await call("GET", "/api/communities/mine", undefined, tokenB);
+assert(!mineB.json.some((x) => x.id === comm.json.id), "删除后从 B 的社区列表消失");
+const goneMsgs = await call("GET", `/api/channels/${channelId}/messages`, undefined, tokenB);
+assert(goneMsgs.status === 404, "删除后频道消息 404");
+
 ws.close();
 await sleep(300);
 console.log("WS SMOKE PASSED");

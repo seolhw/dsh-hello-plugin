@@ -3,13 +3,14 @@
 // 权限模型：
 //   - 身份由 Better Auth 会话（Bearer）保证，见 lib/auth.ts
 //   - 社区内角色：owner > admin > member（community_members 表）
-//   - 浏览私密内容需成员身份；管理操作需 owner/admin；踢人/转让等需 owner
+//   - 浏览私密内容需成员身份；管理操作需 owner/admin；踢人/转让/删除社区等需 owner
 //   - owner 同时冗余在 communities.owner_id，以 owner_id 为最终权威
 // ================================================================
 
 import type {
   CreateChannelRequest,
   CreateCommunityRequest,
+  CreateInviteRequest,
   DiscoverCommunitiesQuery,
   GetMyCommunitiesResponse,
   ListMembersQuery,
@@ -18,7 +19,7 @@ import type {
   UpdateMemberRoleRequest,
 } from "@dsh-talk/types/api";
 import type { Community, CommunityMember, MemberRole, User } from "@dsh-talk/types/entities";
-import { and, asc, count, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   type ChannelRow,
@@ -28,14 +29,16 @@ import {
   channels,
   communities,
   communityMembers,
+  messages,
 } from "../db/schema";
-import { getMembership, requireMember, requireModerator } from "../lib/access";
-import { createBearerAuth, requireUserId } from "../lib/auth";
+import { getMembership, requireMember, requireModerator, requireOwner } from "../lib/access";
+import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId, newInviteCode, newSlug } from "../lib/ids";
+import { createCommunityInvite, finalizePendingInvites } from "../lib/invites";
 import { type AppCtx, emptyOk } from "../lib/response";
-import { fetchUserById, fetchUsersByIds } from "../lib/users";
+import { fetchUserById, fetchUsersByIds, findAuthUserByHandleOrEmail } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
 // ---------------- 小工具 ----------------
@@ -259,8 +262,6 @@ communitiesApi.post("/", async (c) => {
       kind: d.kind,
       position: d.position,
       topic: null,
-      isHelp: false,
-      isShowcase: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -271,8 +272,6 @@ communitiesApi.post("/", async (c) => {
       kind: d.kind,
       position: d.position,
       topic: null,
-      isHelp: false,
-      isShowcase: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -346,24 +345,6 @@ communitiesApi.patch("/:id", async (c) => {
   return c.json(mapCommunity(updated));
 });
 
-// --- POST /:id/rotate-invite —— 轮换邀请码（owner/admin） ---
-communitiesApi.post("/:id/rotate-invite", async (c) => {
-  const db = dbOf(c);
-  const userId = requireUserId(c);
-  const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
-  await requireModerator(db, communityId, userId);
-  const code = newInviteCode();
-  await db
-    .update(communities)
-    .set({ inviteCode: code, updatedAt: Date.now() })
-    .where(eq(communities.id, communityId));
-  return c.json({ inviteCode: code });
-});
-
 // --- POST /join-by-code —— 用邀请码加入 ---
 communitiesApi.post("/join-by-code", async (c) => {
   const db = dbOf(c);
@@ -412,6 +393,8 @@ async function joinCommunity(
       .set({ memberCount: communityRow.memberCount + 1 })
       .where(eq(communities.id, communityRow.id));
   }
+  // 收敛该用户可能遗留的 pending 邀请（用邀请码/公开方式加入也算接受邀请）
+  await finalizePendingInvites(db, communityRow.id, userId, "accepted");
   const chans = await listChannels(db, communityRow.id);
   const role = (existing?.role ?? "member") as MemberRole;
   return c.json({ ...mapCommunity(communityRow), channels: chans.map(mapChannel), myRole: role });
@@ -439,6 +422,72 @@ communitiesApi.post("/:id/leave", async (c) => {
       .set({ memberCount: Math.max(0, row.memberCount - 1) })
       .where(eq(communities.id, communityId));
   return c.json({ ok: true });
+});
+
+// --- POST /:id/invites —— 邀请注册用户入社区（owner/admin；目标收站内信+邮件） ---
+communitiesApi.post("/:id/invites", async (c) => {
+  const db = dbOf(c);
+  const actorId = requireUserId(c);
+  const actor = requireCurrentUser(c);
+  const communityId = c.req.param("id");
+  const row = (
+    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+  )[0];
+  if (!row) throw HttpApiError.notFound("community not found");
+  await requireModerator(db, communityId, actorId);
+
+  const body = await jsonBody<CreateInviteRequest>(c);
+  const who = body.handleOrEmail?.trim() ?? "";
+  if (!who) throw HttpApiError.badRequest("handleOrEmail required");
+  const found = await findAuthUserByHandleOrEmail(c.env.DB, who);
+  if (!found) {
+    throw new HttpApiError(
+      404,
+      "INVITE_INVALID",
+      "未找到该用户：目前只能邀请已注册用户，请输入对方的 @handle 或注册邮箱",
+    );
+  }
+  if (found.user.id === actorId) {
+    throw HttpApiError.badRequest("不能邀请自己");
+  }
+
+  const invite = await createCommunityInvite({
+    db,
+    env: c.env,
+    request: c.req.raw as Request,
+    community: row,
+    actor: { id: actorId, handle: actor.handle },
+    target: { id: found.user.id, email: found.email },
+  });
+  return c.json({ ...invite, invitee: found.user }, 201);
+});
+
+// --- DELETE /:id —— 删除社区（仅 owner） ---
+// 级联清理顺序：先删子表（消息/未读/频道/成员）再删社区本身；R2 附件对象
+// 留在桶里由孤儿回收策略兜底（与删频道一致），不影响数据一致性。
+communitiesApi.delete("/:id", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const row = (
+    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+  )[0];
+  if (!row) throw HttpApiError.notFound("community not found");
+  await requireOwner(db, communityId, userId);
+
+  const channelRows = await db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(eq(channels.communityId, communityId));
+  const channelIds = channelRows.map((r) => r.id);
+  if (channelIds.length > 0) {
+    await db.delete(channelReadStates).where(inArray(channelReadStates.channelId, channelIds));
+  }
+  await db.delete(messages).where(eq(messages.communityId, communityId));
+  await db.delete(channels).where(eq(channels.communityId, communityId));
+  await db.delete(communityMembers).where(eq(communityMembers.communityId, communityId));
+  await db.delete(communities).where(eq(communities.id, communityId));
+  return emptyOk(c);
 });
 
 // ================================================================
@@ -476,8 +525,6 @@ communitiesApi.post("/:id/channels", async (c) => {
     kind: body.kind ?? "text",
     position,
     topic: body.topic ?? null,
-    isHelp: body.isHelp ?? false,
-    isShowcase: body.isShowcase ?? false,
     createdAt: now,
     updatedAt: now,
   });
@@ -672,8 +719,6 @@ channelsApi.patch("/:id", async (c) => {
   }
   if (body.topic !== undefined) patch.topic = body.topic;
   if (body.position !== undefined) patch.position = body.position;
-  if (body.isHelp !== undefined) patch.isHelp = body.isHelp;
-  if (body.isShowcase !== undefined) patch.isShowcase = body.isShowcase;
   if (body.kind !== undefined) patch.kind = body.kind;
   if (Object.keys(patch).length === 0) throw HttpApiError.badRequest("empty patch");
   patch.updatedAt = Date.now();

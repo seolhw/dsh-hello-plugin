@@ -10,6 +10,7 @@ import type {
   AuthUser,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
+  InboxItem,
   ListMembersResponse,
   MessageAttachmentPut,
   SignUpEmailRequest,
@@ -62,6 +63,13 @@ export interface TalkState {
   view: ViewState;
   /** 注册成功后待验证的邮箱；非空时 AuthScreen 切换到验证码界面 */
   pendingEmail: string | null;
+  /** 站内信收件箱 */
+  inboxOpen: boolean;
+  notifications: InboxItem[];
+  inboxLoading: boolean;
+  inboxUnread: number;
+  /** 正在处理（接受/拒绝）的站内信 id，用于按钮禁用 */
+  inboxBusyId: string | null;
 }
 
 // ---------------- 初始状态 ----------------
@@ -91,6 +99,11 @@ const INITIAL: TalkState = {
   toast: "",
   view: INITIAL_VIEW,
   pendingEmail: null,
+  inboxOpen: false,
+  notifications: [],
+  inboxLoading: false,
+  inboxUnread: 0,
+  inboxBusyId: null,
 };
 
 let state: TalkState = { ...INITIAL, view: { ...INITIAL_VIEW } };
@@ -147,6 +160,17 @@ export function dismissToast(): void {
     toastTimer = null;
   }
   setState({ toast: "" });
+}
+
+/** 清空站内信状态（登出 / 切换账号时调用） */
+function resetInbox(): void {
+  setState({
+    inboxOpen: false,
+    notifications: [],
+    inboxLoading: false,
+    inboxUnread: 0,
+    inboxBusyId: null,
+  });
 }
 
 // ---------------- React hook ----------------
@@ -251,6 +275,31 @@ export function cancelVerification(): void {
   setState({ pendingEmail: null });
 }
 
+/**
+ * 忘记密码 step1：请求把 6 位重置验证码发到邮箱。
+ * 服务端对「邮箱不存在」也返回成功（防探测），文案由调用方统一提示。
+ */
+export async function requestPasswordResetOtp(email: string): Promise<void> {
+  const settings = state.settings;
+  if (!settings) throw new Error("尚未就绪");
+  await makeServer(settings).requestPasswordResetOtp(email.trim());
+}
+
+/** 忘记密码 step2：用邮箱收到的验证码重设密码（成功后回登录页手动登录） */
+export async function resetPasswordWithOtp(input: {
+  email: string;
+  otp: string;
+  password: string;
+}): Promise<void> {
+  const settings = state.settings;
+  if (!settings) throw new Error("尚未就绪");
+  await makeServer(settings).resetPasswordWithOtp({
+    email: input.email.trim(),
+    otp: input.otp.trim(),
+    password: input.password,
+  });
+}
+
 export async function applySession(result: { user: AuthUser; token: string }): Promise<void> {
   setState({ busy: true, error: "" });
   try {
@@ -258,6 +307,7 @@ export async function applySession(result: { user: AuthUser; token: string }): P
     const next = await hostConfigSet({ token: result.token, handle: me.handle });
     const server = makeServer(next);
     const communities = await server.myCommunities();
+    resetInbox();
     setState({
       busy: false,
       phase: "ready",
@@ -266,6 +316,7 @@ export async function applySession(result: { user: AuthUser; token: string }): P
       communities,
       view: { ...INITIAL_VIEW },
     });
+    void refreshInboxUnread();
   } catch (error) {
     setState({ busy: false, phase: "anon", error: errorText(error) });
     throw error;
@@ -375,6 +426,7 @@ export async function logout(): Promise<void> {
     settings: settings === null ? null : { ...settings, token: "" },
     pendingEmail: null,
   });
+  resetInbox();
 }
 
 // ---------------- 初始化 / 刷新 ----------------
@@ -384,12 +436,14 @@ export async function refresh(): Promise<void> {
   try {
     const settings = await hostConfigGet();
     if (settings.token.length === 0) {
+      resetInbox();
       setState({ phase: "anon", busy: false, settings, pendingEmail: null });
       return;
     }
     const server = makeServer(settings);
     const session = await server.getSession();
     if (!session?.session || !session.user) {
+      resetInbox();
       setState({ phase: "anon", busy: false, settings, pendingEmail: null });
       return;
     }
@@ -405,8 +459,10 @@ export async function refresh(): Promise<void> {
     const nextSettings =
       settings.handle === me.handle ? settings : { ...settings, handle: me.handle };
     setState({ busy: false, phase: "ready", settings: nextSettings, me, communities });
+    void refreshInboxUnread();
   } catch (error) {
     if (error instanceof ServerApiError && error.status === 401) {
+      resetInbox();
       setState({
         phase: "anon",
         busy: false,
@@ -430,6 +486,127 @@ export async function refreshCommunities(): Promise<void> {
     setState({ communities });
   } catch {
     // 静默失败：下次刷新再试
+  }
+}
+
+// ---------------- 站内信（事件收件箱） ----------------
+
+/** 打开收件箱并拉取我的站内信 */
+export async function openInbox(): Promise<void> {
+  if (!state.open || !serverOf()) return;
+  setState({ inboxOpen: true, inboxLoading: true });
+  try {
+    const server = serverOf();
+    if (!server) {
+      setState({ inboxOpen: false, inboxLoading: false });
+      return;
+    }
+    const res = await server.listNotifications({ limit: 50 });
+    setState({ notifications: res.items, inboxUnread: res.unread, inboxLoading: false });
+  } catch (error) {
+    setState({ inboxLoading: false });
+    notify(errorText(error));
+  }
+}
+
+export function closeInbox(): void {
+  setState({ inboxOpen: false });
+}
+
+/** 轻量刷新未读数（角标 / 定时轮询用） */
+export async function refreshInboxUnread(): Promise<void> {
+  const server = serverOf();
+  if (!server || !state.open) return;
+  try {
+    const res = await server.listNotifications({ limit: 1 });
+    if (res.unread !== state.inboxUnread) setState({ inboxUnread: res.unread });
+  } catch {
+    // 静默失败：等下次轮询
+  }
+}
+
+function mapNotification(item: InboxItem, patch: Partial<InboxItem>): InboxItem {
+  return { ...item, ...patch };
+}
+
+/** 接受某条邀请类站内信（成功即入会并打开社区） */
+export async function acceptInvite(inviteId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server || state.inboxBusyId !== null) return false;
+  setState({ inboxBusyId: inviteId });
+  try {
+    const joined = await server.acceptInvite(inviteId);
+    setState({ inboxBusyId: null, inboxOpen: false });
+    notify(`已加入社区「${joined.name}」`);
+    await refreshCommunities();
+    await openCommunity(joined.id);
+    void refreshInboxUnread();
+    return true;
+  } catch (error) {
+    setState({ inboxBusyId: null });
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 拒绝某条邀请类站内信 */
+export async function declineInvite(inviteId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server || state.inboxBusyId !== null) return false;
+  setState({ inboxBusyId: inviteId });
+  try {
+    await server.declineInvite(inviteId);
+    setState({
+      inboxBusyId: null,
+      notifications: state.notifications.map((n) =>
+        n.kind === "invite" && n.data?.inviteId === inviteId
+          ? mapNotification(n, {
+              isRead: true,
+              invite: n.invite ? { ...n.invite, status: "declined" } : n.invite,
+            })
+          : n,
+      ),
+    });
+    notify("已拒绝该邀请");
+    void refreshInboxUnread();
+    return true;
+  } catch (error) {
+    setState({ inboxBusyId: null });
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 标记一条站内信已读 */
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  try {
+    await server.markNotificationRead(notificationId);
+    const wasUnread = state.notifications.some((n) => n.id === notificationId && !n.isRead);
+    setState({
+      notifications: state.notifications.map((n) =>
+        n.id === notificationId ? mapNotification(n, { isRead: true }) : n,
+      ),
+      inboxUnread: Math.max(0, state.inboxUnread - (wasUnread ? 1 : 0)),
+    });
+  } catch {
+    // 已读失败不影响浏览
+  }
+}
+
+/** 全部已读 */
+export async function markAllNotificationsRead(): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  try {
+    await server.markAllNotificationsRead();
+    setState({
+      notifications: state.notifications.map((n) => mapNotification(n, { isRead: true })),
+      inboxUnread: 0,
+    });
+  } catch (error) {
+    notify(errorText(error));
   }
 }
 
@@ -524,6 +701,22 @@ export async function leaveCommunity(communityId: string): Promise<void> {
   }
 }
 
+/** 删除社区（仅 owner 可见入口）；服务端级联清除频道/消息/成员 */
+export async function deleteCommunity(communityId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.deleteCommunity(communityId);
+    if (state.view.communityId === communityId) backToCommunities();
+    await refreshCommunities();
+    notify("社区已删除");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
 // ---------------- 社区 / 成员 / 频道 管理（owner/admin） ----------------
 
 /** 重新拉取当前社区详情（编辑/建频道后刷新频道列表等） */
@@ -571,19 +764,20 @@ export async function updateCommunity(patch: {
   }
 }
 
-/** 轮换邀请码，返回新码 */
-export async function rotateInvite(): Promise<string | null> {
+/** 邀请已注册用户入社区（owner/admin）；目标会收到站内信 + 邮件 */
+export async function inviteMember(handleOrEmail: string): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
-  if (!server || !communityId) return null;
+  if (!server || !communityId) return false;
+  const who = handleOrEmail.trim();
+  if (!who) return false;
   try {
-    const res = await server.rotateInvite(communityId);
-    await reloadCommunityDetail();
-    notify("邀请码已更新");
-    return res.inviteCode;
+    const res = await server.createInvite(communityId, { handleOrEmail: who });
+    notify(`已向 ${res.invitee.handle} 发送邀请（站内信 + 邮件）`);
+    return true;
   } catch (error) {
     notify(errorText(error));
-    return null;
+    return false;
   }
 }
 
@@ -636,9 +830,7 @@ export async function kickMember(userId: string): Promise<boolean> {
 export async function createChannel(input: {
   name: string;
   topic?: string;
-  kind?: "text" | "announcement";
-  isHelp?: boolean;
-  isShowcase?: boolean;
+  kind?: "text" | "announcement" | "help";
 }): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
@@ -647,14 +839,10 @@ export async function createChannel(input: {
     const body: {
       name: string;
       topic?: string | null;
-      kind?: "text" | "announcement";
-      isHelp?: boolean;
-      isShowcase?: boolean;
+      kind?: "text" | "announcement" | "help";
     } = { name: input.name };
     if (input.topic !== undefined) body.topic = input.topic;
     if (input.kind !== undefined) body.kind = input.kind;
-    if (input.isHelp !== undefined) body.isHelp = input.isHelp;
-    if (input.isShowcase !== undefined) body.isShowcase = input.isShowcase;
     const created = await server.createChannel(communityId, body);
     await reloadCommunityDetail();
     await selectChannel(created.id);
@@ -672,9 +860,7 @@ export async function updateChannelById(
   patch: {
     name?: string;
     topic?: string | null;
-    kind?: "text" | "announcement";
-    isHelp?: boolean;
-    isShowcase?: boolean;
+    kind?: "text" | "announcement" | "help";
   },
 ): Promise<boolean> {
   const server = serverOf();

@@ -111,19 +111,60 @@ export function dispatchResetPasswordEmail(
   );
 }
 
-/** 发送 6 位邮箱验证码（emailOTP 插件回调）。验证码 5 分钟内有效。 */
+/**
+ * 发送 6 位验证码邮件（emailOTP 插件回调）。验证码 5 分钟内有效。
+ * type=forget-password 时用于「忘记密码」，主题/正文换成重置密码语境。
+ */
 export function dispatchVerificationOTPEmail(
   env: Env,
   request: Request | undefined,
   email: string,
   otp: string,
+  type:
+    | "email-verification"
+    | "forget-password"
+    | "sign-in"
+    | "change-email" = "email-verification",
 ): void {
+  const isReset = type === "forget-password";
   runDetached(
     request,
     sendMail(env, {
       to: email,
-      subject: "dsh-talk：你的邮箱验证码",
-      text: `你的邮箱验证码是：${otp}\n\n5 分钟内有效。如果不是你本人操作，请忽略本邮件。`,
+      subject: isReset ? "dsh-talk：重置密码验证码" : "dsh-talk：你的邮箱验证码",
+      text: isReset
+        ? `你正在重置 dsh-talk 账号的密码，验证码是：${otp}\n\n5 分钟内有效。如果这不是你的操作，请忽略本邮件，密码不会改变。`
+        : `你的 dsh-talk 邮箱验证码是：${otp}\n\n5 分钟内有效。如果不是你本人操作，请忽略本邮件。`,
+    }),
+  );
+}
+
+/** 社区邀请邮件：与被邀请人的站内信同时投递（随请求 waitUntil 后台发送） */
+export function dispatchInvitationEmail(
+  env: Env,
+  request: Request | undefined,
+  mail: {
+    to: string;
+    inviter: string;
+    communityName: string;
+    inviteCode: string;
+  },
+): void {
+  const codeHint =
+    mail.inviteCode.length > 0
+      ? `2. 或在社区面板点「＋ 用邀请码加入」，输入邀请码 ${mail.inviteCode} 加入。`
+      : "";
+  runDetached(
+    request,
+    sendMail(env, {
+      to: mail.to,
+      subject: `${mail.inviter} 邀请你加入 dsh-talk 社区「${mail.communityName}」`,
+      text:
+        `${mail.inviter} 邀请你加入 dsh-talk 社区「${mail.communityName}」。\n\n` +
+        `加入方式：\n` +
+        `1. 打开 dsh-talk 的「社区」面板，点击左上角铃铛查看站内信，点「加入」即可；\n` +
+        (codeHint ? `${codeHint}\n` : "") +
+        `\n如果你不认识对方，忽略本邮件即可。`,
     }),
   );
 }

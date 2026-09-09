@@ -50,7 +50,7 @@ export async function requireModerator(
   return member;
 }
 
-/** 必须是 owner（最高权限：删除/转让/轮换邀请等敏感操作按需用） */
+/** 必须是 owner（最高权限：删除社区/转让等敏感操作按需用） */
 export async function requireOwner(
   db: Db,
   communityId: string,

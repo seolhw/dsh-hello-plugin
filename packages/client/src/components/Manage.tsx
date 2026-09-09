@@ -10,7 +10,6 @@ import {
   IconEditOutline16,
   IconEllipsisOutline16,
   IconPlusOutline16,
-  IconRefreshOutline16,
   IconRightUpOutline16,
   IconTrashOutline16,
   IconUserOutline16,
@@ -25,11 +24,12 @@ import { useEffect, useState } from "react";
 import {
   createChannel,
   deleteChannelById,
+  deleteCommunity,
+  inviteMember,
   kickMember,
   leaveCommunity,
   listMembers,
   notify,
-  rotateInvite,
   setMemberRole,
   updateChannelById,
   updateCommunity,
@@ -103,7 +103,7 @@ const dialogHint: CSSProperties = {
   lineHeight: 1.6,
 };
 
-type CommunityDialog = null | "members" | "invite" | "settings";
+type CommunityDialog = null | "members" | "invite-user" | "invite" | "settings";
 
 /** 频道列表顶部的社区管理菜单（成员 / 邀请码 / 设置 / 退出） */
 export function CommunityTools(): ReactElement | null {
@@ -118,6 +118,7 @@ export function CommunityTools(): ReactElement | null {
   if (moder) {
     menuItems.push(
       { id: "members", label: "成员管理", icon: <IconUserOutline16 /> },
+      { id: "invite-user", label: "邀请用户", icon: <IconPlusOutline16 /> },
       { id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> },
       { id: "settings", label: "社区设置", icon: <IconEditOutline16 /> },
       { type: "separator", id: "sep" },
@@ -132,7 +133,8 @@ export function CommunityTools(): ReactElement | null {
         onClose={() => setMenuOpen(false)}
         onSelect={(id) => {
           setMenuOpen(false);
-          if (id === "members" || id === "invite" || id === "settings") setDialog(id);
+          if (id === "members" || id === "invite-user" || id === "invite" || id === "settings")
+            setDialog(id);
           if (id === "leave") {
             if (window.confirm("退出该社区？所有者需先转让所有权。"))
               void leaveCommunity(communityId);
@@ -151,32 +153,21 @@ export function CommunityTools(): ReactElement | null {
         portal
       />
       {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
+      {dialog === "invite-user" ? <InviteUserDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite" ? <InviteDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "settings" ? <SettingsDialog open onClose={() => setDialog(null)} /> : null}
     </>
   );
 }
 
-/** 邀请码展示 / 复制 / 轮换（owner/admin 可轮换；码对所有成员可见） */
+/** 邀请码展示 / 复制（创建社区时生成、固定不变；码对所有成员可见） */
 function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
   const talk = useTalkState();
   const community = talk.view.community;
   const code = community?.inviteCode ?? "";
-  const moder = isModerator(community?.myRole);
-  const [busy, setBusy] = useState(false);
 
   async function copy(): Promise<void> {
     await writeClipboard(code);
-    notify("邀请码已复制");
-  }
-  async function rotate(): Promise<void> {
-    setBusy(true);
-    const next = await rotateInvite();
-    setBusy(false);
-    if (next) await copyToClipboard(next);
-  }
-  async function copyToClipboard(value: string): Promise<void> {
-    await writeClipboard(value);
     notify("邀请码已复制");
   }
 
@@ -203,18 +194,66 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <Button variant="outline" icon={<IconCopyOutline16 />} onClick={() => void copy()}>
             复制
           </Button>
-          {moder ? (
-            <Button
-              variant="ghost"
-              icon={<IconRefreshOutline16 />}
-              disabled={busy}
-              onClick={() => void rotate()}
-            >
-              换新码
-            </Button>
-          ) : null}
         </div>
-        <span style={dialogHint}>所有成员均可查看，仅所有者/管理员可换新码。</span>
+        <span style={dialogHint}>
+          邀请码在创建社区时生成、固定不变，不会过期；请妥善保存，所有成员均可查看。
+        </span>
+      </div>
+    </Modal>
+  );
+}
+
+/** 邀请已注册用户入社区（owner/admin）：输入 @用户名 或邮箱，对方会收到站内信 + 邮件 */
+function InviteUserDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // 每次打开清空输入
+  useEffect(() => {
+    if (open) setValue("");
+  }, [open]);
+
+  async function submit(): Promise<void> {
+    if (busy || value.trim().length === 0) return;
+    setBusy(true);
+    const ok = await inviteMember(value);
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="邀请用户加入"
+      closeLabel="关闭"
+      description="输入对方的 @用户名 或注册邮箱，对方会收到站内信和邮件邀请。"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || value.trim().length === 0}
+            onClick={() => void submit()}
+          >
+            {busy ? "邀请中…" : "发送邀请"}
+          </Button>
+        </>
+      }
+    >
+      <div style={fieldBlock}>
+        <label htmlFor="talk-invite-user" style={fieldLabel}>
+          @用户名 或邮箱
+        </label>
+        <Input
+          id="talk-invite-user"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="如 @alice 或 alice@example.com"
+        />
+        <span style={dialogHint}>仅可邀请已注册的用户；对方接受后即可加入社区。</span>
       </div>
     </Modal>
   );
@@ -253,6 +292,19 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
       privacy,
       iconUrl,
     });
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  /** 删除社区（仅 owner 可见按钮）；删除后整个社区及其内容不复存在 */
+  async function removeCommunity(): Promise<void> {
+    if (!community) return;
+    const confirmed = window.confirm(
+      `删除社区「${community.name}」？其中所有频道与消息将被永久删除，且无法恢复。`,
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    const ok = await deleteCommunity(community.id);
     setBusy(false);
     if (ok) onClose();
   }
@@ -333,6 +385,34 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             </button>
           </div>
         </div>
+        {community?.myRole === "owner" ? (
+          <div
+            style={{
+              borderTop: `1px solid ${palette.border}`,
+              paddingTop: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <span style={dialogHint}>
+              危险操作：删除社区「{community.name}」后，其全部频道与消息将被永久清除。
+            </span>
+            <Button
+              variant="ghost"
+              icon={<IconTrashOutline16 />}
+              disabled={busy}
+              onClick={() => void removeCommunity()}
+              style={{
+                color: palette.danger,
+                border: `1px solid ${palette.dangerSoft}`,
+                alignSelf: "flex-start",
+              }}
+            >
+              删除社区
+            </Button>
+          </div>
+        ) : null}
       </div>
     </Modal>
   );
@@ -503,8 +583,7 @@ function ChannelDialog({
   const isEdit = channel !== undefined;
   const [name, setName] = useState(channel?.name ?? "");
   const [topic, setTopic] = useState(channel?.topic ?? "");
-  const [kind, setKind] = useState<"text" | "announcement">(channel?.kind ?? "text");
-  const [isHelp, setIsHelp] = useState(channel?.isHelp ?? false);
+  const [kind, setKind] = useState<"text" | "announcement" | "help">(channel?.kind ?? "text");
   const [busy, setBusy] = useState(false);
 
   async function save(): Promise<void> {
@@ -516,18 +595,15 @@ function ChannelDialog({
         name: name.trim(),
         topic: topic.length > 0 ? topic : null,
         kind,
-        isHelp,
       });
     } else {
       const body: {
         name: string;
         topic?: string;
-        kind?: "text" | "announcement";
-        isHelp?: boolean;
+        kind?: "text" | "announcement" | "help";
       } = {
         name: name.trim(),
         kind,
-        isHelp,
       };
       if (topic.length > 0) body.topic = topic;
       ok = await createChannel(body);
@@ -545,7 +621,7 @@ function ChannelDialog({
       description={
         isEdit
           ? "可改名、改主题与类型。删除频道请用频道旁的「…」。"
-          : "和 Discord 一样，频道用于承载某一主题的实时消息。"
+          : "频道用于承载某一主题的实时消息。"
       }
       footer={
         <>
@@ -585,38 +661,38 @@ function ChannelDialog({
             placeholder="主题（显示在消息区顶部，可选）"
           />
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-          <div style={{ ...fieldBlock, flex: 1 }}>
-            <span style={fieldLabel}>类型</span>
-            <div style={pillGroup}>
-              <button
-                type="button"
-                style={{ ...pillKey, ...(kind === "text" ? pillKeyActive : {}) }}
-                onClick={() => setKind("text")}
-              >
-                文字
-              </button>
-              <button
-                type="button"
-                style={{ ...pillKey, ...(kind === "announcement" ? pillKeyActive : {}) }}
-                onClick={() => setKind("announcement")}
-              >
-                公告
-              </button>
-            </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>类型</span>
+          <div style={pillGroup}>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(kind === "text" ? pillKeyActive : {}) }}
+              onClick={() => setKind("text")}
+            >
+              文字
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(kind === "announcement" ? pillKeyActive : {}) }}
+              onClick={() => setKind("announcement")}
+            >
+              公告
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(kind === "help" ? pillKeyActive : {}) }}
+              onClick={() => setKind("help")}
+            >
+              求助
+            </button>
           </div>
-          <div style={{ ...fieldBlock, flex: 1 }}>
-            <span style={fieldLabel}>属性</span>
-            <div style={pillGroup}>
-              <button
-                type="button"
-                style={{ ...pillKey, ...(isHelp ? pillKeyActive : {}) }}
-                onClick={() => setIsHelp((v) => !v)}
-              >
-                求助频道
-              </button>
-            </div>
-          </div>
+          <span style={dialogHint}>
+            {kind === "text"
+              ? "全员自由发言。"
+              : kind === "announcement"
+                ? "仅所有者/管理员可发，普通成员只读。"
+                : "提问消息可标记「已解决」，适合问答。"}
+          </span>
         </div>
       </div>
     </Modal>

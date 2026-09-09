@@ -17,7 +17,6 @@ import {
   IconTrashOutline16,
   Input,
   Modal,
-  Pill,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { Channel, MessageAttachment } from "@dsh-talk/types/entities";
 import type { ChangeEvent, CSSProperties, ReactElement, ReactNode, UIEvent } from "react";
@@ -39,6 +38,7 @@ import {
   setDraft,
   snapshotChannel,
   updateMessage,
+  updateUserName,
   useTalkState,
 } from "../store";
 import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
@@ -125,8 +125,27 @@ const msgRow: CSSProperties = {
   border: `1px solid transparent`,
 };
 
+const creatorRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+  padding: "6px 0",
+};
+
+const emptyMsg: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 6,
+  padding: "38px 16px",
+  color: palette.muted,
+  textAlign: "center",
+};
+
 const composerWrap: CSSProperties = {
   borderTop: `1px solid ${palette.border}`,
+  background: palette.page,
   padding: "10px 14px",
   display: "flex",
   gap: 8,
@@ -174,23 +193,145 @@ const pendingChip: CSSProperties = {
   maxWidth: 260,
 };
 
+// 与登录/注册一致的品牌渐变元素（@_@）
+const brandMark: CSSProperties = {
+  width: 52,
+  height: 52,
+  borderRadius: 14,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background:
+    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 24,
+  userSelect: "none",
+  flex: "0 0 auto",
+};
+
+const emptyCard: CSSProperties = {
+  width: 380,
+  maxWidth: "calc(100vw - 56px)",
+  background: palette.panel,
+  border: `1px solid ${palette.border}`,
+  borderRadius: 16,
+  padding: "34px 30px",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 12,
+  color: palette.text,
+  textAlign: "center",
+};
+
+const sectionTitle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 650,
+  color: palette.caption,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  padding: "4px 8px 2px",
+};
+
+// 社区栏顶部的迷你品牌标志（登录/注册品牌渐变的小号版本）
+const railMark: CSSProperties = {
+  width: 34,
+  height: 34,
+  borderRadius: 10,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background:
+    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 17,
+  userSelect: "none",
+  flex: "0 0 auto",
+};
+
+// 分段式激活态（对齐 AuthScreen 的 Segmented 控件）
+const activeTile: CSSProperties = {
+  background: palette.elevated,
+  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+  border: `1px solid ${palette.border}`,
+};
+
+const liveDot: CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  flex: "0 0 auto",
+};
+
+// ---------- 与登录/注册一致的弹窗表单样式 ----------
+
+/** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件） */
+const pillGroup: CSSProperties = {
+  display: "flex",
+  gap: 2,
+  padding: 3,
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+const pillKey: CSSProperties = {
+  flex: 1,
+  border: "none",
+  borderRadius: 8,
+  padding: "7px 12px",
+  fontSize: 13,
+  fontWeight: 450,
+  color: palette.muted,
+  background: "transparent",
+  cursor: "pointer",
+  transition: "background 120ms ease, color 120ms ease",
+};
+
+const pillKeyActive: CSSProperties = {
+  fontWeight: 600,
+  color: palette.text,
+  background: palette.elevated,
+  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+};
+
+const fieldBlock: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+const fieldLabel: CSSProperties = {
+  fontSize: 12,
+  color: palette.muted,
+  fontWeight: 500,
+};
+
 // ---------------- 社区栏 ----------------
 
 function CommunitiesRail({
   onJoin,
   onCreate,
+  onEditProfile,
 }: {
   onJoin: () => void;
   onCreate: () => void;
+  onEditProfile: () => void;
 }): ReactElement {
   const talk = useTalkState();
   const current = talk.view.communityId;
   const me = talk.me;
   return (
     <div style={rail}>
-      <div style={railHeader}>
-        <span style={{ fontSize: 13, fontWeight: 650, color: palette.muted }}>社区</span>
-        <span style={{ display: "flex", gap: 2 }}>
+      <div style={{ ...railHeader, gap: 6 }}>
+        <span style={railMark}>{me?.handle.slice(0, 1).toUpperCase() ?? "T"}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.2 }}>dsh-talk</span>
+          <span style={{ ...smallText, fontSize: 10.5 }}>社区</span>
+        </div>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
           <Button
             size="sm"
             variant="ghost"
@@ -211,45 +352,55 @@ function CommunitiesRail({
       </div>
       <div style={railScroll}>
         {talk.communities.length === 0 ? (
-          <div style={{ ...smallText, padding: "8px 10px", lineHeight: 1.6 }}>
+          <div style={{ ...smallText, padding: "12px 12px", lineHeight: 1.7 }}>
             还没有社区。
             <br />
-            点右上「+」创建，或用邀请码加入。
+            点右上「＋」创建，或用邀请码加入。
           </div>
         ) : (
-          talk.communities.map((c) => {
-            const active = c.id === current;
-            const unread = c.unreadChannels;
-            const mention = c.unreadMentions;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                style={{ ...itemRow, background: active ? palette.active : undefined }}
-                onClick={() => {
-                  if (!active) void openCommunity(c.id);
-                }}
-              >
-                <Avatar label={c.name} size={26} />
-                <span
+          <>
+            <div style={sectionTitle}>我的社区</div>
+            {talk.communities.map((c) => {
+              const active = c.id === current;
+              const unread = c.unreadChannels;
+              const mention = c.unreadMentions;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
                   style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    ...itemRow,
+                    background: active ? palette.hover : undefined,
+                    border: "1px solid transparent",
+                    ...(active ? activeTile : {}),
+                    marginBottom: 2,
+                    fontWeight: active ? 600 : 450,
+                  }}
+                  onClick={() => {
+                    if (!active) void openCommunity(c.id);
                   }}
                 >
-                  {c.name}
-                </span>
-                {mention > 0 ? (
-                  <span style={{ ...badge, background: palette.accent }}>{mention}</span>
-                ) : unread > 0 ? (
-                  <span style={badge}>{unread}</span>
-                ) : null}
-              </button>
-            );
-          })
+                  <Avatar label={c.name} size={26} />
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {c.name}
+                  </span>
+                  {mention > 0 ? (
+                    <span style={{ ...badge, background: palette.accent }}>{mention}</span>
+                  ) : unread > 0 ? (
+                    <span style={badge}>{unread}</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </>
         )}
       </div>
       {me ? (
@@ -258,8 +409,11 @@ function CommunitiesRail({
             display: "flex",
             alignItems: "center",
             gap: 6,
-            padding: "8px 10px",
-            borderTop: `1px solid ${palette.border}`,
+            margin: "0 8px 8px",
+            padding: "7px 8px",
+            borderRadius: 12,
+            background: palette.inputBg,
+            border: `1px solid ${palette.border}`,
           }}
         >
           <Avatar label={me.handle} size={24} />
@@ -271,11 +425,20 @@ function CommunitiesRail({
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontSize: 12,
-              color: palette.secondary,
+              fontWeight: 600,
+              color: palette.text,
             }}
           >
             @{me.handle}
           </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconEditOutline16 />}
+            onClick={onEditProfile}
+            aria-label="修改用户名"
+            title="修改用户名"
+          />
           <Button
             size="sm"
             variant="ghost"
@@ -331,7 +494,8 @@ function ChannelList(): ReactElement | null {
         </span>
         <CommunityTools />
       </div>
-      <div style={{ ...railScroll, flex: 1 }}>
+      <div style={{ ...railScroll, flex: 1, padding: "0 8px 8px" }}>
+        <div style={sectionTitle}>频道</div>
         {community.channels.map((ch: Channel) => {
           const active = ch.id === activeChannel;
           return (
@@ -343,7 +507,10 @@ function ChannelList(): ReactElement | null {
                 gap: 2,
                 padding: "0 4px 0 8px",
                 borderRadius: 8,
-                background: active ? palette.active : undefined,
+                background: active ? palette.hover : undefined,
+                border: "1px solid transparent",
+                ...(active ? activeTile : {}),
+                marginBottom: 2,
               }}
             >
               <button
@@ -359,6 +526,7 @@ function ChannelList(): ReactElement | null {
                   border: "none",
                   background: "transparent",
                   color: palette.text,
+                  fontWeight: active ? 600 : 450,
                   cursor: "pointer",
                   textAlign: "left",
                 }}
@@ -712,8 +880,25 @@ function ChatPane(): ReactElement | null {
             borderBottom: `1px solid ${palette.border}`,
           }}
         >
-          <span style={{ color: palette.muted }}>#</span>
-          <span style={{ fontWeight: 650 }}>{channel?.name ?? ""}</span>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 22,
+              height: 22,
+              borderRadius: 6,
+              background: palette.inputBg,
+              border: `1px solid ${palette.border}`,
+              color: palette.muted,
+              fontSize: 12,
+              fontWeight: 700,
+              flex: "0 0 auto",
+            }}
+          >
+            #
+          </span>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>{channel?.name ?? ""}</span>
           {channel?.topic ? (
             <span
               style={{
@@ -734,17 +919,26 @@ function ChatPane(): ReactElement | null {
             aria-label="分享会话快照"
             title="把本频道消息打成可分享的快照"
           />
-          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+          <span
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "3px 8px",
+              borderRadius: 999,
+              background: talk.view.live ? palette.hover : palette.inputBg,
+              border: `1px solid ${palette.border}`,
+            }}
+          >
             <span
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
+                ...liveDot,
                 background: talk.view.live ? palette.success : palette.muted,
-                boxShadow: talk.view.live ? `0 0 6px ${palette.success}` : undefined,
+                boxShadow: talk.view.live ? `0 0 5px ${palette.success}` : undefined,
               }}
             />
-            <span style={{ ...smallText, fontSize: 11 }}>
+            <span style={{ fontSize: 11, color: palette.secondary }}>
               {talk.view.live ? "实时" : "重连中…"}
             </span>
           </span>
@@ -752,13 +946,33 @@ function ChatPane(): ReactElement | null {
 
         <div ref={scrollRef} onScroll={onScroll} style={messagesWrap}>
           {talk.view.messagesLoading ? (
-            <div style={{ ...smallText, padding: 16 }}>加载消息…</div>
+            <div style={{ ...emptyMsg }}>加载消息…</div>
           ) : talk.view.messages.length === 0 ? (
-            <div style={{ ...smallText, padding: 16 }}>还没有消息，来说第一句吧。</div>
+            <div style={{ ...emptyMsg }}>
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 40,
+                  height: 40,
+                  borderRadius: 12,
+                  background: palette.inputBg,
+                  border: `1px solid ${palette.border}`,
+                  color: palette.accent,
+                  fontSize: 18,
+                  fontWeight: 700,
+                }}
+              >
+                #
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>还没有消息</span>
+              <span style={{ fontSize: 12 }}>来说第一句吧。</span>
+            </div>
           ) : (
             <>
               {canLoadMore ? (
-                <div style={{ textAlign: "center", padding: 4 }}>
+                <div style={creatorRow}>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -907,20 +1121,47 @@ function CreateCommunityModal({
         </>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="社区名称" />
-        <Input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="简介（可选）"
-        />
-        <div style={{ display: "flex", gap: 6 }}>
-          <Pill active={privacy === "public"} onClick={() => setPrivacy("public")}>
-            公开
-          </Pill>
-          <Pill active={privacy === "private"} onClick={() => setPrivacy("private")}>
-            私有
-          </Pill>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-create-name" style={fieldLabel}>
+            社区名称
+          </label>
+          <Input
+            id="talk-create-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="社区名称"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-create-desc" style={fieldLabel}>
+            简介
+          </label>
+          <Input
+            id="talk-create-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="简介（可选）"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>可见性</span>
+          <div style={pillGroup}>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
+              onClick={() => setPrivacy("public")}
+            >
+              公开
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
+              onClick={() => setPrivacy("private")}
+            >
+              私有
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
@@ -963,11 +1204,75 @@ function JoinModal({ open, onClose }: { open: boolean; onClose: () => void }): R
         </>
       }
     >
-      <Input
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
-        placeholder="邀请码，如 ABCD1234"
-      />
+      <div style={fieldBlock}>
+        <label htmlFor="talk-join-code" style={fieldLabel}>
+          邀请码
+        </label>
+        <Input
+          id="talk-join-code"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="邀请码，如 ABCD1234"
+        />
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：修改用户名 ----------------
+
+function UpdateUsernameModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}): ReactElement {
+  const talk = useTalkState();
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // 每次打开用当前 handle 预填
+  useEffect(() => {
+    if (open) setValue(talk.me?.handle ?? "");
+  }, [open, talk.me?.handle]);
+
+  async function submit(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    const ok = await updateUserName(value);
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  const trimmed = value.trim();
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="修改用户名"
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || trimmed.length === 0}
+            onClick={() => void submit()}
+          >
+            {busy ? "保存中…" : "保存"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="新的用户名" />
+        <span style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
+          仅限字母、数字、下划线与点；4-30 位且全局唯一（@提及用）。若已被占用会自动提示。
+        </span>
+      </div>
     </Modal>
   );
 }
@@ -1051,31 +1356,46 @@ export function HomeScreen(): ReactElement {
   const talk = useTalkState();
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
+  const [showUsername, setShowUsername] = useState(false);
   const inCommunity = talk.view.communityId !== null;
 
   return (
     <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-      <CommunitiesRail onJoin={() => setShowJoin(true)} onCreate={() => setShowCreate(true)} />
+      <CommunitiesRail
+        onJoin={() => setShowJoin(true)}
+        onCreate={() => setShowCreate(true)}
+        onEditProfile={() => setShowUsername(true)}
+      />
       {inCommunity ? (
         <>
           <ChannelList />
           <ChatPane />
         </>
       ) : (
-        <div
-          style={{
-            ...chatCol,
-            alignItems: "center",
-            justifyContent: "center",
-            color: palette.muted,
-            fontSize: 13,
-          }}
-        >
-          从左侧选择一个社区开始聊天
+        <div style={{ ...chatCol, alignItems: "center", justifyContent: "center" }}>
+          <div style={emptyCard}>
+            <span style={brandMark}>T</span>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                lineHeight: 1.3,
+                marginTop: 2,
+              }}
+            >
+              欢迎使用 dsh-talk 社区
+            </div>
+            <span style={{ ...smallText, fontSize: 12.5, lineHeight: 1.7 }}>
+              从左侧选择一个社区开始聊天，
+              <br />
+              或点右上「＋」创建 / 用邀请码加入。
+            </span>
+          </div>
         </div>
       )}
       <CreateCommunityModal open={showCreate} onClose={() => setShowCreate(false)} />
       <JoinModal open={showJoin} onClose={() => setShowJoin(false)} />
+      <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
     </div>
   );
 }

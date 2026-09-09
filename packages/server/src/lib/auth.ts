@@ -21,6 +21,7 @@ import { createMiddleware } from "hono/factory";
 import type { Env, HonoAppVariables } from "../types";
 import { dispatchResetPasswordEmail, dispatchVerificationEmail } from "./email";
 import { HttpApiError } from "./errors";
+import { uniqueUsernameForEmail } from "./users";
 
 // better-auth 选项类型（不显式 import，避免与实例泛型不一致）
 type BetterAuthOptions = Parameters<typeof betterAuth>[0];
@@ -90,7 +91,7 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       },
     },
     plugins: [
-      username(),
+      username({ minUsernameLength: 4 }),
       // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，
       // 之后所有请求带 Authorization: Bearer <token> 即等价于带 session cookie
       bearer(),
@@ -98,6 +99,23 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
     advanced: {
       // 与默认 /api/auth 一致即可；前缀定短一点避免与业务混淆
       cookiePrefix: "dsh_talk",
+    },
+    // 注册时客户端不提交用户名：由这里在 user.create.before 从邮箱 @ 前缀派生，
+    // 并在前缀被占用时自动生成随机后缀，保证用户名唯一。
+    // 该钩子在 username 插件钩子之后执行（runPluginInit 把顶层 databaseHooks 排在最后）。
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (user) => {
+            const u = user as { email?: string; username?: string | null };
+            const email = u.email ?? "";
+            const existingUsername = u.username ?? null;
+            if (!email || existingUsername) return { data: user };
+            const username = await uniqueUsernameForEmail(env.DB, email);
+            return { data: { ...user, username } };
+          },
+        },
+      },
     },
     // 信任的跨源调用方（本插件是纯 Bearer 会话，无 cookie，CSRF 面小）；
     // 本地 DSH web shell / 前端 dev server 用。BETTER_AUTH_URL 域名始终在允许名单。

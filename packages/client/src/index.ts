@@ -14,7 +14,7 @@
 
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import "./augment";
-import { HelloWorld, TalkPage } from "./components";
+import { TalkPage } from "./components";
 import { refresh } from "./store";
 
 export const inject: string[] = ["slots"];
@@ -35,7 +35,6 @@ export function apply(ctx: ClientContext): void {
         TalkPage,
       ),
     );
-
   } catch (error) {
     // 注册失败只降级为诊断输出，绝不让插件 fiber 崩掉整个 GUI。
     console.error("[dsh-talk] slot register failed:", error);

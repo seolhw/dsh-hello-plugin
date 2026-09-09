@@ -13,6 +13,7 @@ import type {
   ListMembersResponse,
   MessageAttachmentPut,
   SignUpEmailRequest,
+  UpdateUserRequest,
 } from "@dsh-talk/types/api";
 import type { ID, MemberRole, Message, User } from "@dsh-talk/types/entities";
 import type { TalkSettings } from "@dsh-talk/types/rpc";
@@ -201,21 +202,16 @@ export async function login(mode: LoginMode, account: string, password: string):
   await applySession({ user, token });
 }
 
-/** 邮箱注册（用户名可选；name 必填由服务端契约保证，空则退回用户名/邮箱前缀） */
+/** 邮箱注册：用户名由服务端从邮箱 @ 前缀自动派生，客户端不再提交。昵称可选。 */
 export async function register(input: {
   name?: string;
   email: string;
-  username?: string;
   password: string;
 }): Promise<void> {
   const settings = state.settings;
   if (!settings) throw new Error("尚未就绪");
-  const name =
-    input.name?.trim() || input.username?.trim() || input.email.split("@")[0] || "dsh-user";
+  const name = input.name?.trim() || input.email.split("@")[0] || "dsh-user";
   const body: SignUpEmailRequest = { name, email: input.email, password: input.password };
-  if (input.username !== undefined && input.username.trim().length > 0) {
-    body.username = input.username.trim();
-  }
   const result = await makeServer(settings).signUpEmail(body);
   const { user, token } = result;
   if (!token || !user) throw new Error("服务端未返回会话 token");
@@ -240,6 +236,35 @@ export async function applySession(result: { user: AuthUser; token: string }): P
   } catch (error) {
     setState({ busy: false, phase: "anon", error: errorText(error) });
     throw error;
+  }
+}
+
+/** 修改用户名：调用 Better Auth update-user，成功后同步本地 me 与 host handle。 */
+export async function updateUserName(username: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  const trimmed = username.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed === state.me?.handle) {
+    notify("用户名没有变化");
+    return false;
+  }
+  try {
+    const body: UpdateUserRequest = { username: trimmed };
+    const res = await server.updateUser(body);
+    const me = toUser(res.user);
+    try {
+      const next = await hostConfigSet({ handle: me.handle });
+      setState({ me, settings: next });
+    } catch {
+      // 本地写 handle 失败不阻塞用户名更新
+      setState({ me });
+    }
+    notify("用户名已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
   }
 }
 

@@ -35,6 +35,49 @@ export function toEntityUser(row: AuthUserRow): User {
 
 const USER_COLUMNS = "id, name, email, image, username, createdAt";
 
+/** 生成 length 位随机小写字母/数字标签（0-9, a-z） */
+function randomTag(length: number): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(length)))
+    .map((byte) => (byte % 36).toString(36))
+    .join("");
+}
+
+/**
+ * 从邮箱 @ 前缀派生一个合法且唯一的用户名；若前缀已被占用则追加随机后缀。
+ * 归一化规则与 Better Auth username 插件一致：小写 + 仅允许 [a-z0-9_.]，
+ * 且长度固定在 4..30（插件的 minUsernameLength=4, maxUsernameLength=30），
+ * 保证在 databaseHooks 中写入的用户名无需再次触发插件校验也合法。
+ */
+export async function uniqueUsernameForEmail(db: D1Database, email: string): Promise<string> {
+  const prefix = email.split("@")[0] ?? "user";
+  // 清洗为允许字符集，去首尾下划线/点，并控制在 24 位以内（为随机后缀留空间，合计 ≤30）
+  let base =
+    prefix
+      .toLowerCase()
+      .replace(/[^a-z0-9_.]/g, "_")
+      .replace(/^[._]+/, "")
+      .replace(/[._]+$/, "")
+      .slice(0, 24) || "user";
+
+  // 邮箱前缀过短：补齐到 ≥4，避免产生低于 Better Auth 最小长度的用户名
+  if (base.length < 4) {
+    base = `${base}${randomTag(4 - base.length + 1)}`.slice(0, 24);
+  }
+
+  let candidate = base;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (attempt > 0) {
+      candidate = `${base}_${randomTag(4)}`.slice(0, 30);
+    }
+    const existing = await db
+      .prepare(`SELECT id FROM "user" WHERE username = ?`)
+      .bind(candidate)
+      .first();
+    if (!existing) return candidate;
+  }
+  return `${base}_${crypto.randomUUID().slice(0, 8)}`.slice(0, 30);
+}
+
 /** 单查一个认证用户；不存在返回 null */
 export async function fetchUserById(db: D1Database, userId: string): Promise<User | null> {
   const row = await db

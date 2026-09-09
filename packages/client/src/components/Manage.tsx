@@ -16,11 +16,10 @@ import {
   Input,
   Menu,
   Modal,
-  Pill,
   writeClipboard,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { Channel, MemberRole, User } from "@dsh-talk/types/entities";
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
   createChannel,
@@ -47,6 +46,60 @@ const roleColor: Record<MemberRole, string> = {
 };
 
 const roleName: Record<MemberRole, string> = { owner: "所有者", admin: "管理员", member: "成员" };
+
+// ---------- 与登录/注册一致的共享样式 ----------
+
+/** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件）：圆角外壳 + 内部激活键 */
+const pillGroup: CSSProperties = {
+  display: "flex",
+  gap: 2,
+  padding: 3,
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+/** 分段选择组内的单个键 */
+const pillKey: CSSProperties = {
+  flex: 1,
+  border: "none",
+  borderRadius: 8,
+  padding: "7px 12px",
+  fontSize: 13,
+  fontWeight: 450,
+  color: palette.muted,
+  background: "transparent",
+  cursor: "pointer",
+  transition: "background 120ms ease, color 120ms ease",
+};
+
+const pillKeyActive: CSSProperties = {
+  fontWeight: 600,
+  color: palette.text,
+  background: palette.elevated,
+  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+};
+
+/** 表单字段纵向容器 */
+const fieldBlock: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+/** 字段小标签 */
+const fieldLabel: CSSProperties = {
+  fontSize: 12,
+  color: palette.muted,
+  fontWeight: 500,
+};
+
+/** 弹窗说明文字 */
+const dialogHint: CSSProperties = {
+  fontSize: 11.5,
+  color: palette.caption,
+  lineHeight: 1.6,
+};
 
 type CommunityDialog = null | "members" | "invite" | "settings";
 
@@ -130,23 +183,35 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
       onClose={onClose}
       title="邀请码"
       closeLabel="关闭"
-      description="把邀请码发给对方：对方在「+ 加入」里输入即可进社区。"
+      description="把邀请码发给对方：对方在「＋ 加入」里输入即可进社区。"
     >
-      <div style={{ display: "flex", gap: 8 }}>
-        <Input readOnly value={code} aria-label="邀请码" style={{ flex: 1 }} />
-        <Button variant="outline" icon={<IconCopyOutline16 />} onClick={() => void copy()}>
-          复制
-        </Button>
-        {moder ? (
-          <Button
-            variant="ghost"
-            icon={<IconRefreshOutline16 />}
-            disabled={busy}
-            onClick={() => void rotate()}
-          >
-            换新码
+      <div style={fieldBlock}>
+        <label htmlFor="talk-invite-code" style={fieldLabel}>
+          邀请码
+        </label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Input
+            id="talk-invite-code"
+            readOnly
+            value={code}
+            aria-label="邀请码"
+            style={{ flex: 1 }}
+          />
+          <Button variant="outline" icon={<IconCopyOutline16 />} onClick={() => void copy()}>
+            复制
           </Button>
-        ) : null}
+          {moder ? (
+            <Button
+              variant="ghost"
+              icon={<IconRefreshOutline16 />}
+              disabled={busy}
+              onClick={() => void rotate()}
+            >
+              换新码
+            </Button>
+          ) : null}
+        </div>
+        <span style={dialogHint}>所有成员均可查看，仅所有者/管理员可换新码。</span>
       </div>
     </Modal>
   );
@@ -194,26 +259,47 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
         </>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="社区名称"
-          aria-label="社区名称"
-        />
-        <Input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="简介"
-          aria-label="简介"
-        />
-        <div style={{ display: "flex", gap: 6 }}>
-          <Pill active={privacy === "public"} onClick={() => setPrivacy("public")}>
-            公开
-          </Pill>
-          <Pill active={privacy === "private"} onClick={() => setPrivacy("private")}>
-            私有
-          </Pill>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-community-name" style={fieldLabel}>
+            社区名称
+          </label>
+          <Input
+            id="talk-community-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="社区名称"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-community-desc" style={fieldLabel}>
+            简介
+          </label>
+          <Input
+            id="talk-community-desc"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="一句话介绍这个社区"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>可见性</span>
+          <div style={pillGroup}>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
+              onClick={() => setPrivacy("public")}
+            >
+              公开
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
+              onClick={() => setPrivacy("private")}
+            >
+              私有
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
@@ -256,9 +342,9 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   return (
     <Modal open={open} onClose={onClose} title="成员管理" closeLabel="关闭">
       {loading ? (
-        <div style={smallText}>加载成员…</div>
+        <div style={{ ...smallText, padding: "12px 4px" }}>加载成员…</div>
       ) : members.length === 0 ? (
-        <div style={smallText}>还没有成员。</div>
+        <div style={{ ...smallText, padding: "12px 4px" }}>还没有成员。</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {members.map((m) => {
@@ -273,9 +359,10 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  padding: "6px 8px",
-                  borderRadius: 8,
+                  padding: "7px 10px",
+                  borderRadius: 10,
                   background: palette.inputBg,
+                  border: `1px solid ${palette.border}`,
                 }}
               >
                 <Avatar label={m.user.handle} />
@@ -443,29 +530,61 @@ function ChannelDialog({
         </>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="频道名，如 general / help"
-          aria-label="频道名"
-        />
-        <Input
-          value={topic}
-          onChange={(e) => setTopic(e.target.value)}
-          placeholder="主题（显示在消息区顶部，可选）"
-          aria-label="主题"
-        />
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <Pill active={kind === "text"} onClick={() => setKind("text")}>
-            文字
-          </Pill>
-          <Pill active={kind === "announcement"} onClick={() => setKind("announcement")}>
-            公告
-          </Pill>
-          <Pill active={isHelp} onClick={() => setIsHelp((v) => !v)}>
-            求助(可标记解决)
-          </Pill>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-channel-name" style={fieldLabel}>
+            频道名
+          </label>
+          <Input
+            id="talk-channel-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="频道名，如 general / help"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-channel-topic" style={fieldLabel}>
+            主题
+          </label>
+          <Input
+            id="talk-channel-topic"
+            value={topic}
+            onChange={(e) => setTopic(e.target.value)}
+            placeholder="主题（显示在消息区顶部，可选）"
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <div style={{ ...fieldBlock, flex: 1 }}>
+            <span style={fieldLabel}>类型</span>
+            <div style={pillGroup}>
+              <button
+                type="button"
+                style={{ ...pillKey, ...(kind === "text" ? pillKeyActive : {}) }}
+                onClick={() => setKind("text")}
+              >
+                文字
+              </button>
+              <button
+                type="button"
+                style={{ ...pillKey, ...(kind === "announcement" ? pillKeyActive : {}) }}
+                onClick={() => setKind("announcement")}
+              >
+                公告
+              </button>
+            </div>
+          </div>
+          <div style={{ ...fieldBlock, flex: 1 }}>
+            <span style={fieldLabel}>属性</span>
+            <div style={pillGroup}>
+              <button
+                type="button"
+                style={{ ...pillKey, ...(isHelp ? pillKeyActive : {}) }}
+                onClick={() => setIsHelp((v) => !v)}
+              >
+                求助频道
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </Modal>

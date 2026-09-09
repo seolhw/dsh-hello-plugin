@@ -33,7 +33,7 @@ import { getMembership, requireMember, requireModerator } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
-import { newId, newInviteCode } from "../lib/ids";
+import { newId, newInviteCode, newSlug } from "../lib/ids";
 import { type AppCtx, emptyOk } from "../lib/response";
 import { fetchUserById, fetchUsersByIds } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
@@ -214,10 +214,13 @@ communitiesApi.post("/", async (c) => {
 
   const id = newId();
   const now = Date.now();
-  const slug = body.slug?.trim() ? body.slug.trim().toLowerCase() : null;
-  if (slug) {
+  // 社区短标识：创建时自动生成（nanoid，数字+大小写字母、8 位、无符号），
+  // 不依赖用户输入，并在此做唯一性兜底（正常几乎不会撞）。
+  let slug = newSlug();
+  for (let i = 0; i < 5; i += 1) {
     const dup = await db.select().from(communities).where(eq(communities.slug, slug)).limit(1);
-    if (dup.length > 0) throw HttpApiError.conflict("slug 已被占用");
+    if (dup.length === 0) break;
+    slug = newSlug();
   }
   const inviteCode = newInviteCode();
   const communityId = id;

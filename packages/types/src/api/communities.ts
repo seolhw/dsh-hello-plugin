@@ -22,7 +22,7 @@ export type GetMyCommunitiesResponse = (Community & {
   unreadMentions: number;
 })[];
 
-/** POST /api/communities —— 创建社区（注册用户） */
+/** POST /api/communities —— 创建社区（注册用户）；slug 由系统自动生成 */
 export interface CreateCommunityRequest {
   name: string;
   description?: string | null;
@@ -30,8 +30,6 @@ export interface CreateCommunityRequest {
   privacy?: "public" | "private";
   iconUrl?: string | null;
   bannerUrl?: string | null;
-  /** 可选 slug（URL 友好）；不传则用 id */
-  slug?: string | null;
 }
 
 export type CreateCommunityResponse = Community & {

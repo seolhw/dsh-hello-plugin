@@ -4,6 +4,7 @@
 
 import {
   Button,
+  HoverCard,
   IconChevronLeftOutline14,
   IconCloseOutline16,
   IconDownloadOutline16,
@@ -12,13 +13,14 @@ import {
   IconLoadingOutline16,
   IconPaperclipOutline16,
   IconPlusOutline16,
+  IconRightUpOutline16,
   IconSendOutline16,
   IconShareOutline16,
   IconTrashOutline16,
   Input,
   Modal,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { Channel, MessageAttachment } from "@dsh-talk/types/entities";
+import type { Channel, Community, MemberRole, MessageAttachment } from "@dsh-talk/types/entities";
 import type { ChangeEvent, CSSProperties, ReactElement, ReactNode, UIEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -354,7 +356,81 @@ const fieldLabel: CSSProperties = {
   fontWeight: 500,
 };
 
+const ROLE_LABELS: Record<MemberRole, string> = {
+  owner: "所有者",
+  admin: "管理员",
+  member: "成员",
+};
+
+const PRIVACY_LABELS: Record<Community["privacy"], string> = {
+  public: "公开",
+  private: "私密",
+};
+
 // ---------------- 社区栏 ----------------
+
+// 社区栏 hover 小窗的内容：名称、可见性/角色、描述、成员总数（只读，点击仍选社区）
+function CommunityMetaCard({
+  community,
+}: {
+  community: Community & { role: MemberRole };
+}): ReactElement {
+  return (
+    <div style={{ minWidth: 180, maxWidth: 280 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Avatar label={community.name} src={community.iconUrl} size={32} />
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: palette.text,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {community.name}
+          </div>
+          <div style={{ fontSize: 11, color: palette.caption }}>
+            {PRIVACY_LABELS[community.privacy]} · {ROLE_LABELS[community.role]}成员
+          </div>
+        </div>
+      </div>
+      {community.description ? (
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: palette.secondary,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            display: "-webkit-box",
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          {community.description}
+        </div>
+      ) : null}
+      <div
+        style={{
+          marginTop: 8,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 12,
+          color: palette.muted,
+        }}
+      >
+        <span>{community.memberCount} 名成员</span>
+        {community.slug ? <span>#{community.slug}</span> : null}
+      </div>
+    </div>
+  );
+}
 
 function CommunitiesRail({
   onJoin,
@@ -415,17 +491,22 @@ function CommunitiesRail({
               onClick={() => {
                 if (!active) void openCommunity(c.id);
               }}
-              title={c.name}
             >
               {active ? <span style={railPill} /> : null}
-              <span style={railAvatar}>
-                <Avatar label={c.name} src={c.iconUrl} size={44} />
-                {mention > 0 ? (
-                  <span style={{ ...railBubble, background: palette.accent }}>{mention}</span>
-                ) : unread > 0 ? (
-                  <span style={railBubble}>{unread}</span>
-                ) : null}
-              </span>
+              <HoverCard
+                openDelayMs={300}
+                content={<CommunityMetaCard community={c} />}
+                anchor={
+                  <span style={railAvatar}>
+                    <Avatar label={c.name} src={c.iconUrl} size={44} />
+                    {mention > 0 ? (
+                      <span style={{ ...railBubble, background: palette.accent }}>{mention}</span>
+                    ) : unread > 0 ? (
+                      <span style={railBubble}>{unread}</span>
+                    ) : null}
+                  </span>
+                }
+              />
             </button>
           );
         })}
@@ -461,7 +542,7 @@ function CommunitiesRail({
             aria-label="退出登录"
             title="退出登录"
           >
-            <IconTrashOutline16 />
+            <IconRightUpOutline16 />
           </button>
         </div>
       ) : null}

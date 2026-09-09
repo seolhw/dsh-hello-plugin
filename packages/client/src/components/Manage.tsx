@@ -11,6 +11,7 @@ import {
   IconEllipsisOutline16,
   IconPlusOutline16,
   IconRefreshOutline16,
+  IconRightUpOutline16,
   IconTrashOutline16,
   IconUserOutline16,
   Input,
@@ -122,7 +123,7 @@ export function CommunityTools(): ReactElement | null {
       { type: "separator", id: "sep" },
     );
   }
-  menuItems.push({ id: "leave", label: "退出社区", danger: true, icon: <IconTrashOutline16 /> });
+  menuItems.push({ id: "leave", label: "退出社区", danger: true, icon: <IconRightUpOutline16 /> });
 
   return (
     <>

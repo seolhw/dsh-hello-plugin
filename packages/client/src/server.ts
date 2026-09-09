@@ -36,6 +36,7 @@ import type {
   ResetPasswordRequest,
   RotateInviteResponse,
   SendVerificationEmailRequest,
+  SendVerificationOTPRequest,
   SignInEmailRequest,
   SignInUsernameRequest,
   SignUpEmailRequest,
@@ -50,6 +51,7 @@ import type {
   UpdateReadStateRequest,
   UpdateUserRequest,
   UploadAttachmentResponse,
+  VerifyEmailOTPRequest,
 } from "@dsh-talk/types/api";
 
 export class ServerApiError extends Error {
@@ -254,6 +256,20 @@ export class ServerClient {
   /** POST /api/auth/send-verification-email —— 重发验证邮件 */
   sendVerificationEmail(body: SendVerificationEmailRequest): Promise<{ status: boolean }> {
     return this.call<{ status: boolean }>("POST", "/api/auth/send-verification-email", body);
+  }
+
+  /** POST /api/auth/email-otp/send-verification-otp —— 发送 6 位邮箱验证码 */
+  sendVerificationOtp(body: SendVerificationOTPRequest): Promise<{ success: boolean }> {
+    return this.call<{ success: boolean }>(
+      "POST",
+      "/api/auth/email-otp/send-verification-otp",
+      body,
+    );
+  }
+
+  /** POST /api/auth/email-otp/verify-email —— 校验 6 位验证码；token 非空时已自动登录 */
+  verifyEmail(body: VerifyEmailOTPRequest): Promise<AuthCallResult> {
+    return this.authCall("POST", "/api/auth/email-otp/verify-email", body);
   }
 
   /** POST /api/auth/request-password-reset —— 忘记密码：发重置邮件 */

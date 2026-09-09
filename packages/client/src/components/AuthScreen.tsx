@@ -6,8 +6,8 @@
 
 import { Button, IconWarningOutline16, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, FormEvent, ReactElement, ReactNode } from "react";
-import { useState } from "react";
-import { login, register, useTalkState } from "../store";
+import { useEffect, useState } from "react";
+import { cancelVerification, login, register, resendVerificationOtp, useTalkState, verifyOtp } from "../store";
 import { palette } from "./styles";
 
 type Mode = "login" | "register";
@@ -51,10 +51,27 @@ const errorBanner: CSSProperties = {
   gap: 6,
   padding: "8px 10px",
   borderRadius: 8,
-  background: palette.dangerSoft,
+  background: palette.layer2,
+  border: `1px solid ${palette.border}`,
+  borderLeft: `3px solid ${palette.danger}`,
   color: palette.danger,
   fontSize: 12.5,
   lineHeight: 1.4,
+};
+
+const linkButton: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  color: palette.accent,
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const linkButtonDisabled: CSSProperties = {
+  ...linkButton,
+  color: palette.caption,
+  cursor: "default",
 };
 
 /** 分段控制：登录 / 注册，以及登录态下的 邮箱 / 用户名 */
@@ -141,6 +158,19 @@ export function AuthScreen(): ReactElement {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const [otp, setOtp] = useState("");
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpError, setOtpError] = useState("");
+
+  const pendingEmail = talk.pendingEmail;
+
+  useEffect(() => {
+    if (pendingEmail) {
+      setOtp("");
+      setOtpError("");
+    }
+  }, [pendingEmail]);
+
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
     setBusy(true);
@@ -157,6 +187,31 @@ export function AuthScreen(): ReactElement {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function verify(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setOtpBusy(true);
+    setOtpError("");
+    try {
+      await verifyOtp(otp);
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function resend(): Promise<void> {
+    setOtpError("");
+    setOtpBusy(true);
+    try {
+      await resendVerificationOtp();
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOtpBusy(false);
     }
   }
 
@@ -181,6 +236,82 @@ export function AuthScreen(): ReactElement {
       {showPassword ? "隐藏" : "显示"}
     </button>
   );
+
+  if (pendingEmail) {
+    const otpReady = otp.trim().length === 6;
+    return (
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={brandMark}>T</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>验证邮箱</div>
+            <div style={{ ...fieldHint, fontSize: 12.5 }}>输入验证码完成注册</div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.5 }}>
+          验证码已发送至 <strong style={{ color: palette.text }}>{pendingEmail}</strong>，
+          请查收邮件。5 分钟内有效。
+        </div>
+
+        <form
+          onSubmit={(e) => void verify(e)}
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          <Field label="验证码" htmlFor="talk-otp">
+            <Input
+              id="talk-otp"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+              placeholder="6 位数字"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              required
+            />
+          </Field>
+
+          {otpError ? (
+            <div style={errorBanner}>
+              <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
+                <IconWarningOutline16 size={14} />
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>{otpError}</span>
+            </div>
+          ) : null}
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled={otpBusy || !otpReady}
+            style={{ width: "100%" }}
+          >
+            {otpBusy ? "验证中…" : "验证邮箱"}
+          </Button>
+
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <button
+              type="button"
+              style={otpBusy ? linkButtonDisabled : linkButton}
+              disabled={otpBusy}
+              onClick={() => void resend()}
+            >
+              重新发送
+            </button>
+            <button
+              type="button"
+              style={otpBusy ? linkButtonDisabled : linkButton}
+              disabled={otpBusy}
+              onClick={() => cancelVerification()}
+            >
+              返回登录
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div style={card}>

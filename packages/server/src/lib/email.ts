@@ -110,3 +110,20 @@ export function dispatchResetPasswordEmail(
     }),
   );
 }
+
+/** 发送 6 位邮箱验证码（emailOTP 插件回调）。验证码 5 分钟内有效。 */
+export function dispatchVerificationOTPEmail(
+  env: Env,
+  request: Request | undefined,
+  email: string,
+  otp: string,
+): void {
+  runDetached(
+    request,
+    sendMail(env, {
+      to: email,
+      subject: "dsh-talk：你的邮箱验证码",
+      text: `你的邮箱验证码是：${otp}\n\n5 分钟内有效。如果不是你本人操作，请忽略本邮件。`,
+    }),
+  );
+}

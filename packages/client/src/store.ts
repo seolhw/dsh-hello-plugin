@@ -60,6 +60,8 @@ export interface TalkState {
   error: string;
   toast: string;
   view: ViewState;
+  /** 注册成功后待验证的邮箱；非空时 AuthScreen 切换到验证码界面 */
+  pendingEmail: string | null;
 }
 
 // ---------------- 初始状态 ----------------
@@ -88,6 +90,7 @@ const INITIAL: TalkState = {
   error: "",
   toast: "",
   view: INITIAL_VIEW,
+  pendingEmail: null,
 };
 
 let state: TalkState = { ...INITIAL, view: { ...INITIAL_VIEW } };
@@ -212,10 +215,40 @@ export async function register(input: {
   if (!settings) throw new Error("尚未就绪");
   const name = input.name?.trim() || input.email.split("@")[0] || "dsh-user";
   const body: SignUpEmailRequest = { name, email: input.email, password: input.password };
-  const result = await makeServer(settings).signUpEmail(body);
-  const { user, token } = result;
-  if (!token || !user) throw new Error("服务端未返回会话 token");
-  await applySession({ user, token });
+  // 注册成功（requireEmailVerification=true 不会自动登录），服务端已发送 6 位验证码；
+  // 这里只切换 UI 到验证码界面，由 verifyOtp 完成后续登录。
+  await makeServer(settings).signUpEmail(body);
+  setState({ pendingEmail: input.email.trim(), error: "" });
+}
+
+/** 校验邮箱验证码；验证成功且 autoSignInAfterVerification 开启时自动登录 */
+export async function verifyOtp(otp: string): Promise<void> {
+  const settings = state.settings;
+  const email = state.pendingEmail;
+  if (!settings || !email) throw new Error("请先注册并获取验证码");
+  const result = await makeServer(settings).verifyEmail({ email, otp: otp.trim() });
+  if (!result.user) throw new Error("验证失败，请重试");
+  if (result.token) {
+    await applySession({ user: result.user, token: result.token });
+    return;
+  }
+  // 未自动登录：回登录页，让用户手动登录
+  setState({ pendingEmail: null });
+  notify("邮箱验证成功，请登录");
+}
+
+/** 重新发送邮箱验证码 */
+export async function resendVerificationOtp(): Promise<void> {
+  const settings = state.settings;
+  const email = state.pendingEmail;
+  if (!settings || !email) throw new Error("尚未就绪");
+  await makeServer(settings).sendVerificationOtp({ email, type: "email-verification" });
+  notify("验证码已重新发送");
+}
+
+/** 从验证码界面返回登录页 */
+export function cancelVerification(): void {
+  setState({ pendingEmail: null });
 }
 
 export async function applySession(result: { user: AuthUser; token: string }): Promise<void> {
@@ -291,6 +324,7 @@ export async function logout(): Promise<void> {
     error: "",
     view: { ...INITIAL_VIEW },
     settings: settings === null ? null : { ...settings, token: "" },
+    pendingEmail: null,
   });
 }
 
@@ -301,13 +335,13 @@ export async function refresh(): Promise<void> {
   try {
     const settings = await hostConfigGet();
     if (settings.token.length === 0) {
-      setState({ phase: "anon", busy: false, settings });
+      setState({ phase: "anon", busy: false, settings, pendingEmail: null });
       return;
     }
     const server = makeServer(settings);
     const session = await server.getSession();
     if (!session?.session || !session.user) {
-      setState({ phase: "anon", busy: false, settings });
+      setState({ phase: "anon", busy: false, settings, pendingEmail: null });
       return;
     }
     const me = toUser(session.user);
@@ -324,7 +358,14 @@ export async function refresh(): Promise<void> {
     setState({ busy: false, phase: "ready", settings: nextSettings, me, communities });
   } catch (error) {
     if (error instanceof ServerApiError && error.status === 401) {
-      setState({ phase: "anon", busy: false, me: null, communities: [], settings: state.settings });
+      setState({
+        phase: "anon",
+        busy: false,
+        me: null,
+        communities: [],
+        settings: state.settings,
+        pendingEmail: null,
+      });
       return;
     }
     setState({ phase: "error", busy: false, error: errorText(error) });

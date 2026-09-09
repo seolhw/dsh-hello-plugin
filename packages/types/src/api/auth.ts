@@ -105,6 +105,25 @@ export interface SendVerificationEmailRequest {
   callbackURL?: string;
 }
 
+/** POST /api/auth/email-otp/send-verification-otp —— 发送 6 位邮箱验证码 */
+export interface SendVerificationOTPRequest {
+  email: string;
+  type: "email-verification";
+}
+
+/** POST /api/auth/email-otp/verify-email —— 用 6 位验证码校验邮箱 */
+export interface VerifyEmailOTPRequest {
+  email: string;
+  otp: string;
+}
+
+/** POST /api/auth/email-otp/verify-email 成功返回；token 非空 = 已自动登录（autoSignInAfterVerification） */
+export interface VerifyEmailOTPResponse {
+  status: boolean;
+  token: string | null;
+  user: AuthUser;
+}
+
 /** POST /api/auth/request-password-reset（忘记密码：发重置邮件） */
 export interface RequestPasswordResetRequest {
   email: string;

@@ -15,11 +15,11 @@
 import type { User as AppUser, ID } from "@dsh-talk/types/entities";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import { bearer, username } from "better-auth/plugins";
+import { bearer, emailOTP, username } from "better-auth/plugins";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Env, HonoAppVariables } from "../types";
-import { dispatchResetPasswordEmail, dispatchVerificationEmail } from "./email";
+import { dispatchResetPasswordEmail, dispatchVerificationEmail, dispatchVerificationOTPEmail } from "./email";
 import { HttpApiError } from "./errors";
 import { uniqueUsernameForEmail } from "./users";
 
@@ -76,15 +76,17 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       enabled: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
-      // 注册即发验证邮件但不强制验证后登录；如需强制改这里为 true
-      requireEmailVerification: false,
+      // 强制邮箱验证：未验证用户无法登录（sign-in 抛 EMAIL_NOT_VERIFIED），
+      // 且注册成功不会自动登录（需要先走验证码流程）。验证由 emailOTP 插件承担。
+      requireEmailVerification: true,
       // 不 await，交给 runDetached -> waitUntil（Cloudflare 响应返回后仍继续投递）
       sendResetPassword: async ({ user, url }, request) => {
         dispatchResetPasswordEmail(env, request, user, url);
       },
     },
     emailVerification: {
-      sendOnSignUp: true,
+      // 验证码走 emailOTP 插件（注册后发送 6 位数字码），不再发验证链接
+      sendOnSignUp: false,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }, request) => {
         dispatchVerificationEmail(env, request, user, url);
@@ -95,6 +97,17 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，
       // 之后所有请求带 Authorization: Bearer <token> 即等价于带 session cookie
       bearer(),
+      // 6 位数字验证码邮箱验证：注册即发送验证码，验证成功自动登录
+      emailOTP({
+        otpLength: 6,
+        expiresIn: 300,
+        allowedAttempts: 5,
+        sendVerificationOnSignUp: true,
+        sendVerificationOTP: async ({ email, otp }, ctx) => {
+          const request = ctx?.request as Request | undefined;
+          dispatchVerificationOTPEmail(env, request, email, otp);
+        },
+      }),
     ],
     advanced: {
       // 与默认 /api/auth 一致即可；前缀定短一点避免与业务混淆

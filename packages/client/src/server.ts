@@ -97,6 +97,34 @@ function toQuery(params: Record<string, string | number | undefined>): string {
   return `?${entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
 }
 
+// ---------- 网络层失败自动重试 ----------
+// fetch 只有在「网络层」失败时才会 reject（如 ERR_CONNECTION_REFUSED / ERR_NETWORK，
+// 表现为 TypeError: Failed to fetch）；HTTP 状态码错误会正常 resolve，交给 !res.ok 处理。
+// 本地开发时后端 wrangler dev 刚启动、端口尚未就绪就会命中这里，做有上限的重试，
+// 消除「页面先于后端就绪导致的一次性 REFUSED」。
+const NETWORK_RETRY_MAX = 4;
+const NETWORK_RETRY_BASE_MS = 1000;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithRetry(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= NETWORK_RETRY_MAX; attempt += 1) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      lastError = error;
+      if (attempt === NETWORK_RETRY_MAX) break;
+      await sleep(NETWORK_RETRY_BASE_MS * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
 export class ServerClient {
   readonly baseUrl: string;
   token: string | null;
@@ -126,7 +154,7 @@ export class ServerClient {
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
 
-    const res = await fetch(this.url(path), init);
+    const res = await fetchWithRetry(this.url(path), init);
     const text = await res.text();
     let data: unknown = null;
     if (text.length > 0) {
@@ -153,7 +181,11 @@ export class ServerClient {
   private async authCall(method: string, path: string, body: unknown): Promise<AuthCallResult> {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.hasToken) headers.authorization = `Bearer ${this.token}`;
-    const res = await fetch(this.url(path), { method, headers, body: JSON.stringify(body) });
+    const res = await fetchWithRetry(this.url(path), {
+      method,
+      headers,
+      body: JSON.stringify(body),
+    });
     const text = await res.text();
     let data: unknown = null;
     if (text.length > 0) {

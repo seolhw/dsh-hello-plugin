@@ -28,6 +28,10 @@ const POLL_MS = 250;
 // 杀掉旧 server 后、拉起新 server 前的间隔，等端口释放。
 const RELAUNCH_DELAY_MS = 500;
 
+// 后端 Server 健康探测地址（worker.ts 的 /healthz）。仅提示，不阻塞 dev 主流程。
+const SERVER_URL = "http://127.0.0.1:8787";
+const SERVER_HEALTH_URL = `${SERVER_URL}/healthz`;
+
 const IS_WIN = process.platform === "win32";
 
 let shuttingDown = false;
@@ -41,6 +45,9 @@ let previousSig = "";
 let stableAt = 0;
 let handledSig = "";
 let seenWrite = false;
+
+/** 后端 Server 健康状态：null=未知 / false=未就绪 / true=已就绪。仅记录+提示。 */
+let serverHealthy = null;
 
 function run(command, env = {}) {
   return spawn(command, {
@@ -120,6 +127,27 @@ function restartServer() {
   }, RELAUNCH_DELAY_MS);
 }
 
+/** 探测后端 Server（127.0.0.1:8787）是否就绪，仅在状态变化时打印一次提示。 */
+async function checkServerHealth() {
+  let ok = false;
+  try {
+    const res = await fetch(SERVER_HEALTH_URL);
+    ok = res.ok;
+  } catch {
+    ok = false;
+  }
+  if (ok === serverHealthy) return;
+  serverHealthy = ok;
+  if (ok) {
+    console.log(`\n[dsh-talk] ✅ 后端 Server 已就绪：${SERVER_HEALTH_URL}\n`);
+  } else {
+    console.error(
+      `\n[dsh-talk] ❌ 无法连通后端 Server（${SERVER_URL}）。社区页将报 net::ERR_CONNECTION_REFUSED。\n` +
+        "[dsh-talk] 请另开一个终端运行：pnpm dev:server\n",
+    );
+  }
+}
+
 function tick() {
   const sig = signature();
   const now = Date.now();
@@ -147,6 +175,7 @@ function tick() {
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(serverHealthPoll);
   if (builder) killTree(builder.pid);
   if (server) killTree(server.pid);
   setTimeout(() => process.exit(exitCode), 200);
@@ -157,6 +186,12 @@ process.on("SIGTERM", () => shutdown(0));
 
 console.log(
   "[dsh-talk] dev watch：源码变更将自动打包 lib/ 并重启 DSH web（Ctrl+C 退出）",
+);
+console.log(
+  "[dsh-talk] 注意：本脚本只负责「打包 lib/ 并启动 DSH web（浏览器侧 UI）」，不会启动后端 Server。",
+);
+console.log(
+  `[dsh-talk] 后端 Server 需另开一个终端运行：pnpm dev:server（${SERVER_URL}）`,
 );
 
 // TSDOWN_WATCH 告诉 tsdown.config.ts 这次是 watch：别 clean 掉整个 lib/，
@@ -170,3 +205,6 @@ builder.on("exit", (code) => {
 
 const poll = setInterval(tick, POLL_MS);
 tick();
+// 每 2s 探测一次后端 Server，状态变化时打印提示（开始时若未就绪会提示如何启动后端）。
+const serverHealthPoll = setInterval(() => void checkServerHealth(), 2000);
+void checkServerHealth();

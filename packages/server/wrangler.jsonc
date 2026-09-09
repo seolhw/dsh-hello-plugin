@@ -1,7 +1,8 @@
 // ================================================================
 // dsh-talk Server Wrangler 配置（JSONC 格式，Cloudflare 推荐）
 // 与旧 wrangler.toml 等价；JSON 配置可注释、支持部分只在 JSON 提供的新特性。
-// 本地：pnpm dev (wrangler dev --port 8787)
+// 本地：pnpm dev (wrangler dev --ip 127.0.0.1，显式绑定 IPv4 回环，
+//       避免 localhost 解析到 ::1 导致浏览器走 127.0.0.1 连不上)
 // 部署：pnpm deploy (wrangler deploy)
 // ================================================================
 {

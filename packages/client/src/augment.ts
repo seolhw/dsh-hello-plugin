@@ -1,7 +1,6 @@
 // ================================================================
 // 类型化 slot 接入层：仅为了把 DSH 官方表面的 `declare module` 合并
-// （SlotMap / Context 增强）拉进本插件的编译，从而拿到
-// 'sidebar.footer.action'、'shell.overlay' 等键的强类型。
+// 拉进本插件的编译，从而拿到对应槽位键的强类型。
 // 运行期没有任何代码从这里加载。
 // ================================================================
 
@@ -10,5 +9,27 @@ import type {
   SidebarFooterActionOwnerProps,
   SidebarSettingsOwnerProps,
 } from "@deepseek-ai/dsh-client-ui-sidebar/client";
+
+/**
+ * dsh-talk 注册进官方会话页签环（`conversation.view`）时的槽位声明。
+ * 官方 rc.6 契约（@deepseek-ai/dsh-client-ui-conversation/client）：
+ *   kind: 'list'; scope: 'session'；owner 为空（宿主不注入内容）；
+ *   页签文字取自注册 options.label，正文整页由注册组件自绘。
+ * ui-conversation 包未装进本插件类型图，这里补一条等价的 SlotMap 合并。
+ */
+declare module "@deepseek-ai/dsh-client-ui-slots" {
+  interface SlotMap {
+    "conversation.view": {
+      kind: "list";
+      scope: "session";
+      owner: DshTalkViewOwnerProps;
+    };
+  }
+}
+
+/** conversation.view 的 owner 币种：宿主不传任何业务 props（会话标准 props 由框架注入） */
+export interface DshTalkViewOwnerProps {
+  children?: never;
+}
 
 export type { ILayout, SidebarFooterActionOwnerProps, SidebarSettingsOwnerProps };

@@ -46,8 +46,6 @@ import { Avatar, palette, smallText, timeLabel } from "./styles";
 
 // ---------------- 布局样式 ----------------
 
-const body: CSSProperties = { display: "flex", flex: 1, minHeight: 0 };
-
 const rail: CSSProperties = {
   width: 240,
   flex: "0 0 auto",
@@ -187,6 +185,7 @@ function CommunitiesRail({
 }): ReactElement {
   const talk = useTalkState();
   const current = talk.view.communityId;
+  const me = talk.me;
   return (
     <div style={rail}>
       <div style={railHeader}>
@@ -212,8 +211,10 @@ function CommunitiesRail({
       </div>
       <div style={railScroll}>
         {talk.communities.length === 0 ? (
-          <div style={{ ...smallText, padding: "8px 10px" }}>
-            还没有社区。点右上「+」创建或用邀请码加入。
+          <div style={{ ...smallText, padding: "8px 10px", lineHeight: 1.6 }}>
+            还没有社区。
+            <br />
+            点右上「+」创建，或用邀请码加入。
           </div>
         ) : (
           talk.communities.map((c) => {
@@ -251,6 +252,41 @@ function CommunitiesRail({
           })
         )}
       </div>
+      {me ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "8px 10px",
+            borderTop: `1px solid ${palette.border}`,
+          }}
+        >
+          <Avatar label={me.handle} size={24} />
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              fontSize: 12,
+              color: palette.secondary,
+            }}
+          >
+            @{me.handle}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void logout()}
+            aria-label="退出登录"
+            title="退出登录"
+          >
+            退出
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -266,13 +302,20 @@ function ChannelList(): ReactElement | null {
     <div style={midCol}>
       <div
         style={{
-          padding: "12px 12px 6px",
+          padding: "10px 12px 6px",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
-          gap: 6,
+          gap: 4,
         }}
       >
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<IconChevronLeftOutline14 />}
+          onClick={() => backToCommunities()}
+          aria-label="返回社区列表"
+          title="返回社区列表"
+        />
         <span
           style={{
             fontSize: 13,
@@ -494,8 +537,9 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
     <div
       style={{
         ...msgRow,
-        borderColor: mentionedMe ? "rgba(91,140,255,0.35)" : undefined,
-        background: mine ? "rgba(255,255,255,0.02)" : undefined,
+        borderColor: mentionedMe ? "var(--dsw-alias-state-business-tertiary)" : undefined,
+        background: mine ? palette.hover : undefined,
+        cursor: "default",
       }}
     >
       <Avatar label={item.author.handle} />
@@ -1001,7 +1045,7 @@ function ShareSnapshotModal({
   );
 }
 
-// ---------------- 主出口 ----------------
+// ---------------- 主出口（整页三栏，无独立浮层外壳） ----------------
 
 export function HomeScreen(): ReactElement {
   const talk = useTalkState();
@@ -1010,55 +1054,26 @@ export function HomeScreen(): ReactElement {
   const inCommunity = talk.view.communityId !== null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "10px 16px",
-          borderBottom: `1px solid ${palette.border}`,
-        }}
-      >
-        {inCommunity ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<IconChevronLeftOutline14 />}
-            onClick={() => backToCommunities()}
-            aria-label="返回社区列表"
-          >
-            返回
-          </Button>
-        ) : null}
-        <span style={{ fontWeight: 650 }}>
-          {inCommunity ? (talk.view.community?.name ?? "…") : "社区"}
-        </span>
-        <span style={{ ...smallText, fontSize: 11 }}>@{talk.me?.handle}</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          <Button size="sm" variant="ghost" onClick={() => void logout()}>
-            退出登录
-          </Button>
-        </span>
-      </div>
-      <div style={body}>
-        <CommunitiesRail onJoin={() => setShowJoin(true)} onCreate={() => setShowCreate(true)} />
-        {inCommunity ? <ChannelList /> : null}
-        {inCommunity ? (
+    <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <CommunitiesRail onJoin={() => setShowJoin(true)} onCreate={() => setShowCreate(true)} />
+      {inCommunity ? (
+        <>
+          <ChannelList />
           <ChatPane />
-        ) : (
-          <div
-            style={{
-              ...chatCol,
-              alignItems: "center",
-              justifyContent: "center",
-              color: palette.muted,
-            }}
-          >
-            选择一个社区开始聊天
-          </div>
-        )}
-      </div>
+        </>
+      ) : (
+        <div
+          style={{
+            ...chatCol,
+            alignItems: "center",
+            justifyContent: "center",
+            color: palette.muted,
+            fontSize: 13,
+          }}
+        >
+          从左侧选择一个社区开始聊天
+        </div>
+      )}
       <CreateCommunityModal open={showCreate} onClose={() => setShowCreate(false)} />
       <JoinModal open={showJoin} onClose={() => setShowJoin(false)} />
     </div>

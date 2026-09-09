@@ -158,15 +158,24 @@ export function useTalkState(): TalkState {
   return state;
 }
 
-// ---------------- 面板开关 ----------------
+// ---------------- 页面生命周期（社区作为独立页面，不再依赖弹层开关） ----------------
 
-export function openTalk(): void {
+export function activateTalk(): void {
   if (!state.open) {
     setState({ open: true });
     void refresh();
-  } else {
-    setState({ open: false });
   }
+}
+
+export function deactivateTalk(): void {
+  if (!state.open) return;
+  closeRealtime();
+  setState({ open: false });
+}
+
+export function openTalk(): void {
+  if (!state.open) setState({ open: true });
+  void refresh();
 }
 
 export function closeTalk(): void {

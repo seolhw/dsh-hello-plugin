@@ -5,23 +5,34 @@
 // 部署：pnpm deploy (wrangler deploy)
 // ================================================================
 {
-  "name": "dsh-talk-server",
+  "name": "dsh-talk",
   "main": "src/worker.ts",
   "compatibility_date": "2025-01-01",
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "workers_dev": true,
+  "preview_urls": true,
   // ---------- 本地开发（wrangler dev --port 8787） ----------
   "dev": {
     "port": 8787,
     "local_protocol": "http"
   },
+  "routes": [
+    {
+      "pattern": "dsh-talk-api.huiwang.fun",
+      "zone_name": "huiwang.fun",
+      "custom_domain": true,
+      "enabled": true,
+      "previews_enabled": false
+    }
+  ],
   // ---------- D1：元数据库（社区/频道/消息/分享；用户等认证实体由 Better Auth 建表） ----------
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "dsh-talk-server",
-      "database_id": "b0b6854d-8710-4e19-a4dc-0f2234c97f99",
+      "database_name": "dsh-talk",
+      "database_id": "38ff9809-a6fa-4c4c-9795-9b7d3695b5a6",
       // drizzle-kit 生成的 SQL 迁移目录（wrangler d1 migrations apply 使用）
       "migrations_dir": "drizzle"
     }

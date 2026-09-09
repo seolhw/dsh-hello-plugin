@@ -41,8 +41,8 @@ const isModerator = (role: MemberRole | null | undefined): boolean =>
   role === "owner" || role === "admin";
 
 const roleColor: Record<MemberRole, string> = {
-  owner: "#f0a13a",
-  admin: "#5b8cff",
+  owner: "var(--dsw-alias-state-warn-primary)",
+  admin: "var(--dsw-alias-state-business-primary)",
   member: palette.muted,
 };
 

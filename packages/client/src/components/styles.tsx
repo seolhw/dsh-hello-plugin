@@ -1,66 +1,76 @@
 // ================================================================
-// dsh-talk 面板共享样式常量（深色；交互控件用 DSH UI primitives）
+// dsh-talk 页面共享样式：全部使用 DeepSeek 宿主注入的 --dsw-* token，
+// 随系统亮/暗主题自动切换（宿主把 "system" 解析成实际 colorScheme 后，
+// 通过 body 内联变量 + body[data-ds-dark-theme] 下发）。插件侧禁止硬编码色值。
+// 参考：dsh-client-ui-theme 的 design-platform.css token 命名。
 // ================================================================
 
 import type { CSSProperties } from "react";
 
+/** 语义色 token（明暗随宿主翻转）。按键名保留旧 palette 兼容存量引用 */
 export const palette = {
-  page: "#0d0f14",
-  panel: "#151923",
-  rail: "#10141d",
-  border: "rgba(255,255,255,0.09)",
-  text: "#e7eaf1",
-  muted: "#8b93a5",
-  accent: "#5b8cff",
-  danger: "#f2695e",
-  success: "#3fb950",
-  badge: "#e5534b",
-  inputBg: "rgba(255,255,255,0.05)",
-  hover: "rgba(255,255,255,0.07)",
-  active: "rgba(91,140,255,0.16)",
+  // 表面
+  page: "var(--dsw-alias-bg-base)",
+  panel: "var(--dsw-alias-bg-layer-1)",
+  layer2: "var(--dsw-alias-bg-layer-2)",
+  layer3: "var(--dsw-alias-bg-layer-3)",
+  rail: "var(--dsw-specific-sidebar-fill)",
+  elevated: "var(--dsw-alias-bg-overlay)",
+  mask: "var(--dsw-alias-bg-mask-1)",
+  skeleton: "var(--dsw-alias-bg-skeleton)",
+  // 边框
+  border: "var(--dsw-alias-border-l1)",
+  border2: "var(--dsw-alias-border-l2)",
+  border3: "var(--dsw-alias-border-l3)",
+  border4: "var(--dsw-alias-border-l4)",
+  // 文字
+  text: "var(--dsw-alias-label-primary)",
+  secondary: "var(--dsw-alias-label-secondary)",
+  muted: "var(--dsw-alias-label-tertiary)",
+  caption: "var(--dsw-alias-label-caption)",
+  // 品牌 / 状态
+  accent: "var(--dsw-alias-state-business-primary)",
+  danger: "var(--dsw-alias-state-error-primary)",
+  dangerSoft: "var(--dsw-alias-state-error-secondary)",
+  success: "var(--dsw-alias-state-success-primary)",
+  warn: "var(--dsw-alias-state-warn-primary)",
+  warnLabel: "var(--dsw-alias-state-warn-label)",
+  // 交互
+  inputBg: "var(--dsw-alias-interactive-bg-hover-solid)",
+  hover: "var(--dsw-alias-interactive-bg-hover)",
+  active: "var(--dsw-alias-interactive-bg-active)",
+  // 徽标：提及用品牌色，普通未读用文字弱化层
+  badge: "var(--dsw-alias-state-error-primary)",
+  hoverAccent: "var(--dsw-alias-interactive-bg-hover-accent)",
 } as const;
 
-export const overlayStyle: CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  zIndex: 1200,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: "rgba(6,8,12,0.62)",
-  backdropFilter: "blur(6px)",
-  pointerEvents: "auto",
-};
-
-export const panelStyle: CSSProperties = {
-  width: 1080,
-  maxWidth: "calc(100vw - 40px)",
-  height: "min(680px, calc(100vh - 40px))",
+/** 页签内容页根容器：占满宿主中栏（高度由外层 flex 约束） */
+export const pageRoot: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  minHeight: 0,
   display: "flex",
   flexDirection: "column",
-  background: palette.panel,
+  background: palette.page,
   color: palette.text,
-  border: `1px solid ${palette.border}`,
-  borderRadius: 14,
-  overflow: "hidden",
-  boxShadow: "0 16px 48px rgba(0,0,0,.5)",
 };
 
-export const panelHeader: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "12px 16px",
-  borderBottom: `1px solid ${palette.border}`,
+/** 垂直填满剩余空间 */
+export const flexFill: CSSProperties = { flex: 1, minHeight: 0 };
+
+/** 水平滚动条细样式（可选加到滚动容器） */
+export const slimScrollbar: CSSProperties = {
+  scrollbarWidth: "thin",
+  scrollbarColor: "var(--dsh-scrollbar-thumb, var(--dsw-alias-scrollbar-bg-l2)) transparent",
 };
 
 export const smallText: CSSProperties = { fontSize: 12, color: palette.muted };
 
-/** 头像圆块（无图时用 handle 首字母） */
+/** 头像圆块：无图时显示 handle 首字母；背景用品牌渐变，跟随主题 */
 export function Avatar({
   label,
   color,
-  size = 26,
+  size = 28,
 }: {
   label: string;
   color?: string;
@@ -76,7 +86,9 @@ export function Avatar({
         alignItems: "center",
         justifyContent: "center",
         borderRadius: "50%",
-        background: color ?? "linear-gradient(135deg,#5b8cff,#8a63ff)",
+        background:
+          color ??
+          "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
         color: "#fff",
         fontSize: Math.round(size * 0.42),
         fontWeight: 600,

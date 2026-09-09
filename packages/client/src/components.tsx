@@ -78,7 +78,6 @@ export function TalkPage(_props: object): ReactElement {
   );
 }
 
-
 export function HelloWorld(): ReactElement {
   return <div>Hello World!</div>;
 }

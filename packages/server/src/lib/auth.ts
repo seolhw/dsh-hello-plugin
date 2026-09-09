@@ -19,7 +19,11 @@ import { bearer, emailOTP, username } from "better-auth/plugins";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Env, HonoAppVariables } from "../types";
-import { dispatchResetPasswordEmail, dispatchVerificationEmail, dispatchVerificationOTPEmail } from "./email";
+import {
+  dispatchResetPasswordEmail,
+  dispatchVerificationEmail,
+  dispatchVerificationOTPEmail,
+} from "./email";
 import { HttpApiError } from "./errors";
 import { uniqueUsernameForEmail } from "./users";
 

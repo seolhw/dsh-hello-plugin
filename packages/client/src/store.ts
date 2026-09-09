@@ -301,6 +301,55 @@ export async function updateUserName(username: string): Promise<boolean> {
   }
 }
 
+/** 上传一张图片到 R2，返回公开 URL；失败返回 null（内部已 toast） */
+export async function uploadImage(file: File): Promise<string | null> {
+  const server = serverOf();
+  if (!server) return null;
+  if (!file.type.startsWith("image/")) {
+    notify("请选择图片文件");
+    return null;
+  }
+  try {
+    const up = await server.uploadObject(file);
+    return up.url;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 修改用户头像：先上传拿 URL，再更新 Better Auth user.image，并同步本地 me */
+export async function updateUserAvatar(file: File): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  const url = await uploadImage(file);
+  if (!url) return false;
+  try {
+    const res = await server.updateUser({ image: url });
+    setState({ me: toUser(res.user) });
+    notify("头像已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 移除用户头像，回退到字母头像 */
+export async function removeUserAvatar(): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    const res = await server.updateUser({ image: null });
+    setState({ me: toUser(res.user) });
+    notify("已移除头像");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
 export async function logout(): Promise<void> {
   closeRealtime();
   const settings = state.settings;
@@ -422,17 +471,22 @@ export async function createCommunity(input: {
   name: string;
   description?: string;
   privacy?: "public" | "private";
+  iconUrl?: string | null;
 }): Promise<boolean> {
   const server = serverOf();
   if (!server) return false;
   try {
-    const body: { name: string; description?: string; privacy?: "public" | "private" } = {
-      name: input.name,
-    };
+    const body: {
+      name: string;
+      description?: string;
+      privacy?: "public" | "private";
+      iconUrl?: string | null;
+    } = { name: input.name };
     if (input.description !== undefined && input.description.length > 0) {
       body.description = input.description;
     }
     if (input.privacy !== undefined) body.privacy = input.privacy;
+    if (input.iconUrl !== undefined) body.iconUrl = input.iconUrl;
     const created = await server.createCommunity(body);
     await refreshCommunities();
     await openCommunity(created.id);
@@ -490,17 +544,25 @@ export async function updateCommunity(patch: {
   name?: string;
   description?: string | null;
   privacy?: "public" | "private";
+  iconUrl?: string | null;
 }): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
   if (!server || !communityId) return false;
   try {
-    const body: { name?: string; description?: string | null; privacy?: "public" | "private" } = {};
+    const body: {
+      name?: string;
+      description?: string | null;
+      privacy?: "public" | "private";
+      iconUrl?: string | null;
+    } = {};
     if (patch.name !== undefined) body.name = patch.name;
     if (patch.description !== undefined) body.description = patch.description;
     if (patch.privacy !== undefined) body.privacy = patch.privacy;
+    if (patch.iconUrl !== undefined) body.iconUrl = patch.iconUrl;
     await server.updateCommunity(communityId, body);
     await reloadCommunityDetail();
+    await refreshCommunities();
     notify("社区资料已更新");
     return true;
   } catch (error) {

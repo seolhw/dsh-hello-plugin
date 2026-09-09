@@ -5,7 +5,9 @@
 // 参考：dsh-client-ui-theme 的 design-platform.css token 命名。
 // ================================================================
 
-import type { CSSProperties } from "react";
+import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { CSSProperties, ReactElement } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** 语义色 token（明暗随宿主翻转）。按键名保留旧 palette 兼容存量引用 */
 export const palette = {
@@ -66,16 +68,23 @@ export const slimScrollbar: CSSProperties = {
 
 export const smallText: CSSProperties = { fontSize: 12, color: palette.muted };
 
-/** 头像圆块：无图时显示 handle 首字母；背景用品牌渐变，跟随主题 */
+/** 头像圆块：有 url 时显示图片，无 url / 加载失败时回退到 handle 首字符字母头像 */
 export function Avatar({
   label,
   color,
   size = 28,
+  src,
 }: {
   label: string;
   color?: string;
   size?: number;
+  src?: string | null;
 }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (src) setFailed(false);
+  }, [src]);
+  const showImage = Boolean(src) && !failed;
   return (
     <span
       style={{
@@ -86,6 +95,7 @@ export function Avatar({
         alignItems: "center",
         justifyContent: "center",
         borderRadius: "50%",
+        overflow: "hidden",
         background:
           color ??
           "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
@@ -95,8 +105,76 @@ export function Avatar({
         userSelect: "none",
       }}
     >
-      {label.slice(0, 1).toUpperCase()}
+      {showImage ? (
+        <img
+          src={src ?? ""}
+          alt={label}
+          onError={() => setFailed(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ) : (
+        label.slice(0, 1).toUpperCase()
+      )}
     </span>
+  );
+}
+
+/** 头像/图标选择器：预览圆块 + 「修改/移除」按钮，选取后回调 onPick(File) */
+export function AvatarPicker({
+  src,
+  label,
+  size = 60,
+  onPick,
+  onRemove,
+  uploadLabel = "修改头像",
+  removeLabel = "移除头像",
+  busy,
+}: {
+  src?: string | null;
+  label: string;
+  size?: number;
+  onPick?: (file: File) => void;
+  onRemove?: () => void;
+  uploadLabel?: string;
+  removeLabel?: string;
+  busy?: boolean;
+}): ReactElement {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <Avatar label={label} src={src ?? null} size={size} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+          >
+            {uploadLabel}
+          </Button>
+          {onRemove ? (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={onRemove}>
+              {removeLabel}
+            </Button>
+          ) : null}
+        </div>
+        <span style={{ ...smallText, fontSize: 11 }}>支持 JPG / PNG / WebP，建议方形图片</span>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file && onPick) onPick(file);
+        }}
+        aria-hidden
+        tabIndex={-1}
+      />
+    </div>
   );
 }
 

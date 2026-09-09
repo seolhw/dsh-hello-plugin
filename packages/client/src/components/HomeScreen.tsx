@@ -33,62 +33,107 @@ import {
   type MessageItem,
   notify,
   openCommunity,
+  removeUserAvatar,
   selectChannel,
   sendMessage,
   setDraft,
   snapshotChannel,
   updateMessage,
   updateUserName,
+  updateUserAvatar,
+  uploadImage,
   useTalkState,
 } from "../store";
 import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
-import { Avatar, palette, smallText, timeLabel } from "./styles";
+import { Avatar, AvatarPicker, palette, smallText, timeLabel } from "./styles";
 
 // ---------------- 布局样式 ----------------
 
+// 社区栏（Discord 式窄列）：只显示社区头像圆块，节省横向空间
 const rail: CSSProperties = {
-  width: 240,
+  width: 72,
   flex: "0 0 auto",
   background: palette.rail,
   borderRight: `1px solid ${palette.border}`,
   display: "flex",
   flexDirection: "column",
+  alignItems: "center",
   minHeight: 0,
+  paddingTop: 8,
 };
 
-const railHeader: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "12px 12px 8px",
-};
+const railScroll: CSSProperties = { overflowY: "auto", flex: 1, width: "100%", padding: "6px 0" };
 
-const railScroll: CSSProperties = { overflow: "auto", flex: 1, padding: "0 8px 8px" };
-
-const itemRow: CSSProperties = {
-  display: "flex",
+// 窄列里的图标按钮（加入 / 创建 / 修改 / 退出），40×40
+const railAction: CSSProperties = {
+  display: "inline-flex",
   alignItems: "center",
-  gap: 8,
-  padding: "7px 8px",
-  borderRadius: 8,
-  cursor: "pointer",
+  justifyContent: "center",
+  width: 40,
+  height: 40,
+  borderRadius: 12,
   border: "none",
   background: "transparent",
-  color: palette.text,
-  width: "100%",
-  textAlign: "left",
+  color: palette.secondary,
+  cursor: "pointer",
+  flex: "0 0 auto",
 };
 
-const badge: CSSProperties = {
-  minWidth: 18,
+// 单个社区域（48 高，内容水平垂直居中），左缘留出激活指示条
+const railItem: CSSProperties = {
+  width: "100%",
+  height: 48,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  position: "relative",
+  color: palette.text,
+};
+
+// 头像容器：用于包裹 Avatar 并叠加右上角未读气泡
+const railAvatar: CSSProperties = {
+  position: "relative",
+  display: "inline-flex",
+};
+
+// 激活态的左侧指示条（Discord 风格）
+const railPill: CSSProperties = {
+  position: "absolute",
+  left: 0,
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 4,
   height: 18,
-  padding: "0 5px",
+  borderRadius: "0 4px 4px 0",
+  background: palette.text,
+};
+
+// 头像右上角未读气泡
+const railBubble: CSSProperties = {
+  position: "absolute",
+  top: -2,
+  right: -2,
+  minWidth: 15,
+  height: 15,
+  padding: "0 3px",
   borderRadius: 999,
   background: palette.badge,
   color: "#fff",
-  fontSize: 11,
-  lineHeight: "18px",
+  fontSize: 9,
+  fontWeight: 700,
+  lineHeight: "15px",
   textAlign: "center",
+};
+
+// 窄列内的细分隔线
+const railDivider: CSSProperties = {
+  width: 32,
+  height: 1,
+  margin: "6px 0",
+  background: palette.border,
 };
 
 const midCol: CSSProperties = {
@@ -325,129 +370,99 @@ function CommunitiesRail({
   const me = talk.me;
   return (
     <div style={rail}>
-      <div style={{ ...railHeader, gap: 6 }}>
-        <span style={railMark}>{me?.handle.slice(0, 1).toUpperCase() ?? "T"}</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.2 }}>dsh-talk</span>
-          <span style={{ ...smallText, fontSize: 10.5 }}>社区</span>
-        </div>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<IconLinkOutline16 />}
-            onClick={onJoin}
-            aria-label="加入社区"
-            title="用邀请码加入"
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<IconPlusOutline16 />}
-            onClick={onCreate}
-            aria-label="创建社区"
-            title="创建社区"
-          />
-        </span>
+      <span style={railMark} title="dsh-talk 社区">
+        {me?.handle.slice(0, 1).toUpperCase() ?? "T"}
+      </span>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 2,
+          marginTop: 6,
+        }}
+      >
+        <button
+          type="button"
+          style={railAction}
+          onClick={onJoin}
+          aria-label="用邀请码加入"
+          title="用邀请码加入"
+        >
+          <IconLinkOutline16 />
+        </button>
+        <button
+          type="button"
+          style={railAction}
+          onClick={onCreate}
+          aria-label="创建社区"
+          title="创建社区"
+        >
+          <IconPlusOutline16 />
+        </button>
       </div>
+      <div style={railDivider} />
       <div style={railScroll}>
-        {talk.communities.length === 0 ? (
-          <div style={{ ...smallText, padding: "12px 12px", lineHeight: 1.7 }}>
-            还没有社区。
-            <br />
-            点右上「＋」创建，或用邀请码加入。
-          </div>
-        ) : (
-          <>
-            <div style={sectionTitle}>我的社区</div>
-            {talk.communities.map((c) => {
-              const active = c.id === current;
-              const unread = c.unreadChannels;
-              const mention = c.unreadMentions;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  style={{
-                    ...itemRow,
-                    background: active ? palette.hover : undefined,
-                    border: "1px solid transparent",
-                    ...(active ? activeTile : {}),
-                    marginBottom: 2,
-                    fontWeight: active ? 600 : 450,
-                  }}
-                  onClick={() => {
-                    if (!active) void openCommunity(c.id);
-                  }}
-                >
-                  <Avatar label={c.name} size={26} />
-                  <span
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {c.name}
-                  </span>
-                  {mention > 0 ? (
-                    <span style={{ ...badge, background: palette.accent }}>{mention}</span>
-                  ) : unread > 0 ? (
-                    <span style={badge}>{unread}</span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </>
-        )}
+        {talk.communities.map((c) => {
+          const active = c.id === current;
+          const unread = c.unreadChannels;
+          const mention = c.unreadMentions;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              style={railItem}
+              onClick={() => {
+                if (!active) void openCommunity(c.id);
+              }}
+              title={c.name}
+            >
+              {active ? <span style={railPill} /> : null}
+              <span style={railAvatar}>
+                <Avatar label={c.name} src={c.iconUrl} size={44} />
+                {mention > 0 ? (
+                  <span style={{ ...railBubble, background: palette.accent }}>{mention}</span>
+                ) : unread > 0 ? (
+                  <span style={railBubble}>{unread}</span>
+                ) : null}
+              </span>
+            </button>
+          );
+        })}
       </div>
       {me ? (
         <div
           style={{
+            padding: "8px 0 12px",
             display: "flex",
+            flexDirection: "column",
             alignItems: "center",
-            gap: 6,
-            margin: "0 8px 8px",
-            padding: "7px 8px",
-            borderRadius: 12,
-            background: palette.inputBg,
-            border: `1px solid ${palette.border}`,
+            gap: 4,
+            width: "100%",
           }}
         >
-          <Avatar label={me.handle} size={24} />
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontSize: 12,
-              fontWeight: 600,
-              color: palette.text,
-            }}
-          >
-            @{me.handle}
+          <div style={railDivider} />
+          <span title={me.handle} style={railAvatar}>
+            <Avatar label={me.handle} src={me.avatarUrl} size={34} />
           </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<IconEditOutline16 />}
+          <button
+            type="button"
+            style={railAction}
             onClick={onEditProfile}
             aria-label="修改用户名"
             title="修改用户名"
-          />
-          <Button
-            size="sm"
-            variant="ghost"
+          >
+            <IconEditOutline16 />
+          </button>
+          <button
+            type="button"
+            style={railAction}
             onClick={() => void logout()}
             aria-label="退出登录"
             title="退出登录"
           >
-            退出
-          </Button>
+            <IconTrashOutline16 />
+          </button>
         </div>
       ) : null}
     </div>
@@ -710,7 +725,7 @@ function MessageRow({ item }: { item: MessageItem }): ReactElement {
         cursor: "default",
       }}
     >
-      <Avatar label={item.author.handle} />
+      <Avatar label={item.author.handle} src={item.author.avatarUrl} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 600 }}>
@@ -1081,14 +1096,31 @@ function CreateCommunityModal({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [privacy, setPrivacy] = useState<"public" | "private">("public");
+  const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // 每次打开重置已上传的头像预览
+  useEffect(() => {
+    if (open) setIconUrl(null);
+  }, [open]);
+
+  async function pickIcon(file: File): Promise<void> {
+    const url = await uploadImage(file);
+    if (url) setIconUrl(url);
+  }
 
   async function submit(): Promise<void> {
     if (name.trim().length === 0) return;
     setBusy(true);
-    const body: { name: string; description?: string; privacy?: "public" | "private" } = {
+    const body: {
+      name: string;
+      description?: string;
+      privacy?: "public" | "private";
+      iconUrl?: string | null;
+    } = {
       name: name.trim(),
       privacy,
+      iconUrl,
     };
     if (description.trim().length > 0) body.description = description.trim();
     const ok = await createCommunity(body);
@@ -1122,6 +1154,19 @@ function CreateCommunityModal({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>社区头像</span>
+          <AvatarPicker
+            src={iconUrl}
+            label={name.trim() || "社区"}
+            size={60}
+            onPick={(file) => void pickIcon(file)}
+            onRemove={() => setIconUrl(null)}
+            uploadLabel="设置头像"
+            removeLabel="移除头像"
+            busy={busy}
+          />
+        </div>
         <div style={fieldBlock}>
           <label htmlFor="talk-create-name" style={fieldLabel}>
             社区名称
@@ -1231,11 +1276,24 @@ function UpdateUsernameModal({
   const talk = useTalkState();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   // 每次打开用当前 handle 预填
   useEffect(() => {
     if (open) setValue(talk.me?.handle ?? "");
   }, [open, talk.me?.handle]);
+
+  async function pickAvatar(file: File): Promise<void> {
+    setAvatarBusy(true);
+    await updateUserAvatar(file);
+    setAvatarBusy(false);
+  }
+
+  async function removeAvatar(): Promise<void> {
+    setAvatarBusy(true);
+    await removeUserAvatar();
+    setAvatarBusy(false);
+  }
 
   async function submit(): Promise<void> {
     if (busy) return;
@@ -1267,8 +1325,29 @@ function UpdateUsernameModal({
         </>
       }
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="新的用户名" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>个人头像</span>
+          <AvatarPicker
+            src={talk.me?.avatarUrl ?? null}
+            label={talk.me?.handle ?? ""}
+            size={60}
+            onPick={(file) => void pickAvatar(file)}
+            onRemove={() => void removeAvatar()}
+            busy={avatarBusy}
+          />
+        </div>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-username" style={fieldLabel}>
+            用户名
+          </label>
+          <Input
+            id="talk-username"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="新的用户名"
+          />
+        </div>
         <span style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
           仅限字母、数字、下划线与点；4-30 位且全局唯一（@提及用）。若已被占用会自动提示。
         </span>

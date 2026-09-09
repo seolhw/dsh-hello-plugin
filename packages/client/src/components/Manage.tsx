@@ -32,9 +32,10 @@ import {
   setMemberRole,
   updateChannelById,
   updateCommunity,
+  uploadImage,
   useTalkState,
 } from "../store";
-import { Avatar, palette, smallText } from "./styles";
+import { Avatar, AvatarPicker, palette, smallText } from "./styles";
 
 const isModerator = (role: MemberRole | null | undefined): boolean =>
   role === "owner" || role === "admin";
@@ -146,6 +147,7 @@ export function CommunityTools(): ReactElement | null {
           />
         }
         items={menuItems}
+        portal
       />
       {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite" ? <InviteDialog open onClose={() => setDialog(null)} /> : null}
@@ -224,7 +226,22 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
   const [name, setName] = useState(community?.name ?? "");
   const [description, setDescription] = useState(community?.description ?? "");
   const [privacy, setPrivacy] = useState<"public" | "private">(community?.privacy ?? "public");
+  const [iconUrl, setIconUrl] = useState<string | null>(community?.iconUrl ?? null);
   const [busy, setBusy] = useState(false);
+
+  // 每次打开用当前社区资料预填
+  useEffect(() => {
+    if (!open) return;
+    setName(community?.name ?? "");
+    setDescription(community?.description ?? "");
+    setPrivacy(community?.privacy ?? "public");
+    setIconUrl(community?.iconUrl ?? null);
+  }, [open, community?.name, community?.description, community?.privacy, community?.iconUrl]);
+
+  async function pickIcon(file: File): Promise<void> {
+    const url = await uploadImage(file);
+    if (url) setIconUrl(url);
+  }
 
   async function save(): Promise<void> {
     if (name.trim().length === 0) return;
@@ -233,6 +250,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
       name: name.trim(),
       description: description.length > 0 ? description : null,
       privacy,
+      iconUrl,
     });
     setBusy(false);
     if (ok) onClose();
@@ -260,6 +278,19 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>社区头像</span>
+          <AvatarPicker
+            src={iconUrl}
+            label={name.trim() || "社区"}
+            size={60}
+            onPick={(file) => void pickIcon(file)}
+            onRemove={() => setIconUrl(null)}
+            uploadLabel="设置头像"
+            removeLabel="移除头像"
+            busy={busy}
+          />
+        </div>
         <div style={fieldBlock}>
           <label htmlFor="talk-community-name" style={fieldLabel}>
             社区名称
@@ -365,7 +396,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                   border: `1px solid ${palette.border}`,
                 }}
               >
-                <Avatar label={m.user.handle} />
+                <Avatar label={m.user.handle} src={m.user.avatarUrl} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
@@ -630,6 +661,7 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
           { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
           { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
         ]}
+        portal
       />
       {editing ? <ChannelDialog open channel={channel} onClose={() => setEditing(false)} /> : null}
     </>

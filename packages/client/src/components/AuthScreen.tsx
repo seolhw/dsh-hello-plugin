@@ -7,7 +7,14 @@
 import { Button, IconWarningOutline16, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, FormEvent, ReactElement, ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { cancelVerification, login, register, resendVerificationOtp, useTalkState, verifyOtp } from "../store";
+import {
+  cancelVerification,
+  login,
+  register,
+  resendVerificationOtp,
+  useTalkState,
+  verifyOtp,
+} from "../store";
 import { palette } from "./styles";
 
 type Mode = "login" | "register";

@@ -107,8 +107,7 @@ function toQuery(params: Record<string, string | number | undefined>): string {
 const NETWORK_RETRY_MAX = 4;
 const NETWORK_RETRY_BASE_MS = 1000;
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function fetchWithRetry(
   input: string | URL | Request,

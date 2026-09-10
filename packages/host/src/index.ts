@@ -84,6 +84,25 @@ function sanitizePatch(raw: unknown): Partial<TalkSettings> {
   return patch;
 }
 
+// ---------- serverUrl 的环境来源 ----------
+
+/**
+ * BETTER_AUTH_URL 是后端 Server 唯一的环境声明：本地地址就连本地，
+ * 生产地址就连生产。`dsh web` 启动时会从仓库根 .env 加载它（dsh-app-boot），
+ * 因此 host 进程可直接读到。设置了它时优先于 settings 里的 serverUrl。
+ */
+function envServerUrl(): string | undefined {
+  const value = process.env.BETTER_AUTH_URL?.trim();
+  return value && value.length > 0 ? value : undefined;
+}
+
+/** settings 与 BETTER_AUTH_URL 合并后的生效配置：环境变量优先。 */
+function effectiveSettings(scope: SettingsScope<TalkSettings>): TalkSettings {
+  const current = scope.get();
+  const serverUrl = envServerUrl();
+  return serverUrl ? { ...current, serverUrl } : current;
+}
+
 // ---------- 本地克隆：分享包流式下载直写本地 ----------
 
 function clonesDir(): string {
@@ -101,7 +120,7 @@ function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
       path: "/api/talk/config",
       handler: async (req, res) => {
         if (req.method === "GET") {
-          sendJson(res, 200, scope.get());
+          sendJson(res, 200, effectiveSettings(scope));
           return;
         }
         if (req.method === "POST") {
@@ -112,7 +131,7 @@ function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
               return;
             }
             await scope.update(patch);
-            sendJson(res, 200, scope.get());
+            sendJson(res, 200, effectiveSettings(scope));
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             sendJson(res, 500, { code: "INTERNAL", message });
@@ -161,8 +180,8 @@ function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
             sendJson(res, 400, { code: "BAD_REQUEST", message: "downloadUrl 无效" });
             return;
           }
-          // 只允许从配置的 serverUrl 同源下载，避免 host 被当成任意 URL 代理
-          const allowed = new URL(scope.get().serverUrl).host;
+          // 只允许从生效的 serverUrl 同源下载，避免 host 被当成任意 URL 代理
+          const allowed = new URL(effectiveSettings(scope).serverUrl).host;
           if (url.host !== allowed) {
             sendJson(res, 400, { code: "BAD_REQUEST", message: `只允许从 ${allowed} 下载` });
             return;

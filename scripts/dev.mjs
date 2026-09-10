@@ -12,7 +12,7 @@
  * 自动打开）。看到日志提示重启后，刷新已打开的 DSH Web 页即可。
  */
 import { spawn, spawnSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -28,9 +28,39 @@ const POLL_MS = 250;
 // 杀掉旧 server 后、拉起新 server 前的间隔，等端口释放。
 const RELAUNCH_DELAY_MS = 500;
 
+/** 读取仓库根 .env 里的 BETTER_AUTH_URL（与 server 同一个变量，决定连本地还是生产）。 */
+function envServerUrl() {
+  const fromProcess = process.env.BETTER_AUTH_URL?.trim();
+  if (fromProcess) return fromProcess;
+  let text = "";
+  try {
+    text = readFileSync(path.join(ROOT, ".env"), "utf8");
+  } catch {
+    return "";
+  }
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0 || line.slice(0, eq).trim() !== "BETTER_AUTH_URL") continue;
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    return value.trim();
+  }
+  return "";
+}
+
 // 后端 Server 健康探测地址（worker.ts 的 /healthz）。仅提示，不阻塞 dev 主流程。
-const SERVER_URL = "http://127.0.0.1:8787";
+// 连接目标由 BETTER_AUTH_URL 决定：本地地址 → 本地 8787，生产地址 → 生产。
+const SERVER_URL = (envServerUrl() || "http://127.0.0.1:8787").replace(/\/+$/, "");
 const SERVER_HEALTH_URL = `${SERVER_URL}/healthz`;
+// 只有本地 Server 才提示去跑 pnpm dev:server。
+const IS_LOCAL_SERVER = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(SERVER_URL);
 
 const IS_WIN = process.platform === "win32";
 
@@ -127,7 +157,7 @@ function restartServer() {
   }, RELAUNCH_DELAY_MS);
 }
 
-/** 探测后端 Server（127.0.0.1:8787）是否就绪，仅在状态变化时打印一次提示。 */
+/** 探测配置的 Server 是否就绪，仅在状态变化时打印一次提示。 */
 async function checkServerHealth() {
   let ok = false;
   try {
@@ -140,10 +170,15 @@ async function checkServerHealth() {
   serverHealthy = ok;
   if (ok) {
     console.log(`\n[dsh-talk] ✅ 后端 Server 已就绪：${SERVER_HEALTH_URL}\n`);
-  } else {
+  } else if (IS_LOCAL_SERVER) {
     console.error(
       `\n[dsh-talk] ❌ 无法连通后端 Server（${SERVER_URL}）。社区页将报 net::ERR_CONNECTION_REFUSED。\n` +
       "[dsh-talk] 请另开一个终端运行：pnpm dev:server\n",
+    );
+  } else {
+    console.error(
+      `\n[dsh-talk] ❌ 无法连通远端 Server（${SERVER_URL}，来自 BETTER_AUTH_URL）。\n` +
+      "[dsh-talk] 请检查该地址是否可访问以及本机网络。\n",
     );
   }
 }
@@ -191,7 +226,9 @@ console.log(
   "[dsh-talk] 注意：本脚本只负责「打包 lib/ 并启动 DSH web（浏览器侧 UI）」，不会启动后端 Server。",
 );
 console.log(
-  `[dsh-talk] 后端 Server 需另开一个终端运行：pnpm dev:server（${SERVER_URL}）`,
+  IS_LOCAL_SERVER
+    ? `[dsh-talk] 后端 Server = 本地 ${SERVER_URL}，需另开一个终端运行：pnpm dev:server`
+    : `[dsh-talk] 后端 Server = 远端 ${SERVER_URL}（来自 BETTER_AUTH_URL），无需本地 dev:server`,
 );
 
 // TSDOWN_WATCH 告诉 tsdown.config.ts 这次是 watch：别 clean 掉整个 lib/，

@@ -8,11 +8,14 @@
 
 import type {
   AcceptInviteResponse,
+  AddThreadMemberResponse,
   ApiError,
   AuthUser,
   BanCommunityMemberRequest,
   BanCommunityMemberResponse,
   ChangePasswordRequest,
+  CreateAgentSessionShareRequest,
+  CreateAgentSessionShareResponse,
   CreateChannelRequest,
   CreateChannelResponse,
   CreateCommunityRequest,
@@ -28,26 +31,37 @@ import type {
   DeclineInviteResponse,
   DeleteChannelResponse,
   DeleteCommunityResponse,
+  DeleteShareResponse,
+  DiscoverCommunitiesQuery,
+  DiscoverCommunitiesResponse,
   GetChannelOnlineResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   GetReadStateResponse,
   GetSessionResponse,
+  GetShareResponse,
   GetThreadReadStateResponse,
   JoinByInviteRequest,
   JoinByInviteResponse,
   JoinCommunityResponse,
+  JoinThreadRequest,
+  JoinThreadResponse,
   LeaveCommunityResponse,
   ListCommunityBansResponse,
   ListMembersQuery,
   ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
+  ListMySharesResponse,
   ListNotificationsResponse,
+  ListSharesResponse,
+  ListThreadCandidatesResponse,
+  ListThreadMembersResponse,
   ListThreadsResponse,
   MarkAllNotificationsReadResponse,
   MarkNotificationReadResponse,
   RemoveMemberResponse,
+  RemoveThreadMemberResponse,
   RequestPasswordResetOTPResponse,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
@@ -325,6 +339,24 @@ export class ServerClient {
   }
 
   // ---------- 业务 REST：社区 / 频道 / 成员 ----------
+
+  /** GET /api/communities/discover —— 公开社区目录（模糊搜索 + 排序） */
+  discoverCommunities(
+    opts: Pick<DiscoverCommunitiesQuery, "q" | "sort" | "limit" | "offset"> = {},
+  ): Promise<DiscoverCommunitiesResponse> {
+    const qs = toQuery({
+      q: opts.q ?? "",
+      sort: opts.sort ?? "",
+      limit: opts.limit ?? 20,
+      offset: opts.offset ?? 0,
+    });
+    return this.call<DiscoverCommunitiesResponse>(
+      "GET",
+      `/api/communities/discover${qs}`,
+      undefined,
+      true,
+    );
+  }
 
   /** GET /api/communities/mine —— 我加入的社区（含未读概览） */
   myCommunities(): Promise<GetMyCommunitiesResponse> {
@@ -654,9 +686,57 @@ export class ServerClient {
     return this.call<ThreadSummary>("GET", `/api/threads/${threadId}`, undefined, true);
   }
 
-  /** PATCH /api/threads/:id —— 改名 */
-  renameThread(threadId: string, body: UpdateThreadRequest): Promise<ThreadSummary> {
-    return this.call<ThreadSummary>("PATCH", `/api/threads/${threadId}`, body, true);
+  /** PATCH /api/threads/:id —— 改名 / 改可见性 / 改密码（发起人或 owner/admin） */
+  updateThread(threadId: string, patch: UpdateThreadRequest): Promise<ThreadSummary> {
+    return this.call<ThreadSummary>("PATCH", `/api/threads/${threadId}`, patch, true);
+  }
+
+  /** POST /api/threads/:id/join —— 凭密码进入私密讨论组（公开组幂等；无密码的私密组 403） */
+  joinThread(threadId: string, passcode?: string): Promise<JoinThreadResponse> {
+    const body: JoinThreadRequest = {};
+    if (passcode !== undefined && passcode.length > 0) body.passcode = passcode;
+    return this.call<JoinThreadResponse>("POST", `/api/threads/${threadId}/join`, body, true);
+  }
+
+  /** GET /api/threads/:id/members —— 讨论组成员名单（需可进入该讨论组） */
+  listThreadMembers(threadId: string): Promise<ListThreadMembersResponse> {
+    return this.call<ListThreadMembersResponse>(
+      "GET",
+      `/api/threads/${threadId}/members`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/threads/:id/members —— 直接把社区成员拉入讨论组 */
+  addThreadMember(threadId: string, userId: string): Promise<AddThreadMemberResponse> {
+    return this.call<AddThreadMemberResponse>(
+      "POST",
+      `/api/threads/${threadId}/members`,
+      { userId },
+      true,
+    );
+  }
+
+  /** DELETE /api/threads/:id/members/:userId —— 移除成员（移除自己即退出） */
+  removeThreadMember(threadId: string, userId: string): Promise<RemoveThreadMemberResponse> {
+    return this.call<RemoveThreadMemberResponse>(
+      "DELETE",
+      `/api/threads/${threadId}/members/${userId}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** GET /api/threads/:id/candidates?q= —— 可拉入的社区成员（尚未在组内） */
+  listThreadCandidates(threadId: string, q?: string): Promise<ListThreadCandidatesResponse> {
+    const query = toQuery({ q: q ?? "" });
+    return this.call<ListThreadCandidatesResponse>(
+      "GET",
+      `/api/threads/${threadId}/candidates${query}`,
+      undefined,
+      true,
+    );
   }
 
   /** POST /api/threads/:id/archive —— 手动归档 */
@@ -717,9 +797,9 @@ export class ServerClient {
     );
   }
 
-  // ---------- 业务 REST：会话快照分享 ----------
+  // ---------- 业务 REST：分享（频道快照 / DSH 会话） ----------
 
-  /** POST /api/shares/snapshot —— 把某频道消息打包成会话快照 */
+  /** POST /api/shares/snapshot —— 把某频道消息打包成频道快照 */
   createShareSnapshot(
     channelId: string,
     body: Pick<CreateShareRequest, "title" | "summary">,
@@ -730,6 +810,52 @@ export class ServerClient {
       { channelId, ...body },
       true,
     );
+  }
+
+  /** POST /api/shares/agent-session —— 登记一条 DSH 会话分享（包体已直传 R2） */
+  createAgentSessionShare(
+    body: CreateAgentSessionShareRequest,
+  ): Promise<CreateAgentSessionShareResponse> {
+    return this.call<CreateAgentSessionShareResponse>(
+      "POST",
+      "/api/shares/agent-session",
+      body,
+      true,
+    );
+  }
+
+  /** GET /api/shares/discover —— 公开分享广场 */
+  listShares(
+    opts: { kind?: "channel-snapshot" | "agent-session"; cursor?: string; limit?: number } = {},
+  ): Promise<ListSharesResponse> {
+    const qs = toQuery({
+      kind: opts.kind ?? "",
+      cursor: opts.cursor ?? "",
+      limit: opts.limit ?? 20,
+    });
+    return this.call<ListSharesResponse>("GET", `/api/shares/discover${qs}`, undefined, true);
+  }
+
+  /** GET /api/shares/mine —— 我创建的分享 */
+  listMyShares(
+    opts: { kind?: "channel-snapshot" | "agent-session"; cursor?: string; limit?: number } = {},
+  ): Promise<ListMySharesResponse> {
+    const qs = toQuery({
+      kind: opts.kind ?? "",
+      cursor: opts.cursor ?? "",
+      limit: opts.limit ?? 20,
+    });
+    return this.call<ListMySharesResponse>("GET", `/api/shares/mine${qs}`, undefined, true);
+  }
+
+  /** GET /api/shares/:id —— 分享详情（含 downloadUrl） */
+  getShare(shareId: string): Promise<GetShareResponse> {
+    return this.call<GetShareResponse>("GET", `/api/shares/${shareId}`, undefined, true);
+  }
+
+  /** DELETE /api/shares/:id —— 删除自己创建的分享（含 R2 包体） */
+  deleteShare(shareId: string): Promise<DeleteShareResponse> {
+    return this.call<DeleteShareResponse>("DELETE", `/api/shares/${shareId}`, undefined, true);
   }
 
   /**

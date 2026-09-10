@@ -17,6 +17,7 @@ import {
   dismissToast,
   refresh,
   refreshInboxUnread,
+  setCurrentDshSession,
   useTalkState,
 } from "./store";
 
@@ -46,9 +47,15 @@ function ErrorView(): ReactElement {
 }
 
 /** 「社区」页签页：随会话 view 挂载/卸载而激活/释放实时连接 */
-export function TalkPage(_props: object): ReactElement {
+export function TalkPage(props: { sessionId?: string }): ReactElement {
   const talk = useTalkState();
   const ready = talk.phase === "ready";
+  const sessionId = props.sessionId ?? null;
+
+  // 记录当前 DSH 会话 id：「分享会话」入口默认用它
+  useEffect(() => {
+    setCurrentDshSession(sessionId);
+  }, [sessionId]);
 
   useEffect(() => {
     activateTalk();

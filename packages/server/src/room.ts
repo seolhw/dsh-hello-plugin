@@ -96,8 +96,9 @@ export class ChannelActor extends DurableObject<Env> {
     }
     this.channelId = channelId;
 
-    // 鉴权唯一入口：房间存在 + 调用方是该社区成员（D1 为准）
-    // roomId 既可能是主频道，也可能是讨论组（thread）——两种都放行到对应 DO 实例
+    // 鉴权唯一入口：房间存在 + 调用方有权进入（D1 为准）
+    // roomId 既可能是主频道，也可能是讨论组（thread）——两种都放行到对应 DO 实例。
+    // 讨论组隐私：public 全体社区成员可连；private 仅发起人 / 成员名单 / 社区 owner·admin。
     const allowed =
       (await this.env.DB.prepare(
         `SELECT 1 FROM channels c
@@ -109,9 +110,19 @@ export class ChannelActor extends DurableObject<Env> {
       (await this.env.DB.prepare(
         `SELECT 1 FROM threads t
          JOIN community_members m ON m.community_id = t.community_id
-         WHERE t.id = ? AND m.user_id = ? LIMIT 1`,
+         WHERE t.id = ? AND m.user_id = ?
+           AND (
+             t.visibility = 'public'
+             OR t.created_by = ?
+             OR m.role IN ('owner', 'admin')
+             OR EXISTS (
+               SELECT 1 FROM thread_members tm
+               WHERE tm.thread_id = t.id AND tm.user_id = ?
+             )
+           )
+         LIMIT 1`,
       )
-        .bind(this.channelId, userId)
+        .bind(this.channelId, userId, userId, userId)
         .first());
     if (!allowed) {
       return Response.json(

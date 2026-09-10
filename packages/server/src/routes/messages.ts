@@ -48,6 +48,7 @@ import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { broadcastToChannel } from "../lib/realtime";
 import { type AppCtx, emptyOk } from "../lib/response";
+import { canEnterThread } from "../lib/threads";
 import { fetchUserById, fetchUsersByIds, resolveUserIdsByHandles } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
@@ -145,15 +146,19 @@ async function requireChannelMember(
   await requireMember(db, channel.communityId, userId);
 }
 
-/** 校验讨论组（thread）属于该频道并返回行；用于列表 ?threadId / 发消息 body.threadId */
+/** 校验讨论组（thread）属于该频道且我有权进入（私密组）；用于列表 ?threadId / 发消息 body.threadId */
 async function loadThreadInChannel(
   db: ReturnType<typeof dbOf>,
   channel: ChannelRow,
   threadId: string,
+  userId: string,
 ): Promise<ThreadRow> {
   const thread = (await db.select().from(threads).where(eq(threads.id, threadId)).limit(1))[0];
   if (!thread || thread.channelId !== channel.id || thread.communityId !== channel.communityId)
     throw HttpApiError.badRequest("threadId 无效（不存在或不属于该频道）");
+  if (!(await canEnterThread(db, thread, userId))) {
+    throw HttpApiError.forbidden("这是私密讨论组，需要被邀请或用密码进入");
+  }
   return thread;
 }
 
@@ -176,7 +181,7 @@ channelMessagesApi.get("/:id/messages", async (c) => {
   const rawThread = (q.threadId ?? "").trim();
   const conds = [eq(messages.channelId, channelId)];
   if (rawThread.length > 0) {
-    const thread = await loadThreadInChannel(db, channel, rawThread);
+    const thread = await loadThreadInChannel(db, channel, rawThread, userId);
     conds.push(eq(messages.threadId, thread.id));
   } else {
     conds.push(isNull(messages.threadId));
@@ -227,7 +232,7 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   // 目标讨论组：body.threadId 可选；必须依附本频道（公告频道无讨论组，自然不命中）
   const thread =
     body.threadId !== undefined && body.threadId !== null
-      ? await loadThreadInChannel(db, channel, body.threadId)
+      ? await loadThreadInChannel(db, channel, body.threadId, userId)
       : null;
   // 话题（forum）频道不在频道内直接聊天，必须先进入某个话题（thread）
   if (channel.kind === "forum" && !thread)

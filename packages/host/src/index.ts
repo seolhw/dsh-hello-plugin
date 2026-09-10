@@ -5,23 +5,28 @@
 //     语义与 @dsh-talk/types/rpc 的 SettingsRpc 一致（get / set / watch）
 // ================================================================
 
-import { createWriteStream, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
+import { isAbsolute, join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import type { SettingsScope } from "@deepseek-ai/dsh-settings";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import z from "@deepseek-ai/schemastery";
-import type { TalkSettings } from "@dsh-talk/types/rpc";
+import type {
+  AgentSessionPackage,
+  HostCloneResult,
+  HostSessionsStatus,
+  LocalSessionSummary,
+  TalkSettings,
+} from "@dsh-talk/types/rpc";
 
 export const name = "dsh-talk";
 
-/** 需要 DSH 内置的两个 host service 就绪后才启动。 */
-export const inject = ["settings", "webServer"];
+/** 需要 DSH 内置 service 就绪后才启动（会话分享依赖 sessions / sessionPersistence）。 */
+export const inject = ["settings", "webServer", "sessions", "sessionPersistence"];
 
 const TALK_NS = settingsNamespace("talk");
 
@@ -111,9 +116,173 @@ function clonesDir(): string {
   return dir;
 }
 
+// ---------- 本地 DSH 会话：服务取用 + 打包 / 还原 ----------
+
+/** DSH 会话持久化服务的最小结构面（不引入 @deepseek-ai/dsh-session 类型包依赖） */
+interface SessionHeaderLike {
+  version: number;
+  id: string;
+  createdAt: number;
+  cwd?: string;
+  parentSession?: string;
+  seedLength?: number;
+}
+
+interface SessionPersistenceLike {
+  list(signal?: AbortSignal): Promise<SessionHeaderLike[]>;
+  readFrom(
+    id: string,
+    fromSeq: number,
+    signal?: AbortSignal,
+  ): Promise<{ meta: SessionHeaderLike; events: unknown[] }>;
+}
+
+interface SessionStoreLike {
+  create(
+    id?: string,
+    options?: { seed?: readonly unknown[]; meta?: Record<string, unknown> },
+  ): { id: string };
+  flush(session: { id: string }): Promise<boolean>;
+}
+
+/** 会话包格式版本（host ↔ host；服务端只透传 manifest） */
+const SESSION_PACKAGE_VERSION = 1;
+
+function serviceOf<T>(ctx: Context, key: string): T | undefined {
+  return ctx.get(key) as T | undefined;
+}
+
+/** 解析下载到的字节：是本机会话包则返回，否则 null（频道快照等走落盘分支） */
+function parseAgentSessionPackage(bytes: Buffer): AgentSessionPackage | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const pack = parsed as Partial<AgentSessionPackage>;
+  if (pack.kind !== "agent-session") return null;
+  if (!Array.isArray(pack.events)) return null;
+  if (typeof pack.header !== "object" || pack.header === null) return null;
+  return pack as AgentSessionPackage;
+}
+
+/** 还原会话的落地工作区：显式传入 > 来源 cwd（本机存在才用）> host 进程 cwd */
+function pickWorkspaceCwd(wanted: string | undefined, fromPack: string | undefined): string {
+  if (wanted) return wanted;
+  if (fromPack && isAbsolute(fromPack) && existsSync(fromPack)) {
+    try {
+      if (statSync(fromPack).isDirectory()) return fromPack;
+    } catch {
+      // 读取失败则退回 host cwd
+    }
+  }
+  return process.cwd();
+}
+
+function buildSessionPackage(meta: SessionHeaderLike, events: unknown[]): AgentSessionPackage {
+  return {
+    kind: "agent-session",
+    manifest: {
+      packageVersion: SESSION_PACKAGE_VERSION,
+      sessionId: meta.id,
+      ...(meta.cwd ? { cwd: meta.cwd } : {}),
+      sessionVersion: meta.version,
+      eventCount: events.length,
+      createdAt: meta.createdAt,
+    },
+    header: {
+      version: meta.version,
+      id: meta.id,
+      createdAt: meta.createdAt,
+      ...(meta.cwd ? { cwd: meta.cwd } : {}),
+      ...(meta.parentSession ? { parentSession: meta.parentSession } : {}),
+      ...(typeof meta.seedLength === "number" ? { seedLength: meta.seedLength } : {}),
+    },
+    events,
+  };
+}
+
+// ---------- /api/talk/sessions + /api/talk/session-package 路由 ----------
+
+function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[] {
+  const errorOf = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
+
+  return [
+    {
+      kind: "exact",
+      path: "/api/talk/sessions",
+      handler: async (_req, res) => {
+        const persistence = serviceOf<SessionPersistenceLike>(ctx, "sessionPersistence");
+        if (!persistence) {
+          sendJson(res, 503, { code: "INTERNAL", message: "会话持久化服务不可用" });
+          return;
+        }
+        try {
+          const headers = await persistence.list();
+          const sessions = [...headers]
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 200)
+            .map(
+              (h): LocalSessionSummary => ({
+                id: h.id,
+                createdAt: h.createdAt,
+                ...(h.cwd ? { cwd: h.cwd } : {}),
+                ...(h.parentSession ? { parentSession: h.parentSession } : {}),
+              }),
+            );
+          sendJson(res, 200, { sessions } satisfies HostSessionsStatus);
+        } catch (error) {
+          sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
+        }
+      },
+    },
+    {
+      kind: "exact",
+      path: "/api/talk/session-package",
+      handler: async (req, res) => {
+        const persistence = serviceOf<SessionPersistenceLike>(ctx, "sessionPersistence");
+        if (!persistence) {
+          sendJson(res, 503, { code: "INTERNAL", message: "会话持久化服务不可用" });
+          return;
+        }
+        const sessionId = new URL(req.url ?? "", "http://localhost").searchParams
+          .get("sessionId")
+          ?.trim();
+        if (!sessionId) {
+          sendJson(res, 400, { code: "BAD_REQUEST", message: "缺少 sessionId" });
+          return;
+        }
+        try {
+          const { meta, events } = await persistence.readFrom(sessionId, 0);
+          const body = Buffer.from(JSON.stringify(buildSessionPackage(meta, events)), "utf8");
+          const maxBytes = scope.get().share.maxSizeMb * 1024 * 1024;
+          if (body.byteLength > maxBytes) {
+            const mb = Math.round(maxBytes / 1024 / 1024);
+            sendJson(res, 413, {
+              code: "PAYLOAD_TOO_LARGE",
+              message: `会话包超过 ${mb} MiB 上限`,
+            });
+            return;
+          }
+          res.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "content-length": String(body.byteLength),
+          });
+          res.end(body);
+        } catch (error) {
+          sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
+        }
+      },
+    },
+  ];
+}
+
 // ---------- /api/talk/config + /api/talk/clone(s) 路由 ----------
 
-function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
+function talkRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[] {
   return [
     {
       kind: "exact",
@@ -171,8 +340,10 @@ function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
           return;
         }
         try {
-          const body = (await readJsonBody(req)) as { downloadUrl?: unknown };
+          const body = (await readJsonBody(req)) as { downloadUrl?: unknown; cwd?: unknown };
           const downloadUrl = typeof body.downloadUrl === "string" ? body.downloadUrl : "";
+          const wantedCwd =
+            typeof body.cwd === "string" && isAbsolute(body.cwd) ? body.cwd : undefined;
           let url: URL;
           try {
             url = new URL(downloadUrl);
@@ -189,25 +360,48 @@ function talkRoutes(scope: SettingsScope<TalkSettings>): WebRoute[] {
 
           const started = Date.now();
           const response = await fetch(downloadUrl);
-          if (!response.ok || !response.body) {
+          if (!response.ok) {
             sendJson(res, 502, { code: "INTERNAL", message: `下载失败 HTTP ${response.status}` });
             return;
           }
-          const name = `snapshot-${Date.now()}.json`;
-          const target = join(clonesDir(), name);
-          await pipeline(Readable.fromWeb(response.body), createWriteStream(target));
-          const stat = statSync(target);
+          const bytes = Buffer.from(await response.arrayBuffer());
+
+          // ① DSH 会话包：用官方 sessions 服务按 seed 还原成本地会话
+          const pack = parseAgentSessionPackage(bytes);
+          if (pack) {
+            const store = serviceOf<SessionStoreLike>(ctx, "sessions");
+            if (!store) {
+              sendJson(res, 503, { code: "INTERNAL", message: "会话服务不可用" });
+              return;
+            }
+            const session = store.create(undefined, {
+              seed: pack.events,
+              meta: { cwd: pickWorkspaceCwd(wantedCwd, pack.header.cwd) },
+            });
+            await store.flush(session);
+            sendJson(res, 200, {
+              bytes: bytes.byteLength,
+              elapsedMs: Date.now() - started,
+              sessionId: session.id,
+            } satisfies HostCloneResult);
+            return;
+          }
+
+          // ② 其它分享包（频道快照等）：保持原有「下载落盘」行为
+          const target = join(clonesDir(), `snapshot-${Date.now()}.json`);
+          await writeFile(target, bytes);
           sendJson(res, 200, {
             file: target,
-            bytes: stat.size,
+            bytes: bytes.byteLength,
             elapsedMs: Date.now() - started,
-          });
+          } satisfies HostCloneResult);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           sendJson(res, 500, { code: "INTERNAL", message });
         }
       },
     },
+    ...sessionRoutes(ctx, scope),
   ];
 }
 
@@ -217,7 +411,7 @@ export function apply(ctx: Context): void {
   });
 
   const disposers: Array<() => void> = [];
-  for (const route of talkRoutes(scope)) {
+  for (const route of talkRoutes(ctx, scope)) {
     disposers.push(ctx.webServer.register(route));
   }
 

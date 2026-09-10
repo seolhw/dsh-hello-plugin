@@ -213,10 +213,10 @@ assert((getRes.headers.get("content-type") ?? "").startsWith("image/png"), "附�
 const snap = await call("POST", "/api/shares/snapshot", { channelId }, tokenA);
 assert(
   snap.status === 201 &&
-    snap.json?.share?.kind === "session" &&
+    snap.json?.share?.kind === "channel-snapshot" &&
     snap.json.share.r2Key.startsWith("shr") &&
     typeof snap.json.downloadUrl === "string",
-  "A 生成会话快照",
+  "A 生成频道快照",
 );
 const shareId = snap.json.share.id;
 const dlRes = await fetch(snap.json.downloadUrl);

@@ -51,10 +51,10 @@ const STATUS_LABEL: Record<string, string> = {
 
 function InboxRow({ item }: { item: InboxItem }): ReactElement {
   const talk = useTalkState();
-  const busy = talk.inboxBusyId !== null && item.invite?.id === talk.inboxBusyId;
+  const invite = item.invite;
+  const busy = talk.inboxBusyId !== null && invite?.id === talk.inboxBusyId;
   const communityName = item.data?.communityName ?? "";
   const icon = item.data?.communityIconUrl ?? null;
-  const actionable = item.kind === "invite" && item.invite?.status === "pending";
 
   return (
     <div style={rowWrap}>
@@ -108,15 +108,15 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
         }}
       >
         {item.kind === "invite" ? (
-          item.invite === null ? (
+          invite === null ? (
             <span style={{ ...smallText, fontSize: 11, color: palette.muted }}>邀请已失效</span>
-          ) : item.invite.status === "pending" ? (
+          ) : invite.status === "pending" ? (
             <>
               <Button
                 size="sm"
                 variant="primary"
                 disabled={busy}
-                onClick={() => void acceptInvite(item.invite!.id)}
+                onClick={() => void acceptInvite(invite.id)}
               >
                 {busy ? "加入中…" : "加入"}
               </Button>
@@ -125,7 +125,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
                 variant="ghost"
                 disabled={busy}
                 onClick={() => {
-                  if (window.confirm("拒绝这条社区邀请？")) void declineInvite(item.invite!.id);
+                  if (window.confirm("拒绝这条社区邀请？")) void declineInvite(invite.id);
                 }}
               >
                 拒绝
@@ -133,7 +133,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
             </>
           ) : (
             <span style={{ fontSize: 11.5, color: palette.muted }}>
-              {STATUS_LABEL[item.invite.status] ?? item.invite.status}
+              {STATUS_LABEL[invite.status] ?? invite.status}
             </span>
           )
         ) : null}

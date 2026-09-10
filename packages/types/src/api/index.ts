@@ -53,6 +53,11 @@ export * from "./threads";
  *   PATCH /api/communities/:id/members/:userId/role  UpdateMemberRoleRequest → UpdateMemberRoleResponse
  *   DELETE /api/communities/:id/members/:userId      —                 → RemoveMemberResponse
  *
+ *  封禁（成员被移出后阻止重新加入；owner/admin）
+ *   GET    /api/communities/:id/bans              —                            → ListCommunityBansResponse
+ *   POST   /api/communities/:id/bans              BanCommunityMemberRequest    → BanCommunityMemberResponse
+ *   DELETE /api/communities/:id/bans/:userId      —                            → UnbanCommunityMemberResponse
+ *
  *  邀请 / 站内信
  *   POST  /api/communities/:id/invites   CreateInviteRequest       → CreateInviteResponse
  *   POST  /api/invites/:id/accept        —                         → AcceptInviteResponse
@@ -66,17 +71,38 @@ export * from "./threads";
  *   POST   /api/channels/:id/messages          CreateMessageRequest     → CreateMessageResponse
  *   PATCH  /api/messages/:id                   UpdateMessageRequest     → UpdateMessageResponse
  *   DELETE /api/messages/:id                   —                        → DeleteMessageResponse
+ *   GET    /api/messages/search                query:SearchMessagesQuery → SearchMessagesResponse
  *
- *  未读
+ *  讨论组（thread；消息复用上面同一套，传 ?threadId= / body.threadId）
+ *   可见性 public/private：私密组非成员"可见但加锁"，可凭密码进入或被邀请
+ *   GET    /api/channels/:channelId/threads    query:ListThreadsQuery   → ListThreadsResponse
+ *   POST   /api/channels/:channelId/threads    CreateThreadRequest      → CreateThreadResponse
+ *   GET    /api/threads/:id                    —                        → ThreadSummary
+ *   PATCH  /api/threads/:id                    UpdateThreadRequest      → UpdateThreadResponse
+ *   POST   /api/threads/:id/archive            —                        → ArchiveThreadResponse
+ *   POST   /api/threads/:id/reopen             —                        → ReopenThreadResponse
+ *   DELETE /api/threads/:id                    —                        → DeleteThreadResponse
+ *   POST   /api/threads/:id/join               JoinThreadRequest        → JoinThreadResponse
+ *   GET    /api/threads/:id/members            —                        → ListThreadMembersResponse
+ *   POST   /api/threads/:id/members            AddThreadMemberRequest   → AddThreadMemberResponse
+ *   DELETE /api/threads/:id/members/:userId    —                        → RemoveThreadMemberResponse
+ *   GET    /api/threads/:id/candidates         query:ListThreadCandidatesQuery → ListThreadCandidatesResponse
+ *   GET    /api/threads/:id/read-state         —                        → GetThreadReadStateResponse
+ *   POST   /api/threads/:id/read-state         UpdateThreadReadStateRequest → UpdateThreadReadStateResponse
+ *
+ *  未读 / 在线
  *   GET    /api/channels/:id/read-state        —                        → GetReadStateResponse
  *   POST   /api/channels/:id/read-state        UpdateReadStateRequest   → UpdateReadStateResponse
+ *   GET    /api/channels/:id/online            —                        → GetChannelOnlineResponse
  *
- *  分享（会话快照）
+ *  分享（来源两类：channel-snapshot 频道快照 / agent-session DSH 会话）
  *   GET    /api/shares/discover              query:ListSharesQuery      → ListSharesResponse
  *   GET    /api/shares/mine                  query:ListMySharesQuery    → ListMySharesResponse
  *   POST   /api/shares/snapshot              CreateShareRequest         → CreateShareResponse
+ *   POST   /api/shares/agent-session         CreateAgentSessionShareRequest → CreateAgentSessionShareResponse
  *   GET    /api/shares/:id                   —                          → GetShareResponse
  *   DELETE /api/shares/:id                   —                          → DeleteShareResponse
+ *   （分享卡片随消息发出时带 CreateMessageRequest.shareId）
  *
  *  附件（R2，Worker 直写）
  *   PUT   /api/r2/objects              原始字节 body + X-File-Name(URL 编码)

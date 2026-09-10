@@ -13,14 +13,19 @@ import type {
   CommunityBanItem,
   CreateMessageRequest,
   CreateThreadRequest,
+  DiscoverCommunitiesResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   InboxItem,
   ListMembersResponse,
+  ListMySharesResponse,
+  ListSharesResponse,
   MessageAttachmentPut,
   SearchMessageResult,
   SignUpEmailRequest,
+  ThreadMemberItem,
   ThreadSummary,
+  UpdateThreadRequest,
   UpdateUserRequest,
 } from "@dsh-talk/types/api";
 import {
@@ -28,12 +33,19 @@ import {
   MESSAGE_RETRACT_MS,
   type MemberRole,
   type Message,
+  type ThreadVisibility,
   type User,
 } from "@dsh-talk/types/entities";
-import type { TalkSettings } from "@dsh-talk/types/rpc";
+import type { AgentSessionPackage, LocalSessionSummary, TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { useEffect, useReducer } from "react";
-import { hostClone, hostConfigGet, hostConfigSet } from "./config";
+import {
+  hostClone,
+  hostConfigGet,
+  hostConfigSet,
+  hostSessionPackage,
+  hostSessions,
+} from "./config";
 import { ServerApiError, ServerClient } from "./server";
 import { TalkSocket } from "./ws";
 
@@ -752,6 +764,42 @@ export async function joinCommunityByCode(inviteCode: string): Promise<boolean> 
   }
 }
 
+/** 发现公开社区（社区目录；支持关键词搜索与排序） */
+export async function discoverCommunities(
+  opts: { q?: string; sort?: "hot" | "newest"; offset?: number } = {},
+): Promise<DiscoverCommunitiesResponse["items"]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.discoverCommunities({
+      q: opts.q?.trim() ?? "",
+      sort: opts.sort ?? "hot",
+      limit: 20,
+      offset: opts.offset ?? 0,
+    });
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 直接加入公开社区（发现页用；私有社区需邀请码走 joinCommunityByCode） */
+export async function joinPublicCommunity(communityId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    const joined = await server.joinCommunity(communityId);
+    await refreshCommunities();
+    await openCommunity(joined.id);
+    notify(`已加入社区「${joined.name}」`);
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
 export async function leaveCommunity(communityId: string): Promise<void> {
   const server = serverOf();
   if (!server) return;
@@ -1032,16 +1080,23 @@ export async function deleteChannelById(channelId: string): Promise<boolean> {
 
 // ---------------- 讨论组（thread）操作 ----------------
 
-/** 在主频道创建讨论组（可带起点消息）；成功后打开它 */
+/** 在主频道创建讨论组（可带起点消息与可见性）；成功后打开它 */
 export async function createThreadInChannel(
   channelId: string,
-  input: { name: string; starterMessageId?: string },
+  input: {
+    name: string;
+    starterMessageId?: string;
+    visibility?: ThreadVisibility;
+    passcode?: string | null;
+  },
 ): Promise<ThreadSummary | null> {
   const server = serverOf();
   if (!server) return null;
   try {
     const body: CreateThreadRequest = { name: input.name.trim() };
     if (input.starterMessageId) body.starterMessageId = input.starterMessageId;
+    if (input.visibility !== undefined) body.visibility = input.visibility;
+    if (input.passcode !== undefined) body.passcode = input.passcode;
     const created = await server.createThread(channelId, body);
     notify(`已创建讨论组「${created.name}」`);
     await reloadCommunityDetail();
@@ -1050,6 +1105,92 @@ export async function createThreadInChannel(
   } catch (error) {
     notify(errorText(error));
     return null;
+  }
+}
+
+/** 凭密码进入私密讨论组；成功后刷新频道讨论组列表并打开它 */
+export async function joinThreadWithPasscode(threadId: string, passcode: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    const joined = await server.joinThread(threadId, passcode.trim());
+    notify(`已加入讨论组「${joined.name}」`);
+    await reloadCommunityDetail();
+    await openThread({ id: joined.id, channelId: joined.channelId });
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 编辑讨论组（改名 / 改可见性 / 改密码），成功后刷新社区详情 */
+export async function updateThread(threadId: string, patch: UpdateThreadRequest): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.updateThread(threadId, patch);
+    await reloadCommunityDetail();
+    notify("讨论组已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 拉讨论组成员列表（失败返回 []） */
+export async function listThreadMembers(threadId: string): Promise<ThreadMemberItem[]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.listThreadMembers(threadId);
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 拉可拉入的社区成员候选（支持关键词搜索；失败返回 []） */
+export async function listThreadCandidates(threadId: string, q = ""): Promise<User[]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.listThreadCandidates(threadId, q.trim());
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 直接把社区成员拉入讨论组 */
+export async function addThreadMember(threadId: string, userId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    const res = await server.addThreadMember(threadId, userId);
+    notify(`已把 @${res.user.handle} 拉入讨论组`);
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 移除讨论组成员（userId 传自己即退出） */
+export async function removeThreadMember(threadId: string, userId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.removeThreadMember(threadId, userId);
+    notify(userId === state.me?.id ? "已退出讨论组" : "已移出该成员");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
   }
 }
 
@@ -1356,14 +1497,19 @@ function buildMessageBody(
 
 /**
  * 发消息：先逐个 PUT 附件拿 r2Key，再走 REST 创建；WS live 时事件回填，否则本地补一条。
+ * shareId 非空时会附带一张分享卡片（服务端展开成消息内嵌的 shareCard 快照）。
  * @returns 是否成功入队（成功时调用方应清空输入与附件）
  */
-export async function sendMessage(content: string, files: File[] = []): Promise<boolean> {
+export async function sendMessage(
+  content: string,
+  files: File[] = [],
+  shareId: string | null = null,
+): Promise<boolean> {
   const server = serverOf();
   const channelId = state.view.channelId;
   if (!server || !channelId || state.view.sending) return false;
   const text = content.trim();
-  if (text.length === 0 && files.length === 0) return false;
+  if (text.length === 0 && files.length === 0 && shareId === null) return false;
   patchView({ sending: true });
   try {
     const attachments: MessageAttachmentPut[] = [];
@@ -1377,6 +1523,7 @@ export async function sendMessage(content: string, files: File[] = []): Promise<
       });
     }
     const request: CreateMessageRequest = { ...buildMessageBody(text, attachments) };
+    if (shareId !== null) request.shareId = shareId;
     if (state.view.replyingTo) request.replyToId = state.view.replyingTo.id;
     const sentThreadId = state.view.threadId;
     if (sentThreadId !== null) request.threadId = sentThreadId;
@@ -1473,11 +1620,154 @@ export async function snapshotChannel(input: {
 export async function cloneToLocal(downloadUrl: string): Promise<string | null> {
   try {
     const res = await hostClone(downloadUrl);
-    notify(`已克隆到本地：${res.file}（${res.bytes} B）`);
-    return res.file;
+    const file = res.file ?? null;
+    if (file) notify(`已克隆到本地：${file}（${res.bytes} B）`);
+    return file;
   } catch (error) {
     notify(errorText(error));
     return null;
+  }
+}
+
+/** 公开分享广场（最新公开的会话快照） */
+export async function listPublicShares(): Promise<ListSharesResponse["items"]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.listShares({ limit: 30 });
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 我创建的分享 */
+export async function listMyShares(): Promise<ListMySharesResponse["items"]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.listMyShares({ limit: 50 });
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 取分享的下载地址（服务端会顺带自增下载计数） */
+export async function shareDownloadUrl(shareId: string): Promise<string | null> {
+  const server = serverOf();
+  if (!server) return null;
+  try {
+    const res = await server.getShare(shareId);
+    return res.downloadUrl;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 删除我创建的分享（含 R2 包体） */
+export async function removeShare(shareId: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.deleteShare(shareId);
+    notify("分享已删除");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+// ---------------- DSH 会话分享（agent-session） ----------------
+
+/** 当前 DSH 会话 id：由「社区」页签（会话级 slot）挂载时写入 */
+let currentDshSessionId: string | null = null;
+
+export function setCurrentDshSession(id: string | null): void {
+  currentDshSessionId = id;
+}
+
+export function getCurrentDshSession(): string | null {
+  return currentDshSessionId;
+}
+
+type SessionOpener = (sessionId: string) => Promise<boolean>;
+
+let openSessionFn: SessionOpener | null = null;
+
+/** 由 client 入口 apply 注入「打开会话」实现（refresh + open） */
+export function bindSessionOpener(fn: SessionOpener | null): void {
+  openSessionFn = fn;
+}
+
+/** 本机可分享的 DSH 会话（host 读会话持久化层得到） */
+export async function listLocalSessions(): Promise<LocalSessionSummary[]> {
+  try {
+    const res = await hostSessions();
+    return res.sessions;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/**
+ * 把本机某个 DSH 会话分享到社区：
+ * host 打包 → 上传 R2 → 在 Server 登记一条 agent-session 分享。
+ * 成功返回分享 id（可随消息发卡片），失败返回 null。
+ */
+export async function shareLocalSession(input: {
+  sessionId: string;
+  title?: string;
+  summary?: string;
+  communityId?: string | null;
+}): Promise<string | null> {
+  const server = serverOf();
+  if (!server) return null;
+  try {
+    const raw = await hostSessionPackage(input.sessionId);
+    const pack = JSON.parse(raw) as AgentSessionPackage;
+    const title = input.title?.trim() || `会话分享：${pack.manifest.sessionId.slice(0, 8)}`;
+    const file = new File([raw], `agent-session-${pack.manifest.sessionId}.json`, {
+      type: "application/json",
+    });
+    const uploaded = await server.uploadObject(file);
+    const res = await server.createAgentSessionShare({
+      r2Key: uploaded.r2Key,
+      title,
+      ...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
+      sizeBytes: uploaded.size,
+      manifest: pack.manifest,
+      ...(input.communityId ? { communityId: input.communityId } : {}),
+    });
+    notify(`已分享会话「${res.share.title}」`);
+    return res.share.id;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
+  }
+}
+
+/** 让 host 把一条分享还原成本地 DSH 会话，并切到该会话 */
+export async function cloneShareToSession(shareId: string): Promise<boolean> {
+  const url = await shareDownloadUrl(shareId);
+  if (!url) return false;
+  try {
+    const res = await hostClone(url);
+    if (!res.sessionId) {
+      notify("该分享不是 DSH 会话包");
+      return false;
+    }
+    const opened = openSessionFn ? await openSessionFn(res.sessionId) : false;
+    notify(opened ? "已还原会话并切换过去" : `已还原会话 ${res.sessionId}，请在会话列表里打开`);
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
   }
 }
 

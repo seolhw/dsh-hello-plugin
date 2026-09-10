@@ -10,16 +10,40 @@
 // 注册写法对齐官方 ui-conversation 对 conversation.view 的注册：
 //   inject: ["slots"]；list slot 一律用 ctx.slots.inject(slotName, factory)
 //   延迟到宿主声明后注册。
+// 另 inject "sessions"：克隆还原出的 DSH 会话要能在 UI 里打开。
 // ================================================================
 
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import "./augment";
 import { TalkPage } from "./components";
-import { refresh } from "./store";
+import { bindSessionOpener, refresh } from "./store";
 
-export const inject: string[] = ["slots"];
+export const inject: string[] = ["slots", "sessions"];
+
+/** 客户端 sessions 服务里本插件用到的最小面（open/refresh 不在公开 ISessions 上） */
+interface SessionsFace {
+  open(id: string): void;
+  refresh(): Promise<void>;
+}
 
 export function apply(ctx: ClientContext): void {
+  // 克隆还原出的会话要能在 UI 里切过去：先 refresh 列表再 open
+  const sessions = ctx.get("sessions") as SessionsFace | undefined;
+  bindSessionOpener(async (sessionId) => {
+    if (!sessions) return false;
+    try {
+      await sessions.refresh();
+    } catch {
+      // 列表刷新失败也继续尝试打开（目标可能已在列表中）
+    }
+    try {
+      sessions.open(sessionId);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
   try {
     // 会话页签「社区」：注册进 conversation.view（list / scope=session）。
     // label 作为页签文字；order 越大越靠右（官方 chat = 0，trajectory≈10）。

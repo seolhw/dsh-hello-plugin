@@ -3,11 +3,11 @@
 //   只返回「我」的信；kind=invite 时附带邀请实时状态（被删/已处理后按钮禁用）。
 // ================================================================
 
-import type { ListNotificationsQuery, InboxItem } from "@dsh-talk/types/api";
+import type { InboxItem, ListNotificationsQuery } from "@dsh-talk/types/api";
 import type { NotificationData } from "@dsh-talk/types/entities";
 import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
-import { type NotificationRow, invites, notifications } from "../db/schema";
+import { invites, type NotificationRow, notifications } from "../db/schema";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
@@ -96,10 +96,7 @@ notificationsApi.get("/", async (c) => {
       data,
       isRead: row.isRead,
       createdAt: row.createdAt,
-      invite:
-        inviteId && status !== undefined
-          ? { id: inviteId, status }
-          : null,
+      invite: inviteId && status !== undefined ? { id: inviteId, status } : null,
     };
   });
 

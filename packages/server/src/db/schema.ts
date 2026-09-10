@@ -119,6 +119,11 @@ export const threads = sqliteTable(
     status: text("status", { enum: ["active", "archived"] })
       .notNull()
       .default("active"),
+    visibility: text("visibility", { enum: ["public", "private"] })
+      .notNull()
+      .default("public"),
+    /** 私密组的进入密码哈希（pbkdf2$…）；null = 未设密码（只能被邀请） */
+    passcodeHash: text("passcode_hash"),
     messageCount: integer("message_count", { mode: "number" }).notNull().default(0),
     lastMessageId: text("last_message_id"),
     lastActivityAt: integer("last_activity_at", { mode: "number" }).notNull(),
@@ -129,6 +134,23 @@ export const threads = sqliteTable(
   (t) => [
     index("idx_threads_channel_status").on(t.channelId, t.status, desc(t.lastActivityAt)),
     index("idx_threads_community_status").on(t.communityId, t.status, desc(t.lastActivityAt)),
+  ],
+);
+
+// ---------- 讨论组成员（仅私密讨论组有行；发起人建组时写入一行） ----------
+export const threadMembers = sqliteTable(
+  "thread_members",
+  {
+    threadId: $id("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    userId: $id("user_id"), // 弱引用 better-auth user.id
+    addedBy: $id("added_by"), // 邀请人（发起人自加时 = 发起人）
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.threadId, t.userId] }),
+    index("idx_thread_members_user").on(t.userId),
   ],
 );
 
@@ -177,13 +199,13 @@ export const messages = sqliteTable(
   ],
 );
 
-// ---------- 分享（session / workflow） ----------
+// ---------- 分享（channel-snapshot 频道快照 / agent-session DSH 会话） ----------
 export const shares = sqliteTable(
   "shares",
   {
     id: text("id").primaryKey(),
     authorId: $id("author_id"), // 弱引用 better-auth user.id
-    kind: text("kind", { enum: ["session", "workflow"] }).notNull(),
+    kind: text("kind", { enum: ["channel-snapshot", "agent-session"] }).notNull(),
     title: text("title").notNull(),
     summary: text("summary"),
     coverUrl: text("cover_url"),
@@ -275,6 +297,8 @@ export type ChannelRow = typeof channels.$inferSelect;
 export type NewChannel = typeof channels.$inferInsert;
 export type ThreadRow = typeof threads.$inferSelect;
 export type NewThread = typeof threads.$inferInsert;
+export type ThreadMemberRow = typeof threadMembers.$inferSelect;
+export type NewThreadMember = typeof threadMembers.$inferInsert;
 export type ThreadReadStateRow = typeof threadReadStates.$inferSelect;
 export type NewThreadReadState = typeof threadReadStates.$inferInsert;
 export type MessageRow = typeof messages.$inferSelect;

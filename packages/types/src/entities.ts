@@ -104,7 +104,7 @@ export interface MessageAttachment {
   height?: number | null;
 }
 
-export type MessageShareCardKind = "session" | "workflow";
+export type MessageShareCardKind = "channel-snapshot" | "agent-session";
 
 /** 消息内嵌的分享卡片引用（只占元数据；实际 payload 在 Share 表） */
 export interface MessageShareCardRef {
@@ -141,6 +141,13 @@ export interface Message {
 /** 讨论组生命周期：活跃 / 已归档（24h 无新消息自动归档，可再发言恢复） */
 export type ThreadStatus = "active" | "archived";
 
+/**
+ * 讨论组可见性：
+ * - public：社区成员自由进入
+ * - private：仅成员可进出；非成员可见但加锁。设了密码可凭密码进入，未设密码则只能被邀请
+ */
+export type ThreadVisibility = "public" | "private";
+
 export interface Thread {
   id: ID;
   /** 所属社区 */
@@ -159,6 +166,10 @@ export interface Thread {
   /** 起点消息正文摘要（空白讨论组为 null） */
   starterSnippet: string | null;
   status: ThreadStatus;
+  /** 可见性（public / private） */
+  visibility: ThreadVisibility;
+  /** 私密讨论组是否设了进入密码（只暴露有无，不泄露密码本身） */
+  hasPasscode: boolean;
   /** 讨论内消息总数（含起点引用消息？不含：只统计本线程消息行） */
   messageCount: number;
   lastMessageId: ID | null;
@@ -170,6 +181,15 @@ export interface Thread {
   archivedAt: TimestampMs | null;
 }
 
+/** 讨论组成员（仅私密讨论组有行；发起人建组时也会写入一行） */
+export interface ThreadMember {
+  threadId: ID;
+  userId: ID;
+  /** 邀请人（发起人自动加入时为发起人自己） */
+  addedBy: ID;
+  createdAt: TimestampMs;
+}
+
 /** 讨论组已读状态（用户 x 讨论组） */
 export interface ThreadReadState {
   userId: ID;
@@ -178,9 +198,9 @@ export interface ThreadReadState {
   lastReadAt: TimestampMs | null;
 }
 
-// ====================== 分享（session / workflow） ======================
+// ====================== 分享（频道快照 / DSH 会话） ======================
 
-export type ShareKind = "session" | "workflow";
+export type ShareKind = "channel-snapshot" | "agent-session";
 
 export interface Share {
   id: ID;
@@ -189,13 +209,13 @@ export interface Share {
   title: string;
   summary: string | null;
   coverUrl: string | null;
-  /** R2 对象 key（session 克隆包 .tar.gz / workflow 的 payload.json） */
+  /** R2 对象 key（channel-snapshot = 频道消息 JSON；agent-session = DSH 会话包 JSON） */
   r2Key: string;
   /** 字节数，用于校验下载完整性 */
   sizeBytes: number;
   /** SHA-256 hex（可选，存着方便校验） */
   sha256: string | null;
-  /** 克隆包 manifest 的快照字段（session 时存版本、消息数等；workflow 存 script 名） */
+  /** 包体 manifest 快照字段（channel-snapshot 存社区/频道/消息数；agent-session 存 cwd/事件数等） */
   manifest: Record<string, unknown>;
   /** 是否公开（未登录也能下载？一般 false，只有注册用户能看社区的才能下载） */
   public: boolean;

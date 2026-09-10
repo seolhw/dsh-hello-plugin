@@ -1,18 +1,24 @@
 // ================================================================
-// /api/shares/* —— 会话快照分享（session）
-//   POST   /snapshot   把某频道最近消息打成 JSON 包 → R2 + 落一份分享元数据
-//   GET    /mine       我创建的分享
-//   GET    /discover   公开快照流（仅 isPublic=true）
-//   GET    /:id        元数据 + downloadUrl（作者 / 公开 / 来源社区成员）
-//   DELETE /:id        删除自己的分享（含 R2 包体）
-// 权限：快照须为该频道社区成员；isPublic 仅对「公开社区」的快照置 true。
+// /api/shares/* —— 分享（两类来源）
+//   POST   /snapshot      频道快照：把某频道最近消息打成 JSON 包 → R2 + 元数据
+//   POST   /agent-session 会话分享：host 打包 DSH 会话后直传 R2，这里只登记元数据
+//   GET    /mine          我创建的分享
+//   GET    /discover      公开分享流（仅 isPublic=true）
+//   GET    /:id           元数据 + downloadUrl（作者 / 公开 / 来源社区成员）
+//   DELETE /:id           删除自己的分享（含 R2 包体）
+// 权限：快照须为该频道社区成员；isPublic 仅对「公开社区」的来源置 true。
 // ================================================================
 
-import type { CreateShareRequest, ListSharesQuery } from "@dsh-talk/types/api";
+import type {
+  CreateAgentSessionShareRequest,
+  CreateShareRequest,
+  ListSharesQuery,
+} from "@dsh-talk/types/api";
 import type { Share, ShareKind, User } from "@dsh-talk/types/entities";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono/validator";
+import { MAX_SHARE_BYTES } from "../constants";
 import {
   channels,
   communities,
@@ -108,7 +114,8 @@ api.get("/discover", async (c) => {
   const q = c.req.query() as unknown as ListSharesQuery;
   const rawLimit = c.req.query("limit") ?? "";
   const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 20, 1), 100);
-  const kind: ShareKind | null = q.kind === "session" || q.kind === "workflow" ? q.kind : null;
+  const kind: ShareKind | null =
+    q.kind === "channel-snapshot" || q.kind === "agent-session" ? q.kind : null;
   const rows = await db
     .select()
     .from(shares)
@@ -226,7 +233,7 @@ api.post(
     await db.insert(shares).values({
       id: shareId,
       authorId: userId,
-      kind: "session",
+      kind: "channel-snapshot",
       title,
       summary: body.summary?.trim() || null,
       coverUrl: null,
@@ -241,6 +248,79 @@ api.post(
         messageCount: rows.length,
       }),
       isPublic: community?.privacy === "public",
+      downloadCount: 0,
+      createdAt: now,
+      updatedAt: null,
+    });
+
+    const created = (await db.select().from(shares).where(eq(shares.id, shareId)).limit(1))[0];
+    if (!created) throw HttpApiError.internal("share row not found");
+    const author = await authorOf(c, userId);
+    const origin = new URL(c.req.url).origin;
+    return c.json(
+      {
+        share: { ...rowToShare(created), author },
+        downloadUrl: `${origin}/api/r2/objects/${r2Key}?download=1`,
+      },
+      201,
+    );
+  },
+);
+
+// ---------------- 登记会话分享：POST /agent-session ----------------
+// 包体由本机 host 打包后经 PUT /api/r2/objects 直传 R2，这里只登记元数据。
+
+api.post(
+  "/agent-session",
+  validator("json", (v) => v as CreateAgentSessionShareRequest),
+  async (c) => {
+    const db = dbOf(c);
+    const userId = requireUserId(c);
+    const body = c.req.valid("json" as never) as CreateAgentSessionShareRequest;
+
+    const r2Key = (body.r2Key ?? "").trim();
+    if (!r2Key) throw HttpApiError.badRequest("r2Key 必填");
+    const title = (body.title ?? "").trim();
+    if (!title) throw HttpApiError.badRequest("title 必填");
+    const sizeBytes = Number(body.sizeBytes);
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+      throw HttpApiError.badRequest("sizeBytes 无效");
+    }
+    if (sizeBytes > MAX_SHARE_BYTES) {
+      const mb = Math.round(MAX_SHARE_BYTES / 1024 / 1024);
+      throw HttpApiError.badRequest(`分享包超过 ${mb} MiB 上限`);
+    }
+
+    // 归属社区（可选）：提供时须为成员，并据社区可见性决定是否公开进广场
+    const communityId = (body.communityId ?? "").trim() || null;
+    let isPublic = false;
+    if (communityId) {
+      await requireMember(db, communityId, userId);
+      const community = (
+        await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
+      )[0];
+      if (!community) throw HttpApiError.notFound("community not found");
+      isPublic = community.privacy === "public";
+    }
+
+    const shareId = newId();
+    const now = Date.now();
+    const manifest = {
+      ...(body.manifest ?? {}),
+      ...(communityId ? { communityId } : {}),
+    };
+    await db.insert(shares).values({
+      id: shareId,
+      authorId: userId,
+      kind: "agent-session",
+      title,
+      summary: body.summary?.trim() || null,
+      coverUrl: null,
+      r2Key,
+      sizeBytes,
+      sha256: body.sha256?.trim() || null,
+      manifest: JSON.stringify(manifest),
+      isPublic,
       downloadCount: 0,
       createdAt: now,
       updatedAt: null,

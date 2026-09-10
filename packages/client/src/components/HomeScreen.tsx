@@ -24,8 +24,23 @@ import {
   Input,
   Modal,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { ChannelOnlineMember, SearchMessageResult, ThreadSummary } from "@dsh-talk/types/api";
-import type { Channel, Community, MemberRole, MessageAttachment } from "@dsh-talk/types/entities";
+import type {
+  ChannelOnlineMember,
+  ListSharesResponse,
+  SearchMessageResult,
+  ThreadMemberItem,
+  ThreadSummary,
+  UpdateThreadRequest,
+} from "@dsh-talk/types/api";
+import type {
+  Channel,
+  Community,
+  MemberRole,
+  MessageAttachment,
+  ThreadVisibility,
+  User,
+} from "@dsh-talk/types/entities";
+import type { LocalSessionSummary } from "@dsh-talk/types/rpc";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -36,18 +51,29 @@ import type {
 } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
+  addThreadMember,
   backToCommunities,
   cancelReply,
   canEditMessage,
   canRetractMessage,
   clearMessageFocus,
+  cloneShareToSession,
   cloneToLocal,
   closeThread,
   createCommunity,
   createThreadInChannel,
   deleteMessage,
+  discoverCommunities,
   fetchChannelOnline,
+  getCurrentDshSession,
   joinCommunityByCode,
+  joinPublicCommunity,
+  joinThreadWithPasscode,
+  listLocalSessions,
+  listMyShares,
+  listPublicShares,
+  listThreadCandidates,
+  listThreadMembers,
   loadOlderMessages,
   logout,
   type MemberLite,
@@ -57,6 +83,8 @@ import {
   openInbox,
   openThread,
   reloadCommunityDetail,
+  removeShare,
+  removeThreadMember,
   removeUserAvatar,
   replyToMessage,
   revealMessage,
@@ -65,8 +93,11 @@ import {
   sendMessage,
   setDraft,
   setThreadArchived,
+  shareDownloadUrl,
+  shareLocalSession,
   snapshotChannel,
   updateMessage,
+  updateThread,
   updateUserAvatar,
   updateUserName,
   uploadImage,
@@ -362,6 +393,19 @@ const sectionTitle: CSSProperties = {
   padding: "4px 8px 2px",
 };
 
+/** 私密讨论组角标（图标库无锁图标，用 emoji + 文字标注） */
+const privacyBadge: CSSProperties = {
+  flex: "0 0 auto",
+  fontSize: 10,
+  fontWeight: 600,
+  color: palette.muted,
+  border: `1px solid ${palette.border}`,
+  borderRadius: 999,
+  padding: "0 6px",
+  lineHeight: "16px",
+  whiteSpace: "nowrap",
+};
+
 // 社区栏顶部的迷你品牌标志（登录/注册品牌渐变的小号版本）
 const railMark: CSSProperties = {
   width: 34,
@@ -509,10 +553,12 @@ function CommunityMetaCard({
 function CommunitiesRail({
   onAdd,
   onInbox,
+  onShares,
   onEditProfile,
 }: {
   onAdd: () => void;
   onInbox: () => void;
+  onShares: () => void;
   onEditProfile: () => void;
 }): ReactElement {
   const talk = useTalkState();
@@ -551,10 +597,19 @@ function CommunitiesRail({
           type="button"
           style={railAction}
           onClick={onAdd}
-          aria-label="加入或创建社区"
-          title="加入或创建社区"
+          aria-label="加入、发现或创建社区"
+          title="加入、发现或创建社区"
         >
           <IconPlusOutline16 />
+        </button>
+        <button
+          type="button"
+          style={railAction}
+          onClick={onShares}
+          aria-label="分享广场"
+          title="分享广场"
+        >
+          <IconShareOutline16 />
         </button>
       </div>
       <div style={railDivider} />
@@ -799,73 +854,82 @@ function ChannelList(): ReactElement | null {
 
 // ---------------- 讨论组（thread）列表：挂在频道下 ----------------
 
-/** 单个讨论组的列表行（含未读角标），点击进入该讨论 */
+/** 单个讨论组的列表行（含未读角标与私密标识），点击进入该讨论 */
 function ThreadListRow({ thread, channelId }: { thread: ThreadSummary; channelId: string }) {
   const talk = useTalkState();
+  const [joinOpen, setJoinOpen] = useState(false);
   const opened = talk.view.threadId === thread.id;
   const unread = thread.unreadCount;
   const mention = thread.unreadMentions;
+  const isPrivate = thread.visibility === "private";
   return (
-    <button
-      type="button"
-      onClick={() => void openThread({ id: thread.id, channelId })}
-      title={thread.starterSnippet ? `起点：${thread.starterSnippet}` : thread.name}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 5,
-        width: "100%",
-        border: "none",
-        background: opened ? palette.hover : "transparent",
-        borderRadius: 6,
-        padding: "4px 6px 4px 8px",
-        color: palette.text,
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <span
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          if (thread.locked) setJoinOpen(true);
+          else void openThread({ id: thread.id, channelId });
+        }}
+        title={thread.starterSnippet ? `起点：${thread.starterSnippet}` : thread.name}
         style={{
-          color: opened ? palette.accent : palette.caption,
-          display: "inline-flex",
-          flex: "0 0 auto",
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          width: "100%",
+          border: "none",
+          background: opened ? palette.hover : "transparent",
+          borderRadius: 6,
+          padding: "4px 6px 4px 8px",
+          color: palette.text,
+          cursor: "pointer",
+          textAlign: "left",
         }}
       >
-        <IconBranchOutline16 />
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          fontSize: 12,
-          color: thread.status === "archived" ? palette.muted : palette.secondary,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {thread.name}
-      </span>
-      {unread > 0 ? (
         <span
           style={{
+            color: opened ? palette.accent : palette.caption,
+            display: "inline-flex",
             flex: "0 0 auto",
-            minWidth: 15,
-            height: 15,
-            padding: "0 4px",
-            borderRadius: 999,
-            fontSize: 10,
-            fontWeight: 700,
-            lineHeight: "15px",
-            textAlign: "center",
-            color: "#fff",
-            background: mention > 0 ? palette.accent : palette.badge,
           }}
         >
-          {unread > 99 ? "99+" : unread}
+          <IconBranchOutline16 />
         </span>
-      ) : null}
-    </button>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 12,
+            color: thread.status === "archived" ? palette.muted : palette.secondary,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {thread.name}
+        </span>
+        {isPrivate ? <span style={privacyBadge}>{thread.locked ? "🔒 私密" : "私密"}</span> : null}
+        {unread > 0 ? (
+          <span
+            style={{
+              flex: "0 0 auto",
+              minWidth: 15,
+              height: 15,
+              padding: "0 4px",
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 700,
+              lineHeight: "15px",
+              textAlign: "center",
+              color: "#fff",
+              background: mention > 0 ? palette.accent : palette.badge,
+            }}
+          >
+            {unread > 99 ? "99+" : unread}
+          </span>
+        ) : null}
+      </button>
+      <ThreadJoinModal open={joinOpen} onClose={() => setJoinOpen(false)} thread={thread} />
+    </>
   );
 }
 
@@ -943,122 +1007,133 @@ function ForumTopicRow({
   channelId: string;
   archivedView: boolean;
 }): ReactElement {
+  const [joinOpen, setJoinOpen] = useState(false);
   const unread = thread.unreadCount;
   const mention = thread.unreadMentions;
   const author = thread.creatorDisplayName ?? thread.creatorHandle;
   const replies = thread.messageCount;
+  const isPrivate = thread.visibility === "private";
   return (
-    <button
-      type="button"
-      onClick={() => void openThread({ id: thread.id, channelId })}
-      title={thread.name}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        width: "100%",
-        border: "none",
-        borderBottom: `1px solid ${palette.border}`,
-        background: "transparent",
-        padding: "9px 4px",
-        color: palette.text,
-        cursor: "pointer",
-        textAlign: "left",
-        transition: "background 120ms ease",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = palette.hover;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
-    >
-      <span
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          if (thread.locked) setJoinOpen(true);
+          else void openThread({ id: thread.id, channelId });
+        }}
+        title={thread.name}
         style={{
-          display: "inline-flex",
+          display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          width: 34,
-          height: 34,
-          borderRadius: 10,
-          background: palette.inputBg,
-          border: `1px solid ${palette.border}`,
-          color: archivedView ? palette.muted : palette.accent,
-          flex: "0 0 auto",
+          gap: 10,
+          width: "100%",
+          border: "none",
+          borderBottom: `1px solid ${palette.border}`,
+          background: "transparent",
+          padding: "9px 4px",
+          color: palette.text,
+          cursor: "pointer",
+          textAlign: "left",
+          transition: "background 120ms ease",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = palette.hover;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "transparent";
         }}
       >
-        <IconBranchOutline16 />
-      </span>
-      <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
         <span
           style={{
-            display: "flex",
+            display: "inline-flex",
             alignItems: "center",
-            gap: 6,
-            minWidth: 0,
-            fontSize: 13.5,
-            fontWeight: 650,
-            color: archivedView ? palette.muted : palette.text,
+            justifyContent: "center",
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            background: palette.inputBg,
+            border: `1px solid ${palette.border}`,
+            color: archivedView ? palette.muted : palette.accent,
+            flex: "0 0 auto",
           }}
         >
+          <IconBranchOutline16 />
+        </span>
+        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
           <span
             style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              minWidth: 0,
+              fontSize: 13.5,
+              fontWeight: 650,
+              color: archivedView ? palette.muted : palette.text,
             }}
           >
-            {thread.name}
-          </span>
-          {archivedView ? (
             <span
               style={{
-                flex: "0 0 auto",
-                fontSize: 10,
-                fontWeight: 600,
-                color: palette.muted,
-                border: `1px solid ${palette.border}`,
-                borderRadius: 999,
-                padding: "0 6px",
-                lineHeight: "16px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
               }}
             >
-              已归档
+              {thread.name}
             </span>
-          ) : null}
+            {isPrivate ? (
+              <span style={privacyBadge}>{thread.locked ? "🔒 私密" : "私密"}</span>
+            ) : null}
+            {archivedView ? (
+              <span
+                style={{
+                  flex: "0 0 auto",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: palette.muted,
+                  border: `1px solid ${palette.border}`,
+                  borderRadius: 999,
+                  padding: "0 6px",
+                  lineHeight: "16px",
+                }}
+              >
+                已归档
+              </span>
+            ) : null}
+          </span>
+          <span style={{ ...smallText, fontSize: 11.5, color: palette.caption }}>
+            {author} 发起
+            {thread.starterSnippet ? (
+              <>
+                {" · "}
+                <span style={{ color: palette.muted }}>{thread.starterSnippet}</span>
+              </>
+            ) : null}
+            {" · "}
+            {replies} 条回复 · {timeLabel(thread.lastActivityAt)}
+          </span>
         </span>
-        <span style={{ ...smallText, fontSize: 11.5, color: palette.caption }}>
-          {author} 发起
-          {thread.starterSnippet ? (
-            <>
-              {" · "}
-              <span style={{ color: palette.muted }}>{thread.starterSnippet}</span>
-            </>
-          ) : null}
-          {" · "}
-          {replies} 条回复 · {timeLabel(thread.lastActivityAt)}
-        </span>
-      </span>
-      {unread > 0 ? (
-        <span
-          style={{
-            flex: "0 0 auto",
-            minWidth: 17,
-            height: 17,
-            padding: "0 5px",
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 700,
-            lineHeight: "17px",
-            textAlign: "center",
-            color: "#fff",
-            background: mention > 0 ? palette.accent : palette.badge,
-          }}
-        >
-          {unread > 99 ? "99+" : unread}
-        </span>
-      ) : null}
-    </button>
+        {unread > 0 ? (
+          <span
+            style={{
+              flex: "0 0 auto",
+              minWidth: 17,
+              height: 17,
+              padding: "0 5px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: "17px",
+              textAlign: "center",
+              color: "#fff",
+              background: mention > 0 ? palette.accent : palette.badge,
+            }}
+          >
+            {unread > 99 ? "99+" : unread}
+          </span>
+        ) : null}
+      </button>
+      <ThreadJoinModal open={joinOpen} onClose={() => setJoinOpen(false)} thread={thread} />
+    </>
   );
 }
 
@@ -1499,6 +1574,7 @@ function MessageRow({
           </div>
         )}
         <AttachmentList attachments={item.attachments ?? []} />
+        {item.shareCard ? <ShareCardView card={item.shareCard} /> : null}
       </div>
       <span className={`dsht-msg-actions${editing ? " is-open" : ""}`} style={msgChip}>
         {editing ? (
@@ -1582,6 +1658,9 @@ function ChatPane(): ReactElement | null {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const MAX_ATTACH = 4;
+  // 随本条消息一起发出的分享卡片（从「我的分享」里选）
+  const [pendingShare, setPendingShare] = useState<ShareItem | null>(null);
+  const [sharePickOpen, setSharePickOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -1598,6 +1677,10 @@ function ChatPane(): ReactElement | null {
   const [threadSeed, setThreadSeed] = useState<{ name: string; starterMessageId?: string } | null>(
     null,
   );
+  // 私密讨论组成员管理弹窗
+  const [threadMembersOpen, setThreadMembersOpen] = useState(false);
+  // 讨论组设置弹窗（改名 / 可见性 / 密码）
+  const [threadSettingsOpen, setThreadSettingsOpen] = useState(false);
 
   const threadId = talk.view.threadId;
   const roomKey = threadId ?? channelId;
@@ -1627,6 +1710,10 @@ function ChatPane(): ReactElement | null {
   // 公告频道仅 owner/admin 可发；其余频道所有成员可发
   const myRole = community?.myRole ?? null;
   const canPost = channel?.kind !== "announcement" || myRole === "owner" || myRole === "admin";
+  /** 能否管理当前讨论组（发起人或社区 owner/admin） */
+  const canManageThread =
+    currentThread !== null &&
+    (currentThread.createdBy === talk.me?.id || myRole === "owner" || myRole === "admin");
 
   /** 在主频道头部开一个空白讨论组 */
   function openBlankThread(): void {
@@ -1793,11 +1880,12 @@ function ChatPane(): ReactElement | null {
 
   async function submit(): Promise<void> {
     const text = draft;
-    if (text.trim().length === 0 && pendingFiles.length === 0) return;
-    const ok = await sendMessage(text, pendingFiles);
+    if (text.trim().length === 0 && pendingFiles.length === 0 && pendingShare === null) return;
+    const ok = await sendMessage(text, pendingFiles, pendingShare?.id ?? null);
     if (ok) {
       setDraft("");
       setPendingFiles([]);
+      setPendingShare(null);
       setMentionActive(false);
       mentionStartRef.current = -1;
       composerRef.current?.focus();
@@ -1885,6 +1973,28 @@ function ChatPane(): ReactElement | null {
               </div>
             ) : null}
           </div>
+          {isThread && currentThread?.visibility === "private" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<IconUserOutline16 />}
+              onClick={() => setThreadMembersOpen(true)}
+              aria-label="讨论组成员"
+              title="管理私密讨论组成员"
+            >
+              成员
+            </Button>
+          ) : null}
+          {canManageThread ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<IconEditOutline16 />}
+              onClick={() => setThreadSettingsOpen(true)}
+              aria-label="讨论组设置"
+              title="改动讨论组：名称 / 可见性 / 进入密码"
+            />
+          ) : null}
           {isThread ? (
             <Button
               size="sm"
@@ -1931,8 +2041,8 @@ function ChatPane(): ReactElement | null {
               variant="ghost"
               icon={<IconShareOutline16 />}
               onClick={() => setShareOpen(true)}
-              aria-label="分享会话快照"
-              title="把本频道消息打成可分享的快照"
+              aria-label="分享"
+              title="分享频道快照，或把本机 DSH 会话分享到社区"
             />
           ) : null}
           {!isThread ? (
@@ -2064,6 +2174,15 @@ function ChatPane(): ReactElement | null {
                     aria-label="添加附件"
                     title="添加附件"
                   />
+                  <Button
+                    size="md"
+                    variant="ghost"
+                    icon={<IconShareOutline16 />}
+                    onClick={() => setSharePickOpen(true)}
+                    disabled={talk.view.sending}
+                    aria-label="附带分享卡片"
+                    title="附带分享卡片"
+                  />
                   <div
                     style={{
                       flex: 1,
@@ -2116,6 +2235,46 @@ function ChatPane(): ReactElement | null {
                             composerRef.current?.focus();
                           }}
                           aria-label="取消回复"
+                        />
+                      </div>
+                    ) : null}
+                    {pendingShare ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          background: palette.inputBg,
+                          border: `1px solid ${palette.border}`,
+                          borderRadius: 8,
+                          padding: "2px 4px 2px 8px",
+                        }}
+                      >
+                        <span style={{ color: palette.accent, display: "inline-flex" }}>
+                          <IconShareOutline16 />
+                        </span>
+                        <span
+                          style={{
+                            flex: 1,
+                            minWidth: 0,
+                            fontSize: 11.5,
+                            color: palette.secondary,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          附带分享卡片：
+                          <span style={{ fontWeight: 600, color: palette.text }}>
+                            {pendingShare.title}
+                          </span>
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          icon={<IconCloseOutline16 />}
+                          onClick={() => setPendingShare(null)}
+                          aria-label="移除分享卡片"
                         />
                       </div>
                     ) : null}
@@ -2242,7 +2401,10 @@ function ChatPane(): ReactElement | null {
                     size="md"
                     icon={<IconSendOutline16 />}
                     disabled={
-                      talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)
+                      talk.view.sending ||
+                      (draft.trim().length === 0 &&
+                        pendingFiles.length === 0 &&
+                        pendingShare === null)
                     }
                     onClick={() => void submit()}
                     aria-label="发送"
@@ -2277,7 +2439,9 @@ function ChatPane(): ReactElement | null {
       <ShareSnapshotModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
+        channelId={channelId ?? ""}
         channelName={channel?.name ?? ""}
+        communityId={community?.id ?? null}
       />
       <ThreadCreateModal
         open={threadCreateOpen}
@@ -2285,7 +2449,26 @@ function ChatPane(): ReactElement | null {
         channelId={channelId}
         seed={threadSeed}
       />
+      {isThread && currentThread ? (
+        <>
+          <ThreadMembersModal
+            open={threadMembersOpen}
+            onClose={() => setThreadMembersOpen(false)}
+            thread={currentThread}
+          />
+          <ThreadSettingsModal
+            open={threadSettingsOpen}
+            onClose={() => setThreadSettingsOpen(false)}
+            thread={currentThread}
+          />
+        </>
+      ) : null}
       <SearchMessagesModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <SharePickerModal
+        open={sharePickOpen}
+        onClose={() => setSharePickOpen(false)}
+        onPick={(item) => setPendingShare(item)}
+      />
       <OnlineMembersModal
         open={onlineOpen}
         onClose={() => setOnlineOpen(false)}
@@ -2310,24 +2493,35 @@ function ThreadCreateModal({
   seed: { name: string; starterMessageId?: string } | null;
 }): ReactElement | null {
   const [name, setName] = useState("");
+  const [visibility, setVisibility] = useState<ThreadVisibility>("public");
+  const [passcode, setPasscode] = useState("");
   const [busy, setBusy] = useState(false);
   const talk = useTalkState();
 
-  // 每次打开按来源预填标题
+  // 每次打开按来源预填标题，并重置可见性
   useEffect(() => {
-    if (open) setName(seed?.name ?? "");
+    if (open) {
+      setName(seed?.name ?? "");
+      setVisibility("public");
+      setPasscode("");
+    }
   }, [open, seed]);
 
   async function submit(): Promise<void> {
     const trimmed = name.trim();
     if (!channelId || trimmed.length === 0 || busy) return;
     setBusy(true);
-    const ok = await createThreadInChannel(
-      channelId,
-      seed?.starterMessageId
-        ? { name: trimmed, starterMessageId: seed.starterMessageId }
-        : { name: trimmed },
-    );
+    const input: {
+      name: string;
+      starterMessageId?: string;
+      visibility?: ThreadVisibility;
+      passcode?: string | null;
+    } = { name: trimmed, visibility };
+    if (seed?.starterMessageId) input.starterMessageId = seed.starterMessageId;
+    if (visibility === "private") {
+      input.passcode = passcode.trim().length > 0 ? passcode.trim() : null;
+    }
+    const ok = await createThreadInChannel(channelId, input);
     setBusy(false);
     if (ok) onClose();
   }
@@ -2384,12 +2578,473 @@ function ThreadCreateModal({
             placeholder={forumMode ? "例如：如何快速导出聊天记录？" : "例如：周末活动安排"}
           />
         </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>可见性</span>
+          <div style={pillGroup}>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(visibility === "public" ? pillKeyActive : {}) }}
+              onClick={() => setVisibility("public")}
+            >
+              公开
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(visibility === "private" ? pillKeyActive : {}) }}
+              onClick={() => setVisibility("private")}
+            >
+              私密
+            </button>
+          </div>
+          <span style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
+            {visibility === "public"
+              ? "社区成员自由进出。"
+              : passcode.trim().length > 0
+                ? "非成员可见但需凭密码进入；社区所有者/管理员可直接查看。"
+                : "仅邀请可加入：非成员看到锁标识，需由组内成员把你拉入。"}
+          </span>
+        </div>
+        {visibility === "private" ? (
+          <div style={fieldBlock}>
+            <label htmlFor="talk-thread-passcode" style={fieldLabel}>
+              进入密码（可选）
+            </label>
+            <Input
+              id="talk-thread-passcode"
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value)}
+              placeholder="留空表示仅邀请加入"
+            />
+            <span style={{ ...smallText, fontSize: 11.5 }}>
+              留空 = 只能由组内成员拉入；填写后，社区成员可凭该密码自行进入。
+            </span>
+          </div>
+        ) : null}
         {starterNote ? (
           <div style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>{starterNote}</div>
         ) : null}
         <div style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
           24
           小时内没人发言会自动归档（从频道列表收起，可在「已归档」里恢复）；再有人发言会自动回到活跃区。
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：输入密码进入私密讨论组 ----------------
+
+/** 锁态私密讨论组：有密码 → 输入进入；无密码 → 仅提示需被邀请 */
+function ThreadJoinModal({
+  open,
+  onClose,
+  thread,
+}: {
+  open: boolean;
+  onClose: () => void;
+  thread: ThreadSummary;
+}): ReactElement {
+  const [passcode, setPasscode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) setPasscode("");
+  }, [open]);
+
+  async function submit(): Promise<void> {
+    if (busy || passcode.trim().length === 0) return;
+    setBusy(true);
+    const ok = await joinThreadWithPasscode(thread.id, passcode);
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  const needsPasscode = thread.hasPasscode;
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={needsPasscode ? "输入密码进入" : "私密讨论组"}
+      closeLabel="关闭"
+      description={
+        needsPasscode
+          ? `「${thread.name}」是私密讨论组，请输入进入密码。`
+          : `「${thread.name}」是仅邀请可加入的私密讨论组，请联系组内成员把你拉入。`
+      }
+      footer={
+        needsPasscode ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || passcode.trim().length === 0}
+              onClick={() => void submit()}
+            >
+              {busy ? "进入中…" : "进入"}
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" onClick={onClose}>
+            知道了
+          </Button>
+        )
+      }
+    >
+      {needsPasscode ? (
+        <div style={fieldBlock}>
+          <label htmlFor="talk-thread-join-passcode" style={fieldLabel}>
+            进入密码
+          </label>
+          <Input
+            id="talk-thread-join-passcode"
+            type="password"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            placeholder="请输入密码"
+          />
+        </div>
+      ) : null}
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：讨论组设置（改名 / 可见性 / 密码） ----------------
+
+/** 讨论组设置：改名、公开↔私密、设置/清除进入密码（发起人或 owner/admin） */
+function ThreadSettingsModal({
+  open,
+  onClose,
+  thread,
+}: {
+  open: boolean;
+  onClose: () => void;
+  thread: ThreadSummary;
+}): ReactElement {
+  const [name, setName] = useState("");
+  const [visibility, setVisibility] = useState<ThreadVisibility>("public");
+  const [passcode, setPasscode] = useState("");
+  const [clearPasscode, setClearPasscode] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // 每次打开按当前讨论组重置表单
+  useEffect(() => {
+    if (!open) return;
+    setName(thread.name);
+    setVisibility(thread.visibility);
+    setPasscode("");
+    setClearPasscode(false);
+  }, [open, thread.name, thread.visibility]);
+
+  async function submit(): Promise<void> {
+    const trimmed = name.trim();
+    if (busy || trimmed.length === 0) return;
+    setBusy(true);
+    const patch: UpdateThreadRequest = { name: trimmed, visibility };
+    // 私密组才处理密码：勾了清除 → null；填了新密码 → 设置；否则不动
+    if (visibility === "private") {
+      if (clearPasscode) patch.passcode = null;
+      else if (passcode.trim().length > 0) patch.passcode = passcode.trim();
+    }
+    const ok = await updateThread(thread.id, patch);
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="讨论组设置"
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || name.trim().length === 0}
+            onClick={() => void submit()}
+          >
+            {busy ? "保存中…" : "保存"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-thread-settings-name" style={fieldLabel}>
+            名称
+          </label>
+          <Input
+            id="talk-thread-settings-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+        </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>可见性</span>
+          <div style={pillGroup}>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(visibility === "public" ? pillKeyActive : {}) }}
+              onClick={() => setVisibility("public")}
+            >
+              公开
+            </button>
+            <button
+              type="button"
+              style={{ ...pillKey, ...(visibility === "private" ? pillKeyActive : {}) }}
+              onClick={() => setVisibility("private")}
+            >
+              私密
+            </button>
+          </div>
+        </div>
+        {visibility === "private" ? (
+          <div style={fieldBlock}>
+            <label htmlFor="talk-thread-settings-passcode" style={fieldLabel}>
+              进入密码（可选）
+            </label>
+            <Input
+              id="talk-thread-settings-passcode"
+              type="password"
+              value={passcode}
+              onChange={(e) => setPasscode(e.target.value)}
+              placeholder={thread.hasPasscode ? "留空保持原密码" : "留空 = 仅邀请可加入"}
+              disabled={clearPasscode}
+            />
+            {thread.hasPasscode ? (
+              <label style={{ ...smallText, display: "flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={clearPasscode}
+                  onChange={(e) => setClearPasscode(e.target.checked)}
+                />
+                清除现有密码（改为仅邀请可加入）
+              </label>
+            ) : null}
+          </div>
+        ) : (
+          <div style={{ ...smallText, fontSize: 12 }}>
+            公开讨论组：社区成员可自由进出；转为公开会一并清除进入密码。
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：私密讨论组成员管理 ----------------
+
+/** 私密讨论组成员：查看成员、移出/退出、从社区成员中搜索并拉入 */
+function ThreadMembersModal({
+  open,
+  onClose,
+  thread,
+}: {
+  open: boolean;
+  onClose: () => void;
+  thread: ThreadSummary;
+}): ReactElement {
+  const talk = useTalkState();
+  const me = talk.me;
+  const [members, setMembers] = useState<ThreadMemberItem[]>([]);
+  const [candidates, setCandidates] = useState<User[]>([]);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const role = talk.view.community?.myRole ?? null;
+  const canManage = thread.createdBy === me?.id || role === "owner" || role === "admin";
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    setQuery("");
+    void listThreadMembers(thread.id).then((list) => {
+      if (cancelled) return;
+      setMembers(list);
+      setLoading(false);
+    });
+    void listThreadCandidates(thread.id, "").then((list) => {
+      if (!cancelled) setCandidates(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, thread.id]);
+
+  async function searchCandidates(value: string): Promise<void> {
+    setQuery(value);
+    const list = await listThreadCandidates(thread.id, value);
+    setCandidates(list);
+  }
+
+  async function invite(userId: string): Promise<void> {
+    if (busyId !== null) return;
+    setBusyId(userId);
+    const ok = await addThreadMember(thread.id, userId);
+    setBusyId(null);
+    if (!ok) return;
+    const [nextMembers, nextCandidates] = await Promise.all([
+      listThreadMembers(thread.id),
+      listThreadCandidates(thread.id, query),
+    ]);
+    setMembers(nextMembers);
+    setCandidates(nextCandidates);
+  }
+
+  async function remove(userId: string, isSelf: boolean): Promise<void> {
+    if (busyId !== null) return;
+    if (!window.confirm(isSelf ? "退出该私密讨论组？" : "把该成员移出讨论组？")) return;
+    setBusyId(userId);
+    const ok = await removeThreadMember(thread.id, userId);
+    setBusyId(null);
+    if (!ok) return;
+    if (isSelf) {
+      onClose();
+      void closeThread();
+      return;
+    }
+    setMembers((prev) => prev.filter((m) => m.userId !== userId));
+    void listThreadCandidates(thread.id, query).then(setCandidates);
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="讨论组成员"
+      closeLabel="关闭"
+      description="私密讨论组：仅成员可进入；可将社区成员直接拉入。"
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={fieldLabel}>成员（{members.length}）</span>
+          {loading ? (
+            <div style={{ ...smallText, padding: "8px 2px" }}>加载成员…</div>
+          ) : members.length === 0 ? (
+            <div style={{ ...smallText, padding: "8px 2px" }}>还没有成员。</div>
+          ) : (
+            members.map((m) => {
+              const isSelf = me !== null && m.userId === me.id;
+              const isCreator = m.userId === thread.createdBy;
+              return (
+                <div
+                  key={m.userId}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "7px 10px",
+                    borderRadius: 10,
+                    background: palette.inputBg,
+                    border: `1px solid ${palette.border}`,
+                  }}
+                >
+                  <Avatar label={m.user.handle} src={m.user.avatarUrl} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {m.user.displayName ?? m.user.handle}
+                      {isSelf ? (
+                        <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
+                      ) : null}
+                    </div>
+                    <div style={{ ...smallText, fontSize: 11 }}>
+                      @{m.user.handle} · {isCreator ? "发起人" : "成员"}
+                    </div>
+                  </div>
+                  {isSelf && !isCreator ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busyId !== null}
+                      onClick={() => void remove(m.userId, true)}
+                    >
+                      退出
+                    </Button>
+                  ) : canManage && !isCreator ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busyId !== null}
+                      onClick={() => void remove(m.userId, false)}
+                    >
+                      移出
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={fieldLabel}>拉入社区成员</span>
+          <Input
+            value={query}
+            onChange={(e) => void searchCandidates(e.target.value)}
+            placeholder="搜索 @用户名 / 昵称"
+            aria-label="搜索可拉入的成员"
+          />
+          {candidates.length === 0 ? (
+            <div style={{ ...smallText, padding: "4px 2px" }}>没有可拉入的成员。</div>
+          ) : (
+            candidates.map((u) => (
+              <div
+                key={u.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: `1px solid ${palette.border}`,
+                }}
+              >
+                <Avatar label={u.handle} src={u.avatarUrl} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {u.displayName ?? u.handle}
+                  </div>
+                  <div style={{ ...smallText, fontSize: 11 }}>@{u.handle}</div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<IconPlusOutline16 />}
+                  disabled={busyId !== null}
+                  onClick={() => void invite(u.id)}
+                >
+                  拉入
+                </Button>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </Modal>
@@ -2695,9 +3350,36 @@ function OnlineMembersModal({
   );
 }
 
-// ---------------- 弹窗：加入 / 创建（合并单入口，顶部 tab 切换） ----------------
+// ---------------- 弹窗：加入 / 发现 / 创建（合并单入口，顶部 tab 切换） ----------------
 
-/** 「加入 / 创建」合并为一个弹窗：顶部 tab 切换，默认「加入」 */
+// 发现页的社区行（头像 + 名称/成员数 + 简介 + 加入按钮）
+const discoverRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "7px 10px",
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+const discoverName: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const discoverDesc: CSSProperties = {
+  fontSize: 11.5,
+  color: palette.caption,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+/** 「加入 / 发现 / 创建」合并为一个弹窗：顶部 tab 切换，默认「加入」 */
 function CommunityAddModal({
   open,
   onClose,
@@ -2705,9 +3387,15 @@ function CommunityAddModal({
   open: boolean;
   onClose: () => void;
 }): ReactElement {
-  const [tab, setTab] = useState<"join" | "create">("join");
+  const talk = useTalkState();
+  const [tab, setTab] = useState<"join" | "discover" | "create">("join");
   // 加入：邀请码
   const [code, setCode] = useState("");
+  // 发现：公开社区目录
+  const [discoverItems, setDiscoverItems] = useState<Community[]>([]);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [joiningId, setJoiningId] = useState<string | null>(null);
   // 创建：名称 / 简介 / 可见性 / 头像
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -2715,11 +3403,17 @@ function CommunityAddModal({
   const [iconUrl, setIconUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 我已在的社区（发现页据此把「加入」换成「进入」）
+  const joinedIds = new Set(talk.communities.map((c) => c.id));
+
   // 每次打开：重置表单，默认落在「加入」
   useEffect(() => {
     if (open) {
       setTab("join");
       setCode("");
+      setKeyword("");
+      setDiscoverItems([]);
+      setJoiningId(null);
       setName("");
       setDescription("");
       setPrivacy("public");
@@ -2732,9 +3426,26 @@ function CommunityAddModal({
     if (url) setIconUrl(url);
   }
 
+  /** 拉公开社区目录（关键词为空 = 热门） */
+  async function loadDiscover(q: string): Promise<void> {
+    setDiscoverLoading(true);
+    const items = await discoverCommunities({ q });
+    setDiscoverItems(items);
+    setDiscoverLoading(false);
+  }
+
+  /** 加入公开社区并进入 */
+  async function enter(communityId: string): Promise<void> {
+    if (joiningId !== null) return;
+    setJoiningId(communityId);
+    const ok = await joinPublicCommunity(communityId);
+    setJoiningId(null);
+    if (ok) onClose();
+  }
+
   async function submit(): Promise<void> {
     if (busy) return;
-    if (tab === "join") {
+    if (tab !== "create") {
       if (code.trim().length === 0) return;
       setBusy(true);
       const ok = await joinCommunityByCode(code);
@@ -2768,29 +3479,36 @@ function CommunityAddModal({
   }
 
   const creating = tab === "create";
+  const discovering = tab === "discover";
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={creating ? "创建社区" : "加入社区"}
+      title={creating ? "创建社区" : discovering ? "发现社区" : "加入社区"}
       closeLabel="关闭"
       footer={
-        <>
+        discovering ? (
           <Button variant="ghost" onClick={onClose}>
-            取消
+            关闭
           </Button>
-          <Button
-            variant="primary"
-            disabled={busy || (creating ? name.trim().length === 0 : code.trim().length === 0)}
-            onClick={() => void submit()}
-          >
-            {busy ? (creating ? "创建中…" : "加入中…") : creating ? "创建" : "加入"}
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || (creating ? name.trim().length === 0 : code.trim().length === 0)}
+              onClick={() => void submit()}
+            >
+              {busy ? (creating ? "创建中…" : "加入中…") : creating ? "创建" : "加入"}
+            </Button>
+          </>
+        )
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* tab 顶栏：加入（默认）/ 创建 */}
+        {/* tab 顶栏：加入（默认）/ 发现 / 创建 */}
         <div style={pillGroup}>
           <button
             type="button"
@@ -2801,7 +3519,17 @@ function CommunityAddModal({
           </button>
           <button
             type="button"
-            style={{ ...pillKey, ...(tab === "create" ? pillKeyActive : {}) }}
+            style={{ ...pillKey, ...(discovering ? pillKeyActive : {}) }}
+            onClick={() => {
+              setTab("discover");
+              void loadDiscover(keyword);
+            }}
+          >
+            发现
+          </button>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(creating ? pillKeyActive : {}) }}
             onClick={() => setTab("create")}
           >
             创建
@@ -2864,6 +3592,70 @@ function CommunityAddModal({
               </div>
             </div>
           </>
+        ) : discovering ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void loadDiscover(keyword);
+                  }
+                }}
+                placeholder="搜索公开社区（名称 / 简介）"
+                aria-label="搜索公开社区"
+              />
+              <Button variant="outline" onClick={() => void loadDiscover(keyword)}>
+                搜索
+              </Button>
+            </div>
+            {discoverLoading ? (
+              <div style={{ ...smallText, padding: "8px 2px" }}>加载社区…</div>
+            ) : discoverItems.length === 0 ? (
+              <div style={{ ...smallText, padding: "8px 2px" }}>没有找到公开社区。</div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  maxHeight: 320,
+                  overflowY: "auto",
+                }}
+              >
+                {discoverItems.map((item) => {
+                  const joined = joinedIds.has(item.id);
+                  return (
+                    <div key={item.id} style={discoverRow}>
+                      <Avatar label={item.name} src={item.iconUrl} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={discoverName}>
+                          {item.name}
+                          <span style={{ color: palette.caption, fontSize: 11 }}>
+                            {" "}
+                            · {item.memberCount} 成员
+                          </span>
+                        </div>
+                        {item.description ? (
+                          <div style={discoverDesc}>{item.description}</div>
+                        ) : null}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={joined ? "ghost" : "primary"}
+                        disabled={joiningId !== null}
+                        onClick={() => (joined ? void openCommunity(item.id) : void enter(item.id))}
+                      >
+                        {joined ? "进入" : joiningId === item.id ? "加入中…" : "加入"}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         ) : (
           <div style={fieldBlock}>
             <label htmlFor="talk-join-code" style={fieldLabel}>
@@ -2980,37 +3772,74 @@ function UpdateUsernameModal({
   );
 }
 
-// ---------------- 弹窗：分享会话快照 ----------------
+// ---------------- 弹窗：分享（频道快照 / DSH 会话） ----------------
 
 function ShareSnapshotModal({
   open,
   onClose,
+  channelId,
   channelName,
+  communityId,
 }: {
   open: boolean;
   onClose: () => void;
+  channelId: string;
   channelName: string;
+  communityId: string | null;
 }): ReactElement {
+  const [tab, setTab] = useState<"channel" | "session">("channel");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function submit(): Promise<void> {
+  // DSH 会话分享：本机可分享会话 + 选中的会话
+  const [sessions, setSessions] = useState<LocalSessionSummary[]>([]);
+  const [sessionId, setSessionId] = useState("");
+
+  useEffect(() => {
+    if (!open || tab !== "session") return;
+    const current = getCurrentDshSession();
+    setSessionId(current ?? "");
+    void listLocalSessions().then((list) => {
+      setSessions(list);
+      if (!current && list.length > 0) setSessionId(list[0]?.id ?? "");
+    });
+  }, [open, tab]);
+
+  async function copyLink(url: string): Promise<void> {
+    if (!navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // 剪贴板不可用时忽略
+    }
+  }
+
+  /** 频道快照：服务端打包 + 本机留档 + 复制链接 */
+  async function submitChannel(): Promise<void> {
     if (busy) return;
     setBusy(true);
     const url = await snapshotChannel({ title, summary });
-    if (url) {
-      await cloneToLocal(url);
-    }
+    if (url) await cloneToLocal(url);
     setBusy(false);
     if (!url) return;
-    if (navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(url);
-      } catch {
-        // 剪贴板不可用时忽略
-      }
+    await copyLink(url);
+    setTitle("");
+    setSummary("");
+    onClose();
+  }
+
+  /** DSH 会话：host 打包上传后登记分享，并把卡片发到当前频道 */
+  async function submitSession(): Promise<void> {
+    if (busy || sessionId.length === 0) return;
+    setBusy(true);
+    const shareId = await shareLocalSession({ sessionId, title, summary, communityId });
+    if (shareId && channelId.length > 0) {
+      const sent = await sendMessage("", [], shareId);
+      if (!sent) notify("分享已创建，但发送卡片失败");
     }
+    setBusy(false);
+    if (!shareId) return;
     setTitle("");
     setSummary("");
     onClose();
@@ -3020,35 +3849,437 @@ function ShareSnapshotModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="分享会话快照"
+      title="分享"
       closeLabel="关闭"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" disabled={busy} onClick={() => void submit()}>
-            {busy ? "打包中…" : "生成并复制链接"}
+          <Button
+            variant="primary"
+            disabled={busy || (tab === "session" && sessionId.length === 0)}
+            onClick={() => void (tab === "channel" ? submitChannel() : submitSession())}
+          >
+            {busy ? "处理中…" : tab === "channel" ? "生成并复制链接" : "分享到本频道"}
           </Button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={pillGroup}>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "channel" ? pillKeyActive : {}) }}
+            onClick={() => setTab("channel")}
+          >
+            频道快照
+          </button>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "session" ? pillKeyActive : {}) }}
+            onClick={() => setTab("session")}
+          >
+            DSH 会话
+          </button>
+        </div>
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={`会话快照：${channelName}`}
+          placeholder={tab === "channel" ? `频道快照：${channelName}` : "会话分享标题（可选）"}
         />
         <Input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder="一句话摘要（可选）"
         />
-        <div style={{ ...smallText, fontSize: 12 }}>
-          把本频道最近最多 200 条消息打包成 JSON 快照，并让本机 host 流式下载到本地
-          `~/.dsh-talk/clones`；生成后链接也会复制到剪贴板，可分享给其它人。
-        </div>
+        {tab === "channel" ? (
+          <div style={{ ...smallText, fontSize: 12 }}>
+            把本频道最近最多 200 条消息打包成 JSON 快照交服务端保管，并让本机 host 下载到本地
+            `~/.dsh-talk/clones`；生成后链接会复制到剪贴板。
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ ...smallText, fontSize: 12 }}>
+              把本机一个 DSH 会话打包上传，社区成员可「克隆到会话」还原出同样的 会话。当前：
+              {getCurrentDshSession() ?? "（未识别到当前会话）"}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+                maxHeight: 200,
+                overflowY: "auto",
+              }}
+            >
+              {sessions.length === 0 ? (
+                <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
+              ) : (
+                sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setSessionId(s.id)}
+                    style={{
+                      ...pillKey,
+                      textAlign: "left",
+                      ...(s.id === sessionId ? pillKeyActive : {}),
+                    }}
+                  >
+                    {s.id}
+                    {s.cwd ? `（${s.cwd}）` : ""}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
+    </Modal>
+  );
+}
+
+// ---------------- 弹窗：分享广场（公开快照 + 我的分享） ----------------
+
+type ShareItem = ListSharesResponse["items"][number];
+
+/** 分享广场：公开快照流 + 我创建的分享；支持下载 / 克隆到本地 / 删除 */
+function ShareGalleryModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}): ReactElement {
+  const talk = useTalkState();
+  const [tab, setTab] = useState<"discover" | "mine">("discover");
+  const [items, setItems] = useState<ShareItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const meId = talk.me?.id ?? null;
+
+  async function load(which: "discover" | "mine"): Promise<void> {
+    setLoading(true);
+    const list = which === "mine" ? await listMyShares() : await listPublicShares();
+    setItems(list);
+    setLoading(false);
+  }
+
+  // 每次打开默认看「广场」
+  useEffect(() => {
+    if (!open) return;
+    setTab("discover");
+    setBusyId(null);
+    setLoading(true);
+    void listPublicShares().then((list) => {
+      setItems(list);
+      setLoading(false);
+    });
+  }, [open]);
+
+  /** 浏览器直接下载包体 */
+  async function download(item: ShareItem): Promise<void> {
+    const url = await shareDownloadUrl(item.id);
+    if (url) window.open(url, "_blank", "noopener");
+  }
+
+  /** 让 host 把包体流式下载到本地克隆目录 */
+  async function clone(item: ShareItem): Promise<void> {
+    if (busyId !== null) return;
+    setBusyId(item.id);
+    const url = await shareDownloadUrl(item.id);
+    if (url) await cloneToLocal(url);
+    setBusyId(null);
+  }
+
+  /** DSH 会话分享：让 host 还原成本地会话并切过去 */
+  async function cloneSession(item: ShareItem): Promise<void> {
+    if (busyId !== null) return;
+    setBusyId(item.id);
+    await cloneShareToSession(item.id);
+    setBusyId(null);
+  }
+
+  /** 删除自己的分享（含 R2 包体） */
+  async function remove(item: ShareItem): Promise<void> {
+    if (!window.confirm(`删除分享「${item.title}」？包体也会一并删除，且无法恢复。`)) return;
+    setBusyId(item.id);
+    const ok = await removeShare(item.id);
+    setBusyId(null);
+    if (ok) setItems((prev) => prev.filter((s) => s.id !== item.id));
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="分享广场"
+      closeLabel="关闭"
+      description="频道快照或 DSH 会话都可分享给他人；来自公开社区的会出现在广场。"
+      footer={
+        <Button variant="ghost" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={pillGroup}>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "discover" ? pillKeyActive : {}) }}
+            onClick={() => {
+              setTab("discover");
+              void load("discover");
+            }}
+          >
+            广场
+          </button>
+          <button
+            type="button"
+            style={{ ...pillKey, ...(tab === "mine" ? pillKeyActive : {}) }}
+            onClick={() => {
+              setTab("mine");
+              void load("mine");
+            }}
+          >
+            我的分享
+          </button>
+        </div>
+        {loading ? (
+          <div style={{ ...smallText, padding: "10px 2px" }}>加载分享…</div>
+        ) : items.length === 0 ? (
+          <div style={{ ...smallText, padding: "10px 2px" }}>
+            {tab === "mine" ? "你还没有创建分享。" : "广场上还没有公开快照。"}
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              maxHeight: 380,
+              overflowY: "auto",
+            }}
+          >
+            {items.map((item) => {
+              const mine = meId !== null && item.authorId === meId;
+              const messageCount =
+                typeof item.manifest.messageCount === "number" ? item.manifest.messageCount : null;
+              return (
+                <div key={item.id} style={discoverRow}>
+                  <div
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                    }}
+                  >
+                    <div style={discoverName}>{item.title}</div>
+                    {item.summary ? <div style={discoverDesc}>{item.summary}</div> : null}
+                    <div style={{ ...smallText, fontSize: 11 }}>
+                      {item.kind === "agent-session" ? "DSH 会话" : "频道快照"} · @
+                      {item.author.handle} · {timeLabel(item.createdAt)} ·{" "}
+                      {formatBytes(item.sizeBytes)}
+                      {messageCount !== null ? ` · ${messageCount} 条消息` : ""}
+                      {item.downloadCount > 0 ? ` · 下载 ${item.downloadCount}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 2, flex: "0 0 auto" }}>
+                    <Button size="sm" variant="ghost" onClick={() => void download(item)}>
+                      下载
+                    </Button>
+                    {item.kind === "agent-session" ? (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={busyId !== null}
+                        onClick={() => void cloneSession(item)}
+                      >
+                        {busyId === item.id ? "还原中…" : "克隆到会话"}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busyId !== null}
+                        onClick={() => void clone(item)}
+                      >
+                        {busyId === item.id ? "克隆中…" : "克隆到本地"}
+                      </Button>
+                    )}
+                    {mine ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busyId !== null}
+                        onClick={() => void remove(item)}
+                        style={{ color: palette.danger }}
+                      >
+                        删除
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- 消息内嵌分享卡片 & 卡片选择器 ----------------
+
+// 消息内嵌的分享卡片（标题 + 摘要 + 下载）
+const shareCardStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  marginTop: 6,
+  padding: "8px 10px",
+  maxWidth: 380,
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+  cursor: "pointer",
+  textAlign: "left",
+};
+
+const shareCardBadge: CSSProperties = {
+  flex: "0 0 auto",
+  fontSize: 10.5,
+  fontWeight: 650,
+  color: palette.accent,
+  background: palette.elevated,
+  border: `1px solid ${palette.border}`,
+  borderRadius: 6,
+  padding: "2px 6px",
+  letterSpacing: "0.02em",
+};
+
+/** 消息内嵌分享卡片：展示标题/摘要，点击下载包体 */
+function ShareCardView({ card }: { card: NonNullable<MessageItem["shareCard"]> }): ReactElement {
+  const [busy, setBusy] = useState(false);
+
+  async function open(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    const url = await shareDownloadUrl(card.shareId);
+    setBusy(false);
+    if (url) window.open(url, "_blank", "noopener");
+  }
+
+  return (
+    <button type="button" onClick={() => void open()} style={shareCardStyle} title="下载分享包">
+      <span style={shareCardBadge}>{card.kind === "agent-session" ? "DSH 会话" : "频道快照"}</span>
+      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {card.title}
+        </span>
+        {card.summary ? (
+          <span
+            style={{
+              ...smallText,
+              fontSize: 11.5,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {card.summary}
+          </span>
+        ) : null}
+      </span>
+      <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+        {busy ? "获取中…" : "下载"}
+      </span>
+    </button>
+  );
+}
+
+/** 选择一张自己创建的分享，随消息一起发出 */
+function SharePickerModal({
+  open,
+  onClose,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onPick: (item: ShareItem) => void;
+}): ReactElement {
+  const [items, setItems] = useState<ShareItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    void listMyShares().then((list) => {
+      setItems(list);
+      setLoading(false);
+    });
+  }, [open]);
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="附带分享卡片"
+      closeLabel="关闭"
+      description="选择一张自己创建的分享，随消息一起发给频道成员。"
+      footer={
+        <Button variant="ghost" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      {loading ? (
+        <div style={{ ...smallText, padding: "10px 2px" }}>加载分享…</div>
+      ) : items.length === 0 ? (
+        <div style={{ ...smallText, padding: "10px 2px" }}>
+          你还没有分享。可在频道工具栏「分享」里生成一张。
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            maxHeight: 340,
+            overflowY: "auto",
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              style={{ ...discoverRow, cursor: "pointer", textAlign: "left" }}
+              onClick={() => {
+                onPick(item);
+                onClose();
+              }}
+            >
+              <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={discoverName}>{item.title}</span>
+                <span style={{ ...smallText, fontSize: 11 }}>
+                  {timeLabel(item.createdAt)} · {formatBytes(item.sizeBytes)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -3058,6 +4289,7 @@ function ShareSnapshotModal({
 export function HomeScreen(): ReactElement {
   const talk = useTalkState();
   const [showAdd, setShowAdd] = useState(false);
+  const [showShares, setShowShares] = useState(false);
   const [showUsername, setShowUsername] = useState(false);
   const inCommunity = talk.view.communityId !== null;
 
@@ -3067,6 +4299,7 @@ export function HomeScreen(): ReactElement {
       <CommunitiesRail
         onAdd={() => setShowAdd(true)}
         onInbox={() => void openInbox()}
+        onShares={() => setShowShares(true)}
         onEditProfile={() => setShowUsername(true)}
       />
       {inCommunity ? (
@@ -3091,12 +4324,13 @@ export function HomeScreen(): ReactElement {
             <span style={{ ...smallText, fontSize: 12.5, lineHeight: 1.7 }}>
               从左侧选择一个社区开始聊天，
               <br />
-              点左栏「＋」用邀请码加入，或创建一个新社区。
+              点左栏「＋」发现公开社区、用邀请码加入，或创建一个新社区。
             </span>
           </div>
         </div>
       )}
       <CommunityAddModal open={showAdd} onClose={() => setShowAdd(false)} />
+      <ShareGalleryModal open={showShares} onClose={() => setShowShares(false)} />
       <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
       <InboxDialog />
     </div>

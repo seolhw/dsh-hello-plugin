@@ -6,12 +6,7 @@
 import type { InviteNotificationData } from "@dsh-talk/types/entities";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db";
-import {
-  type CommunityRow,
-  type InviteRow,
-  invites,
-  notifications,
-} from "../db/schema";
+import { type CommunityRow, type InviteRow, invites, notifications } from "../db/schema";
 import type { Env } from "../types";
 import { getMembership } from "./access";
 import { dispatchInvitationEmail } from "./email";
@@ -97,9 +92,7 @@ export async function createCommunityInvite(args: {
     inviteCode: community.inviteCode ?? "",
   });
 
-  const row = (
-    await db.select().from(invites).where(eq(invites.id, inviteId)).limit(1)
-  )[0];
+  const row = (await db.select().from(invites).where(eq(invites.id, inviteId)).limit(1))[0];
   if (!row) throw HttpApiError.internal("invite row not found");
   return row;
 }

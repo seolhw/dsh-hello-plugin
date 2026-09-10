@@ -29,6 +29,20 @@
       "when": 1788980770783,
       "tag": "20260909190610_panoramic_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1789012800000,
+      "tag": "20260910120000_share_kind_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789020000000,
+      "tag": "20260910140000_thread_visibility_and_members",
+      "breakpoints": true
     }
   ]
 }

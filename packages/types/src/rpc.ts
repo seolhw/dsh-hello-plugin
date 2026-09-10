@@ -76,17 +76,72 @@ export interface HostClonesStatus {
   }>;
 }
 
-/** POST /api/talk/clone —— 让 host 把分享包流式下载直写本地 */
+/** POST /api/talk/clone —— 让 host 下载分享包；DSH 会话包会直接还原成本地会话 */
 export interface HostCloneRequest {
   /** 分享包下载地址（share 的 downloadUrl，GET /api/r2/objects/…?download=1） */
   downloadUrl: string;
+  /** 还原会话用的工作区绝对路径；缺省用 host 进程 cwd */
+  cwd?: string;
 }
 
 export interface HostCloneResult {
-  /** 落盘绝对路径 */
-  file: string;
+  /** 落盘绝对路径（会话包直接还原、不留文件，此时为空） */
+  file?: string;
   bytes: number;
   elapsedMs: number;
+  /** 会话包还原出的新会话 id；频道快照等非会话包为 undefined */
+  sessionId?: string;
+}
+
+// ---------- 1.6 本地 DSH 会话（HTTP：host /api/talk/sessions + /api/talk/session-package） ----------
+
+/** 可供分享的本机会话（来自 DSH 会话持久化层的 header） */
+export interface LocalSessionSummary {
+  id: string;
+  /** 会话创建时的工作区绝对路径 */
+  cwd?: string;
+  createdAt: number;
+  /** seed 来源会话（fork / 克隆谱系） */
+  parentSession?: string;
+}
+
+/** GET /api/talk/sessions —— 本机可分享的会话列表 */
+export interface HostSessionsStatus {
+  sessions: LocalSessionSummary[];
+}
+
+/** 会话包 manifest 快照（随 share 存库，供卡片展示与克隆校验） */
+export interface AgentSessionPackageManifest {
+  /** JSON 袋：可直接透传给 Share.manifest（Record<string, unknown>） */
+  [key: string]: unknown;
+  /** 包格式版本 */
+  packageVersion: number;
+  /** 来源机器上的 DSH 会话 id */
+  sessionId: string;
+  /** 来源工作区绝对路径 */
+  cwd?: string;
+  /** DSH 会话 header 的格式版本 */
+  sessionVersion: number;
+  eventCount: number;
+  createdAt: number;
+}
+
+/** GET /api/talk/session-package?sessionId=… 返回的包体（application/json） */
+export interface AgentSessionPackage {
+  /** 包类型标记：host 据此把下载到的包识别为会话包并还原 */
+  kind: "agent-session";
+  manifest: AgentSessionPackageManifest;
+  /** DSH 会话 header 快照（保留 lineage） */
+  header: {
+    version: number;
+    id: string;
+    createdAt: number;
+    cwd?: string;
+    parentSession?: string;
+    seedLength?: number;
+  };
+  /** 会话事件（append-only、lossless JSON） */
+  events: unknown[];
 }
 
 // ---------- 2. 会话克隆（核心能力） ----------
@@ -127,9 +182,8 @@ export interface CloneSessionRequest {
 }
 
 export interface CloneSessionResult {
+  /** 新会话 id；client 用 ctx.sessions.open(sessionId) 切到它 */
   sessionId: string;
-  /** DSH 里打开这个会话的 URL（client 直接 window.open 跳转） */
-  openUrl: string;
   /** 克隆耗时 ms */
   elapsedMs: number;
   /** 最终落盘 bytes */
@@ -142,36 +196,7 @@ export interface CloneSessionResult {
   };
 }
 
-// ---------- 3. Workflow 运行 ----------
-
-export interface RunWorkflowRequest {
-  shareId: string;
-  /** 同克隆：预签名 R2 下载 URL，host 自己拉 */
-  downloadUrl: string;
-  /** 运行参数（前端表单填的） */
-  args: Record<string, unknown>;
-  /** 用户确认项 */
-  confirmed: Array<"run-unsigned-script" | "access-local-files" | "network-access">;
-  /** 是否阻塞等结果（MVP 默认 true，workflow 是短任务）；长任务未来改成 streaming */
-  blocking?: boolean;
-}
-
-export interface RunWorkflowResult {
-  ok: boolean;
-  /** DSH 里新建的运行会话 id（如果它把运行过程落到了会话里）；可选 */
-  sessionId?: string | null;
-  openUrl?: string | null;
-  elapsedMs: number;
-  /** 脚本退出码（如有） */
-  exitCode?: number | null;
-  /** 脚本 stdout/stderr 摘要（长的话 host 自己截断，MVP 先返回全文） */
-  stdoutSummary?: string;
-  stderrSummary?: string;
-  /** workflow 产出文件列表（相对 DSH workspace 根） */
-  outputs?: string[];
-}
-
-// ---------- 4. 会话打包 & 上传分享（host 端也做，因为要读本地 DSH 数据库） ----------
+// ---------- 3. 会话打包 & 上传分享（host 端也做，因为要读本地 DSH 会话） ----------
 
 export interface PackageSessionRequest {
   sessionId: string;
@@ -201,7 +226,7 @@ export interface PackageSessionResult {
 
 /** 打包好的本地文件 → host 自己用预签名 URL 直传 R2（返回 r2Key 给 client 去 POST /api/shares 落库） */
 export interface UploadSharePackageRequest {
-  /** PackageSessionResult 或类似 workflow 打包流程返回的本地路径 */
+  /** PackageSessionResult 返回的本地路径（host 打包后暂存） */
   localPath: string;
   /** 预签名上传 URL + headers（client 调 /api/r2/sign-upload 拿到后转 host） */
   uploadUrl: string;
@@ -251,9 +276,6 @@ export interface TalkHostRpc extends SettingsRpc, CacheRpc {
     | { type: "done"; data: CloneSessionResult }
     | { type: "error"; data: RpcError }
   >;
-
-  // --- workflow ---
-  "talk.workflow.run"(req: RunWorkflowRequest): Promise<RunWorkflowResult>;
 
   // --- 分享打包 & 上传 ---
   "talk.share.packageSession"(req: PackageSessionRequest): Promise<PackageSessionResult>;

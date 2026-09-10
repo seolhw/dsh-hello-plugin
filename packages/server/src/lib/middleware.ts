@@ -53,7 +53,7 @@ export function applyGlobalMiddleware(app: Hono<{ Bindings: Env; Variables: Hono
   );
 
   // 2. Body 大小限制：API 层 5 MiB；附件直传（PUT /api/r2/objects）豁免，
-  //    由该路由自身按 MAX_ATTACHMENT_BYTES 校验
+  //    由该路由自身按 MAX_R2_UPLOAD_BYTES 校验
   app.use("*", async (c, next) => {
     if (c.req.path.startsWith("/api/r2/objects")) return next();
     const limit = bodyLimit({

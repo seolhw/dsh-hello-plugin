@@ -33,13 +33,6 @@
     {
       "idx": 4,
       "version": "6",
-      "when": 1789012800000,
-      "tag": "20260910120000_share_kind_rename",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
       "when": 1789020000000,
       "tag": "20260910140000_thread_visibility_and_members",
       "breakpoints": true

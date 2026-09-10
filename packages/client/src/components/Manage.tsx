@@ -40,7 +40,19 @@ import {
   uploadImage,
   useTalkState,
 } from "../store";
-import { Avatar, AvatarPicker, palette, smallText, timeLabel } from "./styles";
+import {
+  Avatar,
+  AvatarPicker,
+  fieldBlock,
+  fieldLabel,
+  listCard,
+  listCardName,
+  palette,
+  pillGroup,
+  pillStyle,
+  smallText,
+  timeLabel,
+} from "./styles";
 
 const isModerator = (role: MemberRole | null | undefined): boolean =>
   role === "owner" || role === "admin";
@@ -53,52 +65,7 @@ const roleColor: Record<MemberRole, string> = {
 
 const roleName: Record<MemberRole, string> = { owner: "所有者", admin: "管理员", member: "成员" };
 
-// ---------- 与登录/注册一致的共享样式 ----------
-
-/** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件）：圆角外壳 + 内部激活键 */
-const pillGroup: CSSProperties = {
-  display: "flex",
-  gap: 2,
-  padding: 3,
-  borderRadius: 10,
-  background: palette.inputBg,
-  border: `1px solid ${palette.border}`,
-};
-
-/** 分段选择组内的单个键 */
-const pillKey: CSSProperties = {
-  flex: 1,
-  border: "none",
-  borderRadius: 8,
-  padding: "7px 12px",
-  fontSize: 13,
-  fontWeight: 450,
-  color: palette.muted,
-  background: "transparent",
-  cursor: "pointer",
-  transition: "background 120ms ease, color 120ms ease",
-};
-
-const pillKeyActive: CSSProperties = {
-  fontWeight: 600,
-  color: palette.text,
-  background: palette.elevated,
-  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-};
-
-/** 表单字段纵向容器 */
-const fieldBlock: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-/** 字段小标签 */
-const fieldLabel: CSSProperties = {
-  fontSize: 12,
-  color: palette.muted,
-  fontWeight: 500,
-};
+// ---------- 弹窗共享样式 ----------
 
 /** 弹窗说明文字 */
 const dialogHint: CSSProperties = {
@@ -375,14 +342,14 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
           <div style={pillGroup}>
             <button
               type="button"
-              style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
+              style={pillStyle(privacy === "public")}
               onClick={() => setPrivacy("public")}
             >
               公开
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
+              style={pillStyle(privacy === "private")}
               onClick={() => setPrivacy("private")}
             >
               私有
@@ -497,29 +464,10 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
             const rowCanManage = moder && !self && !targetIsOwner;
             const canTransfer = isOwner && !self && targetIsOwner;
             return (
-              <div
-                key={m.user.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "7px 10px",
-                  borderRadius: 10,
-                  background: palette.inputBg,
-                  border: `1px solid ${palette.border}`,
-                }}
-              >
+              <div key={m.user.id} style={listCard}>
                 <Avatar label={m.user.handle} src={m.user.avatarUrl} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <div style={listCardName}>
                     {m.user.displayName ?? m.user.handle}
                     {self ? (
                       <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
@@ -598,29 +546,10 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
             已封禁用户（{bans.length}）
           </div>
           {bans.map((b) => (
-            <div
-              key={b.userId}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "7px 10px",
-                borderRadius: 10,
-                background: palette.inputBg,
-                border: `1px solid ${palette.border}`,
-              }}
-            >
+            <div key={b.userId} style={listCard}>
               <Avatar label={b.user.handle} src={b.user.avatarUrl} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+                <div style={listCardName}>
                   @{b.user.handle}
                   {b.reason ? (
                     <span style={{ color: palette.caption, fontSize: 11 }}> · {b.reason}</span>
@@ -764,21 +693,21 @@ function ChannelDialog({
           <div style={pillGroup}>
             <button
               type="button"
-              style={{ ...pillKey, ...(kind === "text" ? pillKeyActive : {}) }}
+              style={pillStyle(kind === "text")}
               onClick={() => setKind("text")}
             >
               文字
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(kind === "announcement" ? pillKeyActive : {}) }}
+              style={pillStyle(kind === "announcement")}
               onClick={() => setKind("announcement")}
             >
               公告
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(kind === "forum" ? pillKeyActive : {}) }}
+              style={pillStyle(kind === "forum")}
               onClick={() => setKind("forum")}
             >
               话题

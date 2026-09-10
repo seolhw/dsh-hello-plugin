@@ -24,14 +24,11 @@ import type {
   CreateInviteResponse,
   CreateMessageRequest,
   CreateMessageResponse,
-  CreateShareRequest,
-  CreateShareResponse,
   CreateThreadRequest,
   CreateThreadResponse,
   DeclineInviteResponse,
   DeleteChannelResponse,
   DeleteCommunityResponse,
-  DeleteShareResponse,
   DiscoverCommunitiesQuery,
   DiscoverCommunitiesResponse,
   GetChannelOnlineResponse,
@@ -52,9 +49,7 @@ import type {
   ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
-  ListMySharesResponse,
   ListNotificationsResponse,
-  ListSharesResponse,
   ListThreadCandidatesResponse,
   ListThreadMembersResponse,
   ListThreadsResponse,
@@ -116,6 +111,33 @@ const errorMessage = (data: unknown, text: string): string => {
   }
   return text.length > 0 ? text : "request failed";
 };
+
+/** 读取响应体并尽力解析 JSON；空体或非 JSON 时 data 为 null */
+async function readJson(res: Response): Promise<{ data: unknown; text: string }> {
+  const text = await res.text();
+  if (text.length === 0) return { data: null, text };
+  try {
+    return { data: JSON.parse(text) as unknown, text };
+  } catch {
+    return { data: null, text };
+  }
+}
+
+/** 非 2xx 统一抛 ServerApiError；2xx 返回解析后的 JSON（空体为 null） */
+async function parseResponse<T>(res: Response): Promise<T> {
+  const { data, text } = await readJson(res);
+  if (!res.ok) {
+    const err = data as ApiError | null;
+    throw new ServerApiError(
+      res.status,
+      err?.code ?? "AUTH_ERROR",
+      errorMessage(data, text),
+      err?.requestId,
+      err?.details,
+    );
+  }
+  return data as T;
+}
 
 /** 登录/注册类端点返回：user + 会话 token（响应头 set-auth-token 或 body.token） */
 export interface AuthCallResult {
@@ -193,26 +215,7 @@ export class ServerClient {
     if (body !== undefined) init.body = JSON.stringify(body);
 
     const res = await fetchWithRetry(this.url(path), init);
-    const text = await res.text();
-    let data: unknown = null;
-    if (text.length > 0) {
-      try {
-        data = JSON.parse(text) as unknown;
-      } catch {
-        data = null;
-      }
-    }
-    if (!res.ok) {
-      const err = data as ApiError | null;
-      throw new ServerApiError(
-        res.status,
-        err?.code ?? "AUTH_ERROR",
-        errorMessage(data, text),
-        err?.requestId,
-        err?.details,
-      );
-    }
-    return data as T;
+    return parseResponse<T>(res);
   }
 
   /** 登录/注册专用：同时从响应头/body 收集会话 token（Bearer 用） */
@@ -224,25 +227,7 @@ export class ServerClient {
       headers,
       body: JSON.stringify(body),
     });
-    const text = await res.text();
-    let data: unknown = null;
-    if (text.length > 0) {
-      try {
-        data = JSON.parse(text) as unknown;
-      } catch {
-        data = null;
-      }
-    }
-    if (!res.ok) {
-      const err = data as ApiError | null;
-      throw new ServerApiError(
-        res.status,
-        err?.code ?? "AUTH_ERROR",
-        errorMessage(data, text),
-        err?.requestId,
-        err?.details,
-      );
-    }
+    const data = await parseResponse<unknown>(res);
     const tokenFromHeader = res.headers.get("set-auth-token");
     const tokenFromBody = isRecord(data) && typeof data.token === "string" ? data.token : null;
     const user = isRecord(data) && isRecord(data.user) ? (data.user as unknown as AuthUser) : null;
@@ -797,20 +782,7 @@ export class ServerClient {
     );
   }
 
-  // ---------- 业务 REST：分享（频道快照 / DSH 会话） ----------
-
-  /** POST /api/shares/snapshot —— 把某频道消息打包成频道快照 */
-  createShareSnapshot(
-    channelId: string,
-    body: Pick<CreateShareRequest, "title" | "summary">,
-  ): Promise<CreateShareResponse> {
-    return this.call<CreateShareResponse>(
-      "POST",
-      "/api/shares/snapshot",
-      { channelId, ...body },
-      true,
-    );
-  }
+  // ---------- 业务 REST：分享（DSH 会话） ----------
 
   /** POST /api/shares/agent-session —— 登记一条 DSH 会话分享（包体已直传 R2） */
   createAgentSessionShare(
@@ -824,38 +796,9 @@ export class ServerClient {
     );
   }
 
-  /** GET /api/shares/discover —— 公开分享广场 */
-  listShares(
-    opts: { kind?: "channel-snapshot" | "agent-session"; cursor?: string; limit?: number } = {},
-  ): Promise<ListSharesResponse> {
-    const qs = toQuery({
-      kind: opts.kind ?? "",
-      cursor: opts.cursor ?? "",
-      limit: opts.limit ?? 20,
-    });
-    return this.call<ListSharesResponse>("GET", `/api/shares/discover${qs}`, undefined, true);
-  }
-
-  /** GET /api/shares/mine —— 我创建的分享 */
-  listMyShares(
-    opts: { kind?: "channel-snapshot" | "agent-session"; cursor?: string; limit?: number } = {},
-  ): Promise<ListMySharesResponse> {
-    const qs = toQuery({
-      kind: opts.kind ?? "",
-      cursor: opts.cursor ?? "",
-      limit: opts.limit ?? 20,
-    });
-    return this.call<ListMySharesResponse>("GET", `/api/shares/mine${qs}`, undefined, true);
-  }
-
   /** GET /api/shares/:id —— 分享详情（含 downloadUrl） */
   getShare(shareId: string): Promise<GetShareResponse> {
     return this.call<GetShareResponse>("GET", `/api/shares/${shareId}`, undefined, true);
-  }
-
-  /** DELETE /api/shares/:id —— 删除自己创建的分享（含 R2 包体） */
-  deleteShare(shareId: string): Promise<DeleteShareResponse> {
-    return this.call<DeleteShareResponse>("DELETE", `/api/shares/${shareId}`, undefined, true);
   }
 
   /**
@@ -875,25 +818,6 @@ export class ServerClient {
       headers,
       body: file,
     });
-    const text = await res.text();
-    let data: unknown = null;
-    if (text.length > 0) {
-      try {
-        data = JSON.parse(text) as unknown;
-      } catch {
-        data = null;
-      }
-    }
-    if (!res.ok) {
-      const err = data as ApiError | null;
-      throw new ServerApiError(
-        res.status,
-        err?.code ?? "AUTH_ERROR",
-        errorMessage(data, text),
-        err?.requestId,
-        err?.details,
-      );
-    }
-    return data as UploadAttachmentResponse;
+    return parseResponse<UploadAttachmentResponse>(res);
   }
 }

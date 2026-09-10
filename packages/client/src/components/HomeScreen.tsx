@@ -26,7 +26,7 @@ import {
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type {
   ChannelOnlineMember,
-  ListSharesResponse,
+  GetShareResponse,
   SearchMessageResult,
   ThreadMemberItem,
   ThreadSummary,
@@ -58,7 +58,6 @@ import {
   canRetractMessage,
   clearMessageFocus,
   cloneShareToSession,
-  cloneToLocal,
   closeThread,
   createCommunity,
   createThreadInChannel,
@@ -66,12 +65,11 @@ import {
   discoverCommunities,
   fetchChannelOnline,
   getCurrentDshSession,
+  getShareInfo,
   joinCommunityByCode,
   joinPublicCommunity,
   joinThreadWithPasscode,
   listLocalSessions,
-  listMyShares,
-  listPublicShares,
   listThreadCandidates,
   listThreadMembers,
   loadOlderMessages,
@@ -83,7 +81,6 @@ import {
   openInbox,
   openThread,
   reloadCommunityDetail,
-  removeShare,
   removeThreadMember,
   removeUserAvatar,
   replyToMessage,
@@ -95,7 +92,6 @@ import {
   setThreadArchived,
   shareDownloadUrl,
   shareLocalSession,
-  snapshotChannel,
   updateMessage,
   updateThread,
   updateUserAvatar,
@@ -105,7 +101,19 @@ import {
 } from "../store";
 import { BellGlyph, InboxDialog } from "./Inbox";
 import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
-import { Avatar, AvatarPicker, palette, smallText, timeLabel } from "./styles";
+import {
+  Avatar,
+  AvatarPicker,
+  fieldBlock,
+  fieldLabel,
+  listCard,
+  listCardName,
+  palette,
+  pillGroup,
+  pillStyle,
+  smallText,
+  timeLabel,
+} from "./styles";
 
 // ---------------- 布局样式 ----------------
 
@@ -437,49 +445,7 @@ const liveDot: CSSProperties = {
   flex: "0 0 auto",
 };
 
-// ---------- 与登录/注册一致的弹窗表单样式 ----------
-
-/** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件） */
-const pillGroup: CSSProperties = {
-  display: "flex",
-  gap: 2,
-  padding: 3,
-  borderRadius: 10,
-  background: palette.inputBg,
-  border: `1px solid ${palette.border}`,
-};
-
-const pillKey: CSSProperties = {
-  flex: 1,
-  border: "none",
-  borderRadius: 8,
-  padding: "7px 12px",
-  fontSize: 13,
-  fontWeight: 450,
-  color: palette.muted,
-  background: "transparent",
-  cursor: "pointer",
-  transition: "background 120ms ease, color 120ms ease",
-};
-
-const pillKeyActive: CSSProperties = {
-  fontWeight: 600,
-  color: palette.text,
-  background: palette.elevated,
-  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
-};
-
-const fieldBlock: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-const fieldLabel: CSSProperties = {
-  fontSize: 12,
-  color: palette.muted,
-  fontWeight: 500,
-};
+// ---------- 弹窗表单样式 ----------
 
 const PRIVACY_LABELS: Record<Community["privacy"], string> = {
   public: "公开",
@@ -553,12 +519,10 @@ function CommunityMetaCard({
 function CommunitiesRail({
   onAdd,
   onInbox,
-  onShares,
   onEditProfile,
 }: {
   onAdd: () => void;
   onInbox: () => void;
-  onShares: () => void;
   onEditProfile: () => void;
 }): ReactElement {
   const talk = useTalkState();
@@ -601,15 +565,6 @@ function CommunitiesRail({
           title="加入、发现或创建社区"
         >
           <IconPlusOutline16 />
-        </button>
-        <button
-          type="button"
-          style={railAction}
-          onClick={onShares}
-          aria-label="分享广场"
-          title="分享广场"
-        >
-          <IconShareOutline16 />
         </button>
       </div>
       <div style={railDivider} />
@@ -801,7 +756,6 @@ function ChannelList(): ReactElement | null {
                   gap: 2,
                   padding: "0 4px 0 8px",
                   borderRadius: 8,
-                  background: active ? palette.hover : undefined,
                   border: "1px solid transparent",
                   ...(active ? activeTile : {}),
                   marginBottom: 2,
@@ -1658,9 +1612,6 @@ function ChatPane(): ReactElement | null {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const MAX_ATTACH = 4;
-  // 随本条消息一起发出的分享卡片（从「我的分享」里选）
-  const [pendingShare, setPendingShare] = useState<ShareItem | null>(null);
-  const [sharePickOpen, setSharePickOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [onlineOpen, setOnlineOpen] = useState(false);
   const [onlineLoading, setOnlineLoading] = useState(false);
@@ -1880,12 +1831,11 @@ function ChatPane(): ReactElement | null {
 
   async function submit(): Promise<void> {
     const text = draft;
-    if (text.trim().length === 0 && pendingFiles.length === 0 && pendingShare === null) return;
-    const ok = await sendMessage(text, pendingFiles, pendingShare?.id ?? null);
+    if (text.trim().length === 0 && pendingFiles.length === 0) return;
+    const ok = await sendMessage(text, pendingFiles);
     if (ok) {
       setDraft("");
       setPendingFiles([]);
-      setPendingShare(null);
       setMentionActive(false);
       mentionStartRef.current = -1;
       composerRef.current?.focus();
@@ -2042,7 +1992,7 @@ function ChatPane(): ReactElement | null {
               icon={<IconShareOutline16 />}
               onClick={() => setShareOpen(true)}
               aria-label="分享"
-              title="分享频道快照，或把本机 DSH 会话分享到社区"
+              title="把本机 DSH 会话分享到社区"
             />
           ) : null}
           {!isThread ? (
@@ -2174,15 +2124,6 @@ function ChatPane(): ReactElement | null {
                     aria-label="添加附件"
                     title="添加附件"
                   />
-                  <Button
-                    size="md"
-                    variant="ghost"
-                    icon={<IconShareOutline16 />}
-                    onClick={() => setSharePickOpen(true)}
-                    disabled={talk.view.sending}
-                    aria-label="附带分享卡片"
-                    title="附带分享卡片"
-                  />
                   <div
                     style={{
                       flex: 1,
@@ -2235,46 +2176,6 @@ function ChatPane(): ReactElement | null {
                             composerRef.current?.focus();
                           }}
                           aria-label="取消回复"
-                        />
-                      </div>
-                    ) : null}
-                    {pendingShare ? (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          background: palette.inputBg,
-                          border: `1px solid ${palette.border}`,
-                          borderRadius: 8,
-                          padding: "2px 4px 2px 8px",
-                        }}
-                      >
-                        <span style={{ color: palette.accent, display: "inline-flex" }}>
-                          <IconShareOutline16 />
-                        </span>
-                        <span
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            fontSize: 11.5,
-                            color: palette.secondary,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          附带分享卡片：
-                          <span style={{ fontWeight: 600, color: palette.text }}>
-                            {pendingShare.title}
-                          </span>
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<IconCloseOutline16 />}
-                          onClick={() => setPendingShare(null)}
-                          aria-label="移除分享卡片"
                         />
                       </div>
                     ) : null}
@@ -2401,10 +2302,7 @@ function ChatPane(): ReactElement | null {
                     size="md"
                     icon={<IconSendOutline16 />}
                     disabled={
-                      talk.view.sending ||
-                      (draft.trim().length === 0 &&
-                        pendingFiles.length === 0 &&
-                        pendingShare === null)
+                      talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)
                     }
                     onClick={() => void submit()}
                     aria-label="发送"
@@ -2440,7 +2338,6 @@ function ChatPane(): ReactElement | null {
         open={shareOpen}
         onClose={() => setShareOpen(false)}
         channelId={channelId ?? ""}
-        channelName={channel?.name ?? ""}
         communityId={community?.id ?? null}
       />
       <ThreadCreateModal
@@ -2464,11 +2361,6 @@ function ChatPane(): ReactElement | null {
         </>
       ) : null}
       <SearchMessagesModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-      <SharePickerModal
-        open={sharePickOpen}
-        onClose={() => setSharePickOpen(false)}
-        onPick={(item) => setPendingShare(item)}
-      />
       <OnlineMembersModal
         open={onlineOpen}
         onClose={() => setOnlineOpen(false)}
@@ -2583,14 +2475,14 @@ function ThreadCreateModal({
           <div style={pillGroup}>
             <button
               type="button"
-              style={{ ...pillKey, ...(visibility === "public" ? pillKeyActive : {}) }}
+              style={pillStyle(visibility === "public")}
               onClick={() => setVisibility("public")}
             >
               公开
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(visibility === "private" ? pillKeyActive : {}) }}
+              style={pillStyle(visibility === "private")}
               onClick={() => setVisibility("private")}
             >
               私密
@@ -2795,14 +2687,14 @@ function ThreadSettingsModal({
           <div style={pillGroup}>
             <button
               type="button"
-              style={{ ...pillKey, ...(visibility === "public" ? pillKeyActive : {}) }}
+              style={pillStyle(visibility === "public")}
               onClick={() => setVisibility("public")}
             >
               公开
             </button>
             <button
               type="button"
-              style={{ ...pillKey, ...(visibility === "private" ? pillKeyActive : {}) }}
+              style={pillStyle(visibility === "private")}
               onClick={() => setVisibility("private")}
             >
               私密
@@ -2939,29 +2831,10 @@ function ThreadMembersModal({
               const isSelf = me !== null && m.userId === me.id;
               const isCreator = m.userId === thread.createdBy;
               return (
-                <div
-                  key={m.userId}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "7px 10px",
-                    borderRadius: 10,
-                    background: palette.inputBg,
-                    border: `1px solid ${palette.border}`,
-                  }}
-                >
+                <div key={m.userId} style={listCard}>
                   <Avatar label={m.user.handle} src={m.user.avatarUrl} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 600,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <div style={listCardName}>
                       {m.user.displayName ?? m.user.handle}
                       {isSelf ? (
                         <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
@@ -3020,17 +2893,7 @@ function ThreadMembersModal({
               >
                 <Avatar label={u.handle} src={u.avatarUrl} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {u.displayName ?? u.handle}
-                  </div>
+                  <div style={listCardName}>{u.displayName ?? u.handle}</div>
                   <div style={{ ...smallText, fontSize: 11 }}>@{u.handle}</div>
                 </div>
                 <Button
@@ -3199,10 +3062,10 @@ function SearchMessagesModal({
                   textAlign: "left",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = palette.hover;
+                  e.currentTarget.style.background = palette.hover;
                 }}
                 onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                  e.currentTarget.style.background = "transparent";
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -3321,17 +3184,7 @@ function OnlineMembersModal({
             >
               <Avatar label={m.handle} src={m.avatarUrl} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {m.displayName ?? m.handle}
-                </div>
+                <div style={listCardName}>{m.displayName ?? m.handle}</div>
                 <div style={{ ...smallText, fontSize: 11 }}>@{m.handle}</div>
               </div>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -3510,16 +3363,12 @@ function CommunityAddModal({
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {/* tab 顶栏：加入（默认）/ 发现 / 创建 */}
         <div style={pillGroup}>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(tab === "join" ? pillKeyActive : {}) }}
-            onClick={() => setTab("join")}
-          >
+          <button type="button" style={pillStyle(tab === "join")} onClick={() => setTab("join")}>
             加入
           </button>
           <button
             type="button"
-            style={{ ...pillKey, ...(discovering ? pillKeyActive : {}) }}
+            style={pillStyle(discovering)}
             onClick={() => {
               setTab("discover");
               void loadDiscover(keyword);
@@ -3527,11 +3376,7 @@ function CommunityAddModal({
           >
             发现
           </button>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(creating ? pillKeyActive : {}) }}
-            onClick={() => setTab("create")}
-          >
+          <button type="button" style={pillStyle(creating)} onClick={() => setTab("create")}>
             创建
           </button>
         </div>
@@ -3577,14 +3422,14 @@ function CommunityAddModal({
               <div style={pillGroup}>
                 <button
                   type="button"
-                  style={{ ...pillKey, ...(privacy === "public" ? pillKeyActive : {}) }}
+                  style={pillStyle(privacy === "public")}
                   onClick={() => setPrivacy("public")}
                 >
                   公开
                 </button>
                 <button
                   type="button"
-                  style={{ ...pillKey, ...(privacy === "private" ? pillKeyActive : {}) }}
+                  style={pillStyle(privacy === "private")}
                   onClick={() => setPrivacy("private")}
                 >
                   私有
@@ -3772,22 +3617,19 @@ function UpdateUsernameModal({
   );
 }
 
-// ---------------- 弹窗：分享（频道快照 / DSH 会话） ----------------
+// ---------------- 弹窗：分享 DSH 会话 ----------------
 
 function ShareSnapshotModal({
   open,
   onClose,
   channelId,
-  channelName,
   communityId,
 }: {
   open: boolean;
   onClose: () => void;
   channelId: string;
-  channelName: string;
   communityId: string | null;
 }): ReactElement {
-  const [tab, setTab] = useState<"channel" | "session">("channel");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3797,37 +3639,14 @@ function ShareSnapshotModal({
   const [sessionId, setSessionId] = useState("");
 
   useEffect(() => {
-    if (!open || tab !== "session") return;
+    if (!open) return;
     const current = getCurrentDshSession();
     setSessionId(current ?? "");
     void listLocalSessions().then((list) => {
       setSessions(list);
       if (!current && list.length > 0) setSessionId(list[0]?.id ?? "");
     });
-  }, [open, tab]);
-
-  async function copyLink(url: string): Promise<void> {
-    if (!navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      // 剪贴板不可用时忽略
-    }
-  }
-
-  /** 频道快照：服务端打包 + 本机留档 + 复制链接 */
-  async function submitChannel(): Promise<void> {
-    if (busy) return;
-    setBusy(true);
-    const url = await snapshotChannel({ title, summary });
-    if (url) await cloneToLocal(url);
-    setBusy(false);
-    if (!url) return;
-    await copyLink(url);
-    setTitle("");
-    setSummary("");
-    onClose();
-  }
+  }, [open]);
 
   /** DSH 会话：host 打包上传后登记分享，并把卡片发到当前频道 */
   async function submitSession(): Promise<void> {
@@ -3849,7 +3668,7 @@ function ShareSnapshotModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="分享"
+      title="分享 DSH 会话"
       closeLabel="关闭"
       footer={
         <>
@@ -3858,281 +3677,62 @@ function ShareSnapshotModal({
           </Button>
           <Button
             variant="primary"
-            disabled={busy || (tab === "session" && sessionId.length === 0)}
-            onClick={() => void (tab === "channel" ? submitChannel() : submitSession())}
+            disabled={busy || sessionId.length === 0}
+            onClick={() => void submitSession()}
           >
-            {busy ? "处理中…" : tab === "channel" ? "生成并复制链接" : "分享到本频道"}
+            {busy ? "处理中…" : "分享到本频道"}
           </Button>
         </>
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={pillGroup}>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(tab === "channel" ? pillKeyActive : {}) }}
-            onClick={() => setTab("channel")}
-          >
-            频道快照
-          </button>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(tab === "session" ? pillKeyActive : {}) }}
-            onClick={() => setTab("session")}
-          >
-            DSH 会话
-          </button>
-        </div>
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={tab === "channel" ? `频道快照：${channelName}` : "会话分享标题（可选）"}
+          placeholder="会话分享标题（可选）"
         />
         <Input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           placeholder="一句话摘要（可选）"
         />
-        {tab === "channel" ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ ...smallText, fontSize: 12 }}>
-            把本频道最近最多 200 条消息打包成 JSON 快照交服务端保管，并让本机 host 下载到本地
-            `~/.dsh-talk/clones`；生成后链接会复制到剪贴板。
+            把本机一个 DSH 会话打包上传，社区成员可「克隆到会话」还原出同样的 会话。当前：
+            {getCurrentDshSession() ?? "（未识别到当前会话）"}
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ ...smallText, fontSize: 12 }}>
-              把本机一个 DSH 会话打包上传，社区成员可「克隆到会话」还原出同样的 会话。当前：
-              {getCurrentDshSession() ?? "（未识别到当前会话）"}
-            </div>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 4,
-                maxHeight: 200,
-                overflowY: "auto",
-              }}
-            >
-              {sessions.length === 0 ? (
-                <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
-              ) : (
-                sessions.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setSessionId(s.id)}
-                    style={{
-                      ...pillKey,
-                      textAlign: "left",
-                      ...(s.id === sessionId ? pillKeyActive : {}),
-                    }}
-                  >
-                    {s.id}
-                    {s.cwd ? `（${s.cwd}）` : ""}
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------- 弹窗：分享广场（公开快照 + 我的分享） ----------------
-
-type ShareItem = ListSharesResponse["items"][number];
-
-/** 分享广场：公开快照流 + 我创建的分享；支持下载 / 克隆到本地 / 删除 */
-function ShareGalleryModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}): ReactElement {
-  const talk = useTalkState();
-  const [tab, setTab] = useState<"discover" | "mine">("discover");
-  const [items, setItems] = useState<ShareItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const meId = talk.me?.id ?? null;
-
-  async function load(which: "discover" | "mine"): Promise<void> {
-    setLoading(true);
-    const list = which === "mine" ? await listMyShares() : await listPublicShares();
-    setItems(list);
-    setLoading(false);
-  }
-
-  // 每次打开默认看「广场」
-  useEffect(() => {
-    if (!open) return;
-    setTab("discover");
-    setBusyId(null);
-    setLoading(true);
-    void listPublicShares().then((list) => {
-      setItems(list);
-      setLoading(false);
-    });
-  }, [open]);
-
-  /** 浏览器直接下载包体 */
-  async function download(item: ShareItem): Promise<void> {
-    const url = await shareDownloadUrl(item.id);
-    if (url) window.open(url, "_blank", "noopener");
-  }
-
-  /** 让 host 把包体流式下载到本地克隆目录 */
-  async function clone(item: ShareItem): Promise<void> {
-    if (busyId !== null) return;
-    setBusyId(item.id);
-    const url = await shareDownloadUrl(item.id);
-    if (url) await cloneToLocal(url);
-    setBusyId(null);
-  }
-
-  /** DSH 会话分享：让 host 还原成本地会话并切过去 */
-  async function cloneSession(item: ShareItem): Promise<void> {
-    if (busyId !== null) return;
-    setBusyId(item.id);
-    await cloneShareToSession(item.id);
-    setBusyId(null);
-  }
-
-  /** 删除自己的分享（含 R2 包体） */
-  async function remove(item: ShareItem): Promise<void> {
-    if (!window.confirm(`删除分享「${item.title}」？包体也会一并删除，且无法恢复。`)) return;
-    setBusyId(item.id);
-    const ok = await removeShare(item.id);
-    setBusyId(null);
-    if (ok) setItems((prev) => prev.filter((s) => s.id !== item.id));
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="分享广场"
-      closeLabel="关闭"
-      description="频道快照或 DSH 会话都可分享给他人；来自公开社区的会出现在广场。"
-      footer={
-        <Button variant="ghost" onClick={onClose}>
-          关闭
-        </Button>
-      }
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={pillGroup}>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(tab === "discover" ? pillKeyActive : {}) }}
-            onClick={() => {
-              setTab("discover");
-              void load("discover");
-            }}
-          >
-            广场
-          </button>
-          <button
-            type="button"
-            style={{ ...pillKey, ...(tab === "mine" ? pillKeyActive : {}) }}
-            onClick={() => {
-              setTab("mine");
-              void load("mine");
-            }}
-          >
-            我的分享
-          </button>
-        </div>
-        {loading ? (
-          <div style={{ ...smallText, padding: "10px 2px" }}>加载分享…</div>
-        ) : items.length === 0 ? (
-          <div style={{ ...smallText, padding: "10px 2px" }}>
-            {tab === "mine" ? "你还没有创建分享。" : "广场上还没有公开快照。"}
-          </div>
-        ) : (
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              gap: 8,
-              maxHeight: 380,
+              gap: 4,
+              maxHeight: 200,
               overflowY: "auto",
             }}
           >
-            {items.map((item) => {
-              const mine = meId !== null && item.authorId === meId;
-              const messageCount =
-                typeof item.manifest.messageCount === "number" ? item.manifest.messageCount : null;
-              return (
-                <div key={item.id} style={discoverRow}>
-                  <div
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 2,
-                    }}
-                  >
-                    <div style={discoverName}>{item.title}</div>
-                    {item.summary ? <div style={discoverDesc}>{item.summary}</div> : null}
-                    <div style={{ ...smallText, fontSize: 11 }}>
-                      {item.kind === "agent-session" ? "DSH 会话" : "频道快照"} · @
-                      {item.author.handle} · {timeLabel(item.createdAt)} ·{" "}
-                      {formatBytes(item.sizeBytes)}
-                      {messageCount !== null ? ` · ${messageCount} 条消息` : ""}
-                      {item.downloadCount > 0 ? ` · 下载 ${item.downloadCount}` : ""}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 2, flex: "0 0 auto" }}>
-                    <Button size="sm" variant="ghost" onClick={() => void download(item)}>
-                      下载
-                    </Button>
-                    {item.kind === "agent-session" ? (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={busyId !== null}
-                        onClick={() => void cloneSession(item)}
-                      >
-                        {busyId === item.id ? "还原中…" : "克隆到会话"}
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busyId !== null}
-                        onClick={() => void clone(item)}
-                      >
-                        {busyId === item.id ? "克隆中…" : "克隆到本地"}
-                      </Button>
-                    )}
-                    {mine ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={busyId !== null}
-                        onClick={() => void remove(item)}
-                        style={{ color: palette.danger }}
-                      >
-                        删除
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
+            {sessions.length === 0 ? (
+              <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
+            ) : (
+              sessions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setSessionId(s.id)}
+                  style={{ ...pillStyle(s.id === sessionId), textAlign: "left" }}
+                >
+                  {s.id}
+                  {s.cwd ? `（${s.cwd}）` : ""}
+                </button>
+              ))
+            )}
           </div>
-        )}
+        </div>
       </div>
     </Modal>
   );
 }
 
-// ---------------- 消息内嵌分享卡片 & 卡片选择器 ----------------
+// ---------------- 消息内嵌分享卡片 ----------------
 
 // 消息内嵌的分享卡片（标题 + 摘要 + 下载）
 const shareCardStyle: CSSProperties = {
@@ -4161,11 +3761,83 @@ const shareCardBadge: CSSProperties = {
   letterSpacing: "0.02em",
 };
 
-/** 消息内嵌分享卡片：展示标题/摘要，点击下载包体 */
+/** 消息内嵌分享卡片：点击打开详情弹窗（可在弹窗里克隆到本地会话） */
 function ShareCardView({ card }: { card: NonNullable<MessageItem["shareCard"]> }): ReactElement {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="查看分享详情"
+        style={shareCardStyle}
+      >
+        <span style={shareCardBadge}>DSH 会话</span>
+        <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {card.title}
+          </span>
+          {card.summary ? (
+            <span
+              style={{
+                ...smallText,
+                fontSize: 11.5,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {card.summary}
+            </span>
+          ) : null}
+        </span>
+        <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>查看</span>
+      </button>
+      <ShareCardModal open={open} onClose={() => setOpen(false)} card={card} />
+    </>
+  );
+}
+
+/** 分享详情弹窗：展示分享信息；可一键克隆到本地会话 */
+function ShareCardModal({
+  open,
+  onClose,
+  card,
+}: {
+  open: boolean;
+  onClose: () => void;
+  card: NonNullable<MessageItem["shareCard"]>;
+}): ReactElement {
+  const [detail, setDetail] = useState<GetShareResponse | null>(null);
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function open(): Promise<void> {
+  // 打开时拉一次详情（分享者 / 时间 / 大小 / 会话事件数）
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    setDetail(null);
+    void getShareInfo(card.shareId).then((res) => {
+      if (cancelled) return;
+      setDetail(res);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, card.shareId]);
+
+  async function download(): Promise<void> {
     if (busy) return;
     setBusy(true);
     const url = await shareDownloadUrl(card.shareId);
@@ -4173,113 +3845,55 @@ function ShareCardView({ card }: { card: NonNullable<MessageItem["shareCard"]> }
     if (url) window.open(url, "_blank", "noopener");
   }
 
-  return (
-    <button type="button" onClick={() => void open()} style={shareCardStyle} title="下载分享包">
-      <span style={shareCardBadge}>{card.kind === "agent-session" ? "DSH 会话" : "频道快照"}</span>
-      <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 600,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {card.title}
-        </span>
-        {card.summary ? (
-          <span
-            style={{
-              ...smallText,
-              fontSize: 11.5,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {card.summary}
-          </span>
-        ) : null}
-      </span>
-      <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
-        {busy ? "获取中…" : "下载"}
-      </span>
-    </button>
-  );
-}
+  async function clone(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    const ok = await cloneShareToSession(card.shareId);
+    setBusy(false);
+    if (ok) onClose();
+  }
 
-/** 选择一张自己创建的分享，随消息一起发出 */
-function SharePickerModal({
-  open,
-  onClose,
-  onPick,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onPick: (item: ShareItem) => void;
-}): ReactElement {
-  const [items, setItems] = useState<ShareItem[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    void listMyShares().then((list) => {
-      setItems(list);
-      setLoading(false);
-    });
-  }, [open]);
+  const eventCount =
+    typeof detail?.manifest.eventCount === "number" ? detail.manifest.eventCount : null;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="附带分享卡片"
+      title="DSH 会话分享"
       closeLabel="关闭"
-      description="选择一张自己创建的分享，随消息一起发给频道成员。"
       footer={
-        <Button variant="ghost" onClick={onClose}>
-          关闭
-        </Button>
+        <>
+          <Button variant="ghost" disabled={busy} onClick={() => void download()}>
+            下载包体
+          </Button>
+          <Button variant="primary" disabled={busy || loading} onClick={() => void clone()}>
+            {busy ? "处理中…" : "克隆到本地的会话"}
+          </Button>
+        </>
       }
     >
-      {loading ? (
-        <div style={{ ...smallText, padding: "10px 2px" }}>加载分享…</div>
-      ) : items.length === 0 ? (
-        <div style={{ ...smallText, padding: "10px 2px" }}>
-          你还没有分享。可在频道工具栏「分享」里生成一张。
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={shareCardBadge}>DSH 会话</span>
+          <span style={{ fontSize: 14, fontWeight: 650 }}>{card.title}</span>
         </div>
-      ) : (
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            maxHeight: 340,
-            overflowY: "auto",
-          }}
-        >
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              style={{ ...discoverRow, cursor: "pointer", textAlign: "left" }}
-              onClick={() => {
-                onPick(item);
-                onClose();
-              }}
-            >
-              <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={discoverName}>{item.title}</span>
-                <span style={{ ...smallText, fontSize: 11 }}>
-                  {timeLabel(item.createdAt)} · {formatBytes(item.sizeBytes)}
-                </span>
-              </span>
-            </button>
-          ))}
+        {card.summary ? <div style={{ ...smallText, fontSize: 12.5 }}>{card.summary}</div> : null}
+        {loading ? (
+          <div style={{ ...smallText, fontSize: 12 }}>加载分享信息…</div>
+        ) : detail ? (
+          <div style={{ ...smallText, fontSize: 12, lineHeight: 1.9 }}>
+            <div>分享者：@{detail.author.handle}</div>
+            <div>时间：{timeLabel(detail.createdAt)}</div>
+            <div>大小：{formatBytes(detail.sizeBytes)}</div>
+            {eventCount !== null ? <div>会话事件数：{eventCount}</div> : null}
+            <div>下载次数：{detail.downloadCount}</div>
+          </div>
+        ) : null}
+        <div style={{ ...smallText, fontSize: 12 }}>
+          克隆会在你的 DSH 里新建一个会话并切过去，不影响原会话。
         </div>
-      )}
+      </div>
     </Modal>
   );
 }
@@ -4289,7 +3903,6 @@ function SharePickerModal({
 export function HomeScreen(): ReactElement {
   const talk = useTalkState();
   const [showAdd, setShowAdd] = useState(false);
-  const [showShares, setShowShares] = useState(false);
   const [showUsername, setShowUsername] = useState(false);
   const inCommunity = talk.view.communityId !== null;
 
@@ -4299,7 +3912,6 @@ export function HomeScreen(): ReactElement {
       <CommunitiesRail
         onAdd={() => setShowAdd(true)}
         onInbox={() => void openInbox()}
-        onShares={() => setShowShares(true)}
         onEditProfile={() => setShowUsername(true)}
       />
       {inCommunity ? (
@@ -4330,7 +3942,6 @@ export function HomeScreen(): ReactElement {
         </div>
       )}
       <CommunityAddModal open={showAdd} onClose={() => setShowAdd(false)} />
-      <ShareGalleryModal open={showShares} onClose={() => setShowShares(false)} />
       <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
       <InboxDialog />
     </div>

@@ -19,8 +19,8 @@ import type {
   UpdateCommunityRequest,
   UpdateMemberRoleRequest,
 } from "@dsh-talk/types/api";
-import type { Community, CommunityMember, MemberRole, User } from "@dsh-talk/types/entities";
-import { and, asc, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import type { CommunityMember, MemberRole, User } from "@dsh-talk/types/entities";
+import { and, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   type ChannelRow,
@@ -42,82 +42,38 @@ import {
   requireOwner,
 } from "../lib/access";
 import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
+import { listChannels, loadChannelRow } from "../lib/channels";
+import { mapCommunity } from "../lib/communities";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId, newInviteCode, newSlug } from "../lib/ids";
 import { createCommunityInvite, finalizePendingInvites } from "../lib/invites";
-import { type AppCtx, emptyOk } from "../lib/response";
+import {
+  type AppCtx,
+  emptyOk,
+  firstOr404,
+  jsonBody,
+  mustRow,
+  parseLimitOffset,
+} from "../lib/response";
 import { listThreadSummaries } from "../lib/threads";
 import { fetchUserById, fetchUsersByIds, findAuthUserByHandleOrEmail } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
 // ---------------- 小工具 ----------------
 
-async function jsonBody<T>(c: AppCtx): Promise<T> {
-  try {
-    return (await c.req.json()) as T;
-  } catch {
-    throw HttpApiError.badRequest("invalid JSON body");
-  }
-}
-
-/** 查询必须命中一行（写后回读场景），否则按内部错误抛出 */
-async function mustRow<T>(query: Promise<T[]>, what: string): Promise<T> {
-  const list = await query;
-  const first = list[0];
-  if (first === undefined) throw HttpApiError.internal(`${what} row not found`);
-  return first;
-}
-
-function parseLimitOffset(
-  query: Record<string, string | undefined>,
-  defaultLimit = 20,
-  maxLimit = 100,
-): { limit: number; offset: number } {
-  const rawLimit = Number.parseInt(query.limit ?? "", 10);
-  const rawOffset = Number.parseInt(query.offset ?? "", 10);
-  const limit =
-    Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, maxLimit) : defaultLimit;
-  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0;
-  return { limit, offset };
+/** 按 id 取社区；不存在 404 */
+function communityById(db: ReturnType<typeof dbOf>, communityId: string): Promise<CommunityRow> {
+  return firstOr404(
+    db.select().from(communities).where(eq(communities.id, communityId)).limit(1),
+    "community not found",
+  );
 }
 
 /** 验证社区名 */
 function validateCommunityName(name: string): void {
   const n = name.trim();
   if (n.length < 1 || n.length > 50) throw HttpApiError.badRequest("name 长度需在 1~50 之间");
-}
-
-function mapCommunity(row: CommunityRow): Community {
-  return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    description: row.description,
-    privacy: row.privacy,
-    ownerId: row.ownerId,
-    iconUrl: row.iconUrl,
-    bannerUrl: row.bannerUrl,
-    inviteCode: row.inviteCode,
-    memberCount: row.memberCount,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function mapChannel(row: ChannelRow): ChannelRow {
-  return row;
-}
-
-async function listChannels(
-  db: ReturnType<typeof dbOf>,
-  communityId: string,
-): Promise<ChannelRow[]> {
-  return db
-    .select()
-    .from(channels)
-    .where(eq(channels.communityId, communityId))
-    .orderBy(asc(channels.position));
 }
 
 // ================================================================
@@ -298,10 +254,7 @@ communitiesApi.get("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
+  const row = await communityById(db, communityId);
   const membership = await getMembership(db, communityId, userId);
   if (!membership && row.privacy === "private") {
     throw HttpApiError.forbidden("private community");
@@ -312,7 +265,7 @@ communitiesApi.get("/:id", async (c) => {
   const threadSummaries = membership ? await listThreadSummaries(db, { communityId }, userId) : [];
   return c.json({
     ...mapCommunity(row),
-    channels: chans.map(mapChannel),
+    channels: chans,
     threads: threadSummaries,
     myRole,
   });
@@ -323,10 +276,7 @@ communitiesApi.patch("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
+  await communityById(db, communityId);
   await requireModerator(db, communityId, userId);
 
   const body = await jsonBody<UpdateCommunityRequest>(c);
@@ -381,10 +331,7 @@ communitiesApi.post("/:id/join", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
+  const row = await communityById(db, communityId);
   if (row.privacy !== "public") {
     throw HttpApiError.forbidden("private community，请用邀请码加入（/join-by-code）");
   }
@@ -415,7 +362,7 @@ async function joinCommunity(
   await finalizePendingInvites(db, communityRow.id, userId, "accepted");
   const chans = await listChannels(db, communityRow.id);
   const role = (existing?.role ?? "member") as MemberRole;
-  return c.json({ ...mapCommunity(communityRow), channels: chans.map(mapChannel), myRole: role });
+  return c.json({ ...mapCommunity(communityRow), channels: chans, myRole: role });
 }
 
 // --- POST /:id/leave —— 退出（owner 需先转让） ---
@@ -448,10 +395,7 @@ communitiesApi.post("/:id/invites", async (c) => {
   const actorId = requireUserId(c);
   const actor = requireCurrentUser(c);
   const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
+  const row = await communityById(db, communityId);
   await requireModerator(db, communityId, actorId);
 
   const body = await jsonBody<CreateInviteRequest>(c);
@@ -490,10 +434,7 @@ communitiesApi.delete("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
-  const row = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!row) throw HttpApiError.notFound("community not found");
+  await communityById(db, communityId);
   await requireOwner(db, communityId, userId);
 
   const channelRows = await db
@@ -520,10 +461,7 @@ communitiesApi.post("/:id/channels", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
-  const communityRow = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await communityById(db, communityId);
   await requireModerator(db, communityId, userId);
 
   const body = await jsonBody<CreateChannelRequest>(c);
@@ -553,7 +491,7 @@ communitiesApi.post("/:id/channels", async (c) => {
     db.select().from(channels).where(eq(channels.id, id)).limit(1),
     "channel",
   );
-  return c.json(mapChannel(row), 201);
+  return c.json(row, 201);
 });
 
 // ================================================================
@@ -613,10 +551,7 @@ communitiesApi.patch("/:id/members/:userId/role", async (c) => {
   if (targetRole !== "owner" && targetRole !== "admin" && targetRole !== "member") {
     throw HttpApiError.badRequest("invalid role");
   }
-  const communityRow = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!communityRow) throw HttpApiError.notFound("community not found");
+  const communityRow = await communityById(db, communityId);
 
   const actor = await requireMember(db, communityId, actorId);
   const target = await requireMember(db, communityId, targetId);
@@ -714,10 +649,7 @@ communitiesApi.get("/:id/bans", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
-  const communityRow = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await communityById(db, communityId);
   await requireModerator(db, communityId, actorId);
 
   const rows = await db
@@ -748,10 +680,7 @@ communitiesApi.post("/:id/bans", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
-  const communityRow = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!communityRow) throw HttpApiError.notFound("community not found");
+  const communityRow = await communityById(db, communityId);
   await requireModerator(db, communityId, actorId);
 
   const body = await jsonBody<BanCommunityMemberRequest>(c);
@@ -820,10 +749,7 @@ communitiesApi.delete("/:id/bans/:userId", async (c) => {
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   const targetId = c.req.param("userId");
-  const communityRow = (
-    await db.select().from(communities).where(eq(communities.id, communityId)).limit(1)
-  )[0];
-  if (!communityRow) throw HttpApiError.notFound("community not found");
+  await communityById(db, communityId);
   await requireModerator(db, communityId, actorId);
   await db
     .delete(communityBans)
@@ -841,18 +767,12 @@ export const channelsRoutes = channelsApi;
 
 channelsApi.use("*", createBearerAuth("required"));
 
-async function loadChannelOr404(db: ReturnType<typeof dbOf>, channelId: string) {
-  const row = (await db.select().from(channels).where(eq(channels.id, channelId)).limit(1))[0];
-  if (!row) throw HttpApiError.notFound("channel not found");
-  return row;
-}
-
 // --- PATCH /:id ---
 channelsApi.patch("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const body = await jsonBody<UpdateChannelRequest>(c);
-  const row = await loadChannelOr404(db, c.req.param("id"));
+  const row = await loadChannelRow(db, c.req.param("id"));
   await requireModerator(db, row.communityId, userId);
   const patch: Partial<ChannelRow> = {};
   if (body.name !== undefined) {
@@ -873,14 +793,14 @@ channelsApi.patch("/:id", async (c) => {
     db.select().from(channels).where(eq(channels.id, row.id)).limit(1),
     "channel",
   );
-  return c.json(mapChannel(updated));
+  return c.json(updated);
 });
 
 // --- DELETE /:id ---
 channelsApi.delete("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
-  const row = await loadChannelOr404(db, c.req.param("id"));
+  const row = await loadChannelRow(db, c.req.param("id"));
   await requireModerator(db, row.communityId, userId);
   await db.delete(channels).where(eq(channels.id, row.id));
   return emptyOk(c);

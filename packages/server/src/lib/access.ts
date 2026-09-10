@@ -4,7 +4,6 @@
 // 身份本身由 Better Auth 会话（Bearer）保证，见 lib/auth.ts。
 // ================================================================
 
-import type { MemberRole } from "@dsh-talk/types/entities";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db";
 import { type CommunityMemberRow, communityBans, communityMembers } from "../db/schema";
@@ -80,9 +79,4 @@ export async function requireOwner(
   const member = await requireMember(db, communityId, userId);
   if (member.role !== "owner") throw HttpApiError.forbidden("community owner required");
   return member;
-}
-
-/** 判断一个角色是否为管理角色（owner/admin） */
-export function isModeratorRole(role: MemberRole): boolean {
-  return role === "owner" || role === "admin";
 }

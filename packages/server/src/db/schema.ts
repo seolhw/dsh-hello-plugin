@@ -199,13 +199,13 @@ export const messages = sqliteTable(
   ],
 );
 
-// ---------- 分享（channel-snapshot 频道快照 / agent-session DSH 会话） ----------
+// ---------- 分享（agent-session DSH 会话） ----------
 export const shares = sqliteTable(
   "shares",
   {
     id: text("id").primaryKey(),
     authorId: $id("author_id"), // 弱引用 better-auth user.id
-    kind: text("kind", { enum: ["channel-snapshot", "agent-session"] }).notNull(),
+    kind: text("kind", { enum: ["agent-session"] }).notNull(),
     title: text("title").notNull(),
     summary: text("summary"),
     coverUrl: text("cover_url"),

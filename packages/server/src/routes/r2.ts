@@ -2,7 +2,7 @@
 // /api/r2/objects —— 消息附件：Worker 直写 R2（非预签名 S3）
 //   PUT /objects     上传：body = 文件原始字节（Bearer 鉴权）
 //                      头部：X-File-Name（URL 编码）、Content-Type
-//                      限制：单文件 <= MAX_ATTACHMENT_BYTES
+//                      限制：单文件 <= MAX_R2_UPLOAD_BYTES
 //   GET /objects/:key  读取：公开但 key 不可枚举（att<21位随机>）
 //                      加 ?download=1 触发 Content-Disposition 下载
 // 对象 key 语义：att + newId()，单个路径段、无斜杠，可直接作 URL 参数。
@@ -11,7 +11,7 @@
 import type { UploadAttachmentResponse } from "@dsh-talk/types/api";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_NAME } from "../constants";
+import { MAX_ATTACHMENT_NAME, MAX_R2_UPLOAD_BYTES } from "../constants";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
@@ -35,7 +35,7 @@ function objectReadUrl(c: AppCtx, key: string): string {
 function oversizedResponse() {
   const err = {
     code: "PAYLOAD_TOO_LARGE",
-    message: `附件超过 ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MiB 上限`,
+    message: `附件超过 ${Math.round(MAX_R2_UPLOAD_BYTES / 1024 / 1024)} MiB 上限`,
   };
   return Response.json(err, { status: 413 });
 }
@@ -49,7 +49,7 @@ uploadApi.use("*", createBearerAuth("required"));
 
 uploadApi.put(
   "/objects",
-  bodyLimit({ maxSize: MAX_ATTACHMENT_BYTES, onError: oversizedResponse }),
+  bodyLimit({ maxSize: MAX_R2_UPLOAD_BYTES, onError: oversizedResponse }),
   async (c) => {
     const userId = requireUserId(c);
 

@@ -68,6 +68,76 @@ export const slimScrollbar: CSSProperties = {
 
 export const smallText: CSSProperties = { fontSize: 12, color: palette.muted };
 
+/** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件）：圆角外壳 + 内部激活键 */
+export const pillGroup: CSSProperties = {
+  display: "flex",
+  gap: 2,
+  padding: 3,
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+/** 分段选择组内的单个键（非激活态） */
+const pillKey: CSSProperties = {
+  flex: 1,
+  border: "none",
+  borderRadius: 8,
+  padding: "7px 12px",
+  fontSize: 13,
+  fontWeight: 450,
+  color: palette.muted,
+  background: "transparent",
+  cursor: "pointer",
+  transition: "background 120ms ease, color 120ms ease",
+};
+
+/** 分段选择键样式：active 时叠加激活态 */
+export function pillStyle(active: boolean): CSSProperties {
+  if (!active) return pillKey;
+  return {
+    ...pillKey,
+    fontWeight: 600,
+    color: palette.text,
+    background: palette.elevated,
+    boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+  };
+}
+
+/** 表单字段纵向容器 */
+export const fieldBlock: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+};
+
+/** 字段小标签 */
+export const fieldLabel: CSSProperties = {
+  fontSize: 12,
+  color: palette.muted,
+  fontWeight: 500,
+};
+
+/** 成员 / 封禁 / 在线成员等列表卡片行 */
+export const listCard: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "7px 10px",
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+/** 列表卡片的主标题行（单行省略） */
+export const listCardName: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
 /** 头像圆块：有 url 时显示图片，无 url / 加载失败时回退到 handle 首字符字母头像 */
 export function Avatar({
   label,

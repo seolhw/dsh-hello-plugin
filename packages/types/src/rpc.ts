@@ -63,20 +63,9 @@ export interface SettingsRpc {
   "talk.settings.watch"?(): AsyncIterable<TalkSettings>;
 }
 
-// ---------- 1.5 本地克隆（HTTP：host /api/talk/clone + /api/talk/clones） ----------
+// ---------- 1.5 本地克隆（HTTP：host /api/talk/clone） ----------
 
-/** GET /api/talk/clones —— 本地克隆目录与已克隆文件列表 */
-export interface HostClonesStatus {
-  dir: string;
-  items: Array<{
-    /** 文件名（相对 dir） */
-    file: string;
-    bytes: number;
-    modifiedAt: TimestampMs;
-  }>;
-}
-
-/** POST /api/talk/clone —— 让 host 下载分享包；DSH 会话包会直接还原成本地会话 */
+/** POST /api/talk/clone —— 让 host 下载分享包，DSH 会话包会直接还原成本地会话 */
 export interface HostCloneRequest {
   /** 分享包下载地址（share 的 downloadUrl，GET /api/r2/objects/…?download=1） */
   downloadUrl: string;
@@ -85,11 +74,9 @@ export interface HostCloneRequest {
 }
 
 export interface HostCloneResult {
-  /** 落盘绝对路径（会话包直接还原、不留文件，此时为空） */
-  file?: string;
   bytes: number;
   elapsedMs: number;
-  /** 会话包还原出的新会话 id；频道快照等非会话包为 undefined */
+  /** 会话包还原出的新会话 id */
   sessionId?: string;
 }
 
@@ -283,7 +270,3 @@ export interface TalkHostRpc extends SettingsRpc, CacheRpc {
   /** 上传后清临时文件 */
   "talk.share.cleanupTemp"(localPath: string): Promise<void>;
 }
-
-// ---------- client 侧「类型化调用」辅助：只取方法名与返回类型 ----------
-
-export type TalkHostMethodName = keyof TalkHostRpc;

@@ -16,10 +16,9 @@ import type {
   DiscoverCommunitiesResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
+  GetShareResponse,
   InboxItem,
   ListMembersResponse,
-  ListMySharesResponse,
-  ListSharesResponse,
   MessageAttachmentPut,
   SearchMessageResult,
   SignUpEmailRequest,
@@ -254,16 +253,6 @@ export function activateTalk(): void {
 
 export function deactivateTalk(): void {
   if (!state.open) return;
-  closeRealtime();
-  setState({ open: false });
-}
-
-export function openTalk(): void {
-  if (!state.open) setState({ open: true });
-  void refresh();
-}
-
-export function closeTalk(): void {
   closeRealtime();
   setState({ open: false });
 }
@@ -1593,65 +1582,15 @@ export function setDraft(text: string): void {
   patchView({ drafts: { ...state.view.drafts, [room]: text } });
 }
 
-/** 把当前频道最近消息打成会话快照，返回包体下载链接 */
-export async function snapshotChannel(input: {
-  title?: string;
-  summary?: string;
-}): Promise<string | null> {
+/** 取分享详情（含作者/大小/时间与下载地址）；失败返回 null */
+export async function getShareInfo(shareId: string): Promise<GetShareResponse | null> {
   const server = serverOf();
-  const channelId = state.view.channelId;
-  if (!server || !channelId) return null;
+  if (!server) return null;
   try {
-    const body: { title?: string; summary?: string } = {};
-    const rawTitle = input.title?.trim() ?? "";
-    const rawSummary = input.summary?.trim() ?? "";
-    if (rawTitle.length > 0) body.title = rawTitle;
-    if (rawSummary.length > 0) body.summary = rawSummary;
-    const res = await server.createShareSnapshot(channelId, body);
-    notify(`已生成分享「${res.share.title}」`);
-    return res.downloadUrl;
+    return await server.getShare(shareId);
   } catch (error) {
     notify(errorText(error));
     return null;
-  }
-}
-
-/** 让 host 把分享包流式下载到本地克隆目录；成功返回落盘路径 */
-export async function cloneToLocal(downloadUrl: string): Promise<string | null> {
-  try {
-    const res = await hostClone(downloadUrl);
-    const file = res.file ?? null;
-    if (file) notify(`已克隆到本地：${file}（${res.bytes} B）`);
-    return file;
-  } catch (error) {
-    notify(errorText(error));
-    return null;
-  }
-}
-
-/** 公开分享广场（最新公开的会话快照） */
-export async function listPublicShares(): Promise<ListSharesResponse["items"]> {
-  const server = serverOf();
-  if (!server) return [];
-  try {
-    const res = await server.listShares({ limit: 30 });
-    return res.items;
-  } catch (error) {
-    notify(errorText(error));
-    return [];
-  }
-}
-
-/** 我创建的分享 */
-export async function listMyShares(): Promise<ListMySharesResponse["items"]> {
-  const server = serverOf();
-  if (!server) return [];
-  try {
-    const res = await server.listMyShares({ limit: 50 });
-    return res.items;
-  } catch (error) {
-    notify(errorText(error));
-    return [];
   }
 }
 
@@ -1665,20 +1604,6 @@ export async function shareDownloadUrl(shareId: string): Promise<string | null> 
   } catch (error) {
     notify(errorText(error));
     return null;
-  }
-}
-
-/** 删除我创建的分享（含 R2 包体） */
-export async function removeShare(shareId: string): Promise<boolean> {
-  const server = serverOf();
-  if (!server) return false;
-  try {
-    await server.deleteShare(shareId);
-    notify("分享已删除");
-    return true;
-  } catch (error) {
-    notify(errorText(error));
-    return false;
   }
 }
 

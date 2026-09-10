@@ -6,6 +6,7 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 import type { ID, User } from "@dsh-talk/types/entities";
+import { HttpApiError } from "./errors";
 
 interface AuthUserRow {
   id: string;
@@ -85,6 +86,13 @@ export async function fetchUserById(db: D1Database, userId: string): Promise<Use
     .bind(userId)
     .first<AuthUserRow>();
   return row ? toEntityUser(row) : null;
+}
+
+/** 查一个认证用户，不存在按内部错误抛出（写路径回读作者资料） */
+export async function requireUserById(db: D1Database, userId: string): Promise<User> {
+  const user = await fetchUserById(db, userId);
+  if (!user) throw HttpApiError.internal("user not found");
+  return user;
 }
 
 /** 批量查（用于成员/作者列表补全）；不保证顺序与入参一致 */

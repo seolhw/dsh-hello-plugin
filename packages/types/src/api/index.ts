@@ -95,13 +95,9 @@ export * from "./threads";
  *   POST   /api/channels/:id/read-state        UpdateReadStateRequest   → UpdateReadStateResponse
  *   GET    /api/channels/:id/online            —                        → GetChannelOnlineResponse
  *
- *  分享（来源两类：channel-snapshot 频道快照 / agent-session DSH 会话）
- *   GET    /api/shares/discover              query:ListSharesQuery      → ListSharesResponse
- *   GET    /api/shares/mine                  query:ListMySharesQuery    → ListMySharesResponse
- *   POST   /api/shares/snapshot              CreateShareRequest         → CreateShareResponse
+ *  分享（agent-session DSH 会话）
  *   POST   /api/shares/agent-session         CreateAgentSessionShareRequest → CreateAgentSessionShareResponse
  *   GET    /api/shares/:id                   —                          → GetShareResponse
- *   DELETE /api/shares/:id                   —                          → DeleteShareResponse
  *   （分享卡片随消息发出时带 CreateMessageRequest.shareId）
  *
  *  附件（R2，Worker 直写）

@@ -104,7 +104,7 @@ export interface MessageAttachment {
   height?: number | null;
 }
 
-export type MessageShareCardKind = "channel-snapshot" | "agent-session";
+export type MessageShareCardKind = "agent-session";
 
 /** 消息内嵌的分享卡片引用（只占元数据；实际 payload 在 Share 表） */
 export interface MessageShareCardRef {
@@ -198,9 +198,9 @@ export interface ThreadReadState {
   lastReadAt: TimestampMs | null;
 }
 
-// ====================== 分享（频道快照 / DSH 会话） ======================
+// ====================== 分享（DSH 会话） ======================
 
-export type ShareKind = "channel-snapshot" | "agent-session";
+export type ShareKind = "agent-session";
 
 export interface Share {
   id: ID;
@@ -209,13 +209,13 @@ export interface Share {
   title: string;
   summary: string | null;
   coverUrl: string | null;
-  /** R2 对象 key（channel-snapshot = 频道消息 JSON；agent-session = DSH 会话包 JSON） */
+  /** R2 对象 key（DSH 会话包 JSON） */
   r2Key: string;
   /** 字节数，用于校验下载完整性 */
   sizeBytes: number;
   /** SHA-256 hex（可选，存着方便校验） */
   sha256: string | null;
-  /** 包体 manifest 快照字段（channel-snapshot 存社区/频道/消息数；agent-session 存 cwd/事件数等） */
+  /** 包体 manifest 快照字段（cwd / 事件数等） */
   manifest: Record<string, unknown>;
   /** 是否公开（未登录也能下载？一般 false，只有注册用户能看社区的才能下载） */
   public: boolean;

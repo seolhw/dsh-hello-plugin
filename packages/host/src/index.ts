@@ -5,11 +5,9 @@
 //     语义与 @dsh-talk/types/rpc 的 SettingsRpc 一致（get / set / watch）
 // ================================================================
 
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type { WebRoute } from "@deepseek-ai/dsh-host-webserver";
 import type { SettingsScope } from "@deepseek-ai/dsh-settings";
@@ -68,6 +66,9 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+const errorOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 // 允许客户端 patch 的字段（白名单 + 粗校验，防止把 settings 文档写坏）
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -108,14 +109,6 @@ function effectiveSettings(scope: SettingsScope<TalkSettings>): TalkSettings {
   return serverUrl ? { ...current, serverUrl } : current;
 }
 
-// ---------- 本地克隆：分享包流式下载直写本地 ----------
-
-function clonesDir(): string {
-  const dir = join(homedir(), ".dsh-talk", "clones");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
 // ---------- 本地 DSH 会话：服务取用 + 打包 / 还原 ----------
 
 /** DSH 会话持久化服务的最小结构面（不引入 @deepseek-ai/dsh-session 类型包依赖） */
@@ -152,7 +145,7 @@ function serviceOf<T>(ctx: Context, key: string): T | undefined {
   return ctx.get(key) as T | undefined;
 }
 
-/** 解析下载到的字节：是本机会话包则返回，否则 null（频道快照等走落盘分支） */
+/** 解析下载到的字节：是本机会话包则返回，否则 null */
 function parseAgentSessionPackage(bytes: Buffer): AgentSessionPackage | null {
   let parsed: unknown;
   try {
@@ -204,22 +197,26 @@ function buildSessionPackage(meta: SessionHeaderLike, events: unknown[]): AgentS
   };
 }
 
+/** 取会话持久化服务；不可用时就地回 503 并返回 null */
+function persistenceOr503(ctx: Context, res: ServerResponse): SessionPersistenceLike | null {
+  const persistence = serviceOf<SessionPersistenceLike>(ctx, "sessionPersistence");
+  if (!persistence) {
+    sendJson(res, 503, { code: "INTERNAL", message: "会话持久化服务不可用" });
+    return null;
+  }
+  return persistence;
+}
+
 // ---------- /api/talk/sessions + /api/talk/session-package 路由 ----------
 
 function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[] {
-  const errorOf = (error: unknown): string =>
-    error instanceof Error ? error.message : String(error);
-
   return [
     {
       kind: "exact",
       path: "/api/talk/sessions",
       handler: async (_req, res) => {
-        const persistence = serviceOf<SessionPersistenceLike>(ctx, "sessionPersistence");
-        if (!persistence) {
-          sendJson(res, 503, { code: "INTERNAL", message: "会话持久化服务不可用" });
-          return;
-        }
+        const persistence = persistenceOr503(ctx, res);
+        if (!persistence) return;
         try {
           const headers = await persistence.list();
           const sessions = [...headers]
@@ -243,11 +240,8 @@ function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRou
       kind: "exact",
       path: "/api/talk/session-package",
       handler: async (req, res) => {
-        const persistence = serviceOf<SessionPersistenceLike>(ctx, "sessionPersistence");
-        if (!persistence) {
-          sendJson(res, 503, { code: "INTERNAL", message: "会话持久化服务不可用" });
-          return;
-        }
+        const persistence = persistenceOr503(ctx, res);
+        if (!persistence) return;
         const sessionId = new URL(req.url ?? "", "http://localhost").searchParams
           .get("sessionId")
           ?.trim();
@@ -280,7 +274,7 @@ function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRou
   ];
 }
 
-// ---------- /api/talk/config + /api/talk/clone(s) 路由 ----------
+// ---------- /api/talk/config + /api/talk/clone 路由 ----------
 
 function talkRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[] {
   return [
@@ -302,33 +296,11 @@ function talkRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[
             await scope.update(patch);
             sendJson(res, 200, effectiveSettings(scope));
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sendJson(res, 500, { code: "INTERNAL", message });
+            sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
           }
           return;
         }
         sendJson(res, 405, { code: "BAD_REQUEST", message: "method not allowed" });
-      },
-    },
-    {
-      kind: "exact",
-      path: "/api/talk/clones",
-      handler: async (_req, res) => {
-        try {
-          const dir = clonesDir();
-          const items = readdirSync(dir)
-            .filter((file) => file.endsWith(".json"))
-            .map((file) => {
-              const stat = statSync(join(dir, file));
-              return { file, bytes: stat.size, modifiedAt: stat.mtimeMs };
-            })
-            .sort((a, b) => b.modifiedAt - a.modifiedAt)
-            .slice(0, 50);
-          sendJson(res, 200, { dir, items });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          sendJson(res, 500, { code: "INTERNAL", message });
-        }
       },
     },
     {
@@ -366,38 +338,32 @@ function talkRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRoute[
           }
           const bytes = Buffer.from(await response.arrayBuffer());
 
-          // ① DSH 会话包：用官方 sessions 服务按 seed 还原成本地会话
+          // 仅处理 DSH 会话包：用官方 sessions 服务按 seed 还原成本地会话
           const pack = parseAgentSessionPackage(bytes);
-          if (pack) {
-            const store = serviceOf<SessionStoreLike>(ctx, "sessions");
-            if (!store) {
-              sendJson(res, 503, { code: "INTERNAL", message: "会话服务不可用" });
-              return;
-            }
-            const session = store.create(undefined, {
-              seed: pack.events,
-              meta: { cwd: pickWorkspaceCwd(wantedCwd, pack.header.cwd) },
+          if (!pack) {
+            sendJson(res, 422, {
+              code: "MANIFEST_INVALID",
+              message: "仅支持 DSH 会话包，无法还原该分享",
             });
-            await store.flush(session);
-            sendJson(res, 200, {
-              bytes: bytes.byteLength,
-              elapsedMs: Date.now() - started,
-              sessionId: session.id,
-            } satisfies HostCloneResult);
             return;
           }
-
-          // ② 其它分享包（频道快照等）：保持原有「下载落盘」行为
-          const target = join(clonesDir(), `snapshot-${Date.now()}.json`);
-          await writeFile(target, bytes);
+          const store = serviceOf<SessionStoreLike>(ctx, "sessions");
+          if (!store) {
+            sendJson(res, 503, { code: "INTERNAL", message: "会话服务不可用" });
+            return;
+          }
+          const session = store.create(undefined, {
+            seed: pack.events,
+            meta: { cwd: pickWorkspaceCwd(wantedCwd, pack.header.cwd) },
+          });
+          await store.flush(session);
           sendJson(res, 200, {
-            file: target,
             bytes: bytes.byteLength,
             elapsedMs: Date.now() - started,
+            sessionId: session.id,
           } satisfies HostCloneResult);
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          sendJson(res, 500, { code: "INTERNAL", message });
+          sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
         }
       },
     },

@@ -174,7 +174,6 @@ export function InboxDialog(): ReactElement | null {
               ...smallText,
               padding: "20px 4px",
               textAlign: "center",
-              color: palette.muted,
             }}
           >
             暂时没有站内信。

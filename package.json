@@ -66,5 +66,8 @@
     "@types/node": "^22.0.0",
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "es-toolkit": "^1.52.0"
   }
 }

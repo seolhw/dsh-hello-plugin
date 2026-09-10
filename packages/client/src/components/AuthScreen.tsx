@@ -17,7 +17,7 @@ import {
   useTalkState,
   verifyOtp,
 } from "../store";
-import { palette } from "./styles";
+import { fieldLabel, palette, pillGroup } from "./styles";
 
 type Mode = "login" | "register";
 
@@ -50,8 +50,6 @@ const brandMark: CSSProperties = {
   flex: "0 0 auto",
 };
 
-const fieldLabel: CSSProperties = { fontSize: 12, color: palette.muted, fontWeight: 500 };
-
 const fieldHint: CSSProperties = { fontSize: 11, color: palette.caption };
 
 const errorBanner: CSSProperties = {
@@ -83,6 +81,65 @@ const linkButtonDisabled: CSSProperties = {
   cursor: "default",
 };
 
+/** 把异常转成可展示的文案 */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** 卡片顶部品牌标识 + 标题 / 副标题 */
+function BrandHeader({ title, subtitle }: { title: string; subtitle: string }): ReactElement {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={brandMark}>T</span>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>{title}</div>
+        <div style={{ ...fieldHint, fontSize: 12.5 }}>{subtitle}</div>
+      </div>
+    </div>
+  );
+}
+
+/** 错误提示条（左侧警告图标 + 文案） */
+function ErrorBanner({ message }: { message: string }): ReactElement {
+  return (
+    <div style={errorBanner}>
+      <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
+        <IconWarningOutline16 size={14} />
+      </span>
+      <span style={{ flex: 1, minWidth: 0 }}>{message}</span>
+    </div>
+  );
+}
+
+/** 显示 / 隐藏密码切换按钮 */
+function PasswordToggle({
+  shown,
+  onToggle,
+}: {
+  shown: boolean;
+  onToggle: () => void;
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      style={{
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        color: palette.accent,
+        fontSize: 11,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+      }}
+    >
+      {shown ? "隐藏" : "显示"}
+    </button>
+  );
+}
+
 /** 分段控制：登录 / 注册，以及登录态下的 邮箱 / 用户名 */
 function Segmented<T extends string>({
   value,
@@ -94,16 +151,7 @@ function Segmented<T extends string>({
   onChange: (value: T) => void;
 }): ReactElement {
   return (
-    <div
-      style={{
-        display: "flex",
-        padding: 3,
-        gap: 2,
-        borderRadius: 10,
-        background: palette.inputBg,
-        border: `1px solid ${palette.border}`,
-      }}
-    >
+    <div style={pillGroup}>
       {options.map((option) => {
         const active = value === option.key;
         return (
@@ -183,7 +231,7 @@ function ForgotPasswordCard({
       setOtp("");
       setNewPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -197,43 +245,18 @@ function ForgotPasswordCard({
       await resetPasswordWithOtp({ email, otp, password: newPassword });
       setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
-  const passwordToggle = (
-    <button
-      type="button"
-      onClick={() => setShowPassword((prev) => !prev)}
-      style={{
-        border: "none",
-        background: "transparent",
-        padding: 0,
-        color: palette.accent,
-        fontSize: 11,
-        cursor: "pointer",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      {showPassword ? "隐藏" : "显示"}
-    </button>
-  );
-
   return (
     <div style={card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={brandMark}>T</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>重置密码</div>
-          <div style={{ ...fieldHint, fontSize: 12.5 }}>
-            {stage === "done" ? "密码已更新" : "通过邮箱验证码找回账号"}
-          </div>
-        </div>
-      </div>
+      <BrandHeader
+        title="重置密码"
+        subtitle={stage === "done" ? "密码已更新" : "通过邮箱验证码找回账号"}
+      />
 
       {stage === "done" ? (
         <>
@@ -285,7 +308,16 @@ function ForgotPasswordCard({
                   required
                 />
               </Field>
-              <Field label="新密码" htmlFor="talk-reset-password" right={passwordToggle}>
+              <Field
+                label="新密码"
+                htmlFor="talk-reset-password"
+                right={
+                  <PasswordToggle
+                    shown={showPassword}
+                    onToggle={() => setShowPassword((prev) => !prev)}
+                  />
+                }
+              >
                 <Input
                   id="talk-reset-password"
                   value={newPassword}
@@ -299,14 +331,7 @@ function ForgotPasswordCard({
             </>
           )}
 
-          {error ? (
-            <div style={errorBanner}>
-              <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
-                <IconWarningOutline16 size={14} />
-              </span>
-              <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
-            </div>
-          ) : null}
+          {error ? <ErrorBanner message={error} /> : null}
 
           <Button
             type="submit"
@@ -391,7 +416,7 @@ export function AuthScreen(): ReactElement {
         await register({ ...extra, email: account.trim(), password });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -404,7 +429,7 @@ export function AuthScreen(): ReactElement {
     try {
       await verifyOtp(otp);
     } catch (err) {
-      setOtpError(err instanceof Error ? err.message : String(err));
+      setOtpError(errorMessage(err));
     } finally {
       setOtpBusy(false);
     }
@@ -416,7 +441,7 @@ export function AuthScreen(): ReactElement {
     try {
       await resendVerificationOtp();
     } catch (err) {
-      setOtpError(err instanceof Error ? err.message : String(err));
+      setOtpError(errorMessage(err));
     } finally {
       setOtpBusy(false);
     }
@@ -424,37 +449,11 @@ export function AuthScreen(): ReactElement {
 
   const allowSubmit = account.trim().length > 0 && password.length >= 8;
 
-  const passwordToggle = (
-    <button
-      type="button"
-      onClick={() => setShowPassword((prev) => !prev)}
-      style={{
-        border: "none",
-        background: "transparent",
-        padding: 0,
-        color: palette.accent,
-        fontSize: 11,
-        cursor: "pointer",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-      }}
-    >
-      {showPassword ? "隐藏" : "显示"}
-    </button>
-  );
-
   if (pendingEmail) {
     const otpReady = otp.trim().length === 6;
     return (
       <div style={card}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={brandMark}>T</span>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>验证邮箱</div>
-            <div style={{ ...fieldHint, fontSize: 12.5 }}>输入验证码完成注册</div>
-          </div>
-        </div>
+        <BrandHeader title="验证邮箱" subtitle="输入验证码完成注册" />
 
         <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.5 }}>
           验证码已发送至 <strong style={{ color: palette.text }}>{pendingEmail}</strong>，
@@ -478,14 +477,7 @@ export function AuthScreen(): ReactElement {
             />
           </Field>
 
-          {otpError ? (
-            <div style={errorBanner}>
-              <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
-                <IconWarningOutline16 size={14} />
-              </span>
-              <span style={{ flex: 1, minWidth: 0 }}>{otpError}</span>
-            </div>
-          ) : null}
+          {otpError ? <ErrorBanner message={otpError} /> : null}
 
           <Button
             type="submit"
@@ -526,13 +518,7 @@ export function AuthScreen(): ReactElement {
 
   return (
     <div style={card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={brandMark}>T</span>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>dsh-talk 社区</div>
-          <div style={{ ...fieldHint, fontSize: 12.5 }}>登录后参与社区讨论</div>
-        </div>
-      </div>
+      <BrandHeader title="dsh-talk 社区" subtitle="登录后参与社区讨论" />
 
       <Segmented<Mode>
         value={mode}
@@ -570,7 +556,16 @@ export function AuthScreen(): ReactElement {
           </Field>
         ) : null}
 
-        <Field label="密码" htmlFor="talk-password" right={passwordToggle}>
+        <Field
+          label="密码"
+          htmlFor="talk-password"
+          right={
+            <PasswordToggle
+              shown={showPassword}
+              onToggle={() => setShowPassword((prev) => !prev)}
+            />
+          }
+        >
           <Input
             id="talk-password"
             value={password}
@@ -597,14 +592,7 @@ export function AuthScreen(): ReactElement {
           </div>
         ) : null}
 
-        {error ? (
-          <div style={errorBanner}>
-            <span style={{ display: "inline-flex", flex: "0 0 auto", marginTop: 1 }}>
-              <IconWarningOutline16 size={14} />
-            </span>
-            <span style={{ flex: 1, minWidth: 0 }}>{error}</span>
-          </div>
-        ) : null}
+        {error ? <ErrorBanner message={error} /> : null}
 
         {talk.busy && !busy ? (
           <div style={{ ...fieldHint, color: palette.secondary }}>正在连接 Server…</div>

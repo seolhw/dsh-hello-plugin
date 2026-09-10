@@ -100,7 +100,3 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
     </div>
   );
 }
-
-export function HelloWorld(): ReactElement {
-  return <div>Hello World!</div>;
-}

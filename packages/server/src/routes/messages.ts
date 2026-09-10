@@ -7,7 +7,7 @@
 //   - 改消息：仅消息作者本人，或该社区 owner/admin
 //   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）或该社区 owner/admin；
 //     超时后作者只能编辑，不能撤回
-//   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片尚未纳入 MVP
+//   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片引用 /api/shares 登记的分享
 //   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
 // ================================================================
 
@@ -43,45 +43,15 @@ import {
 } from "../db/schema";
 import { requireMember, requireModerator } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
+import { loadChannelRow } from "../lib/channels";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { broadcastToChannel } from "../lib/realtime";
-import { type AppCtx, emptyOk } from "../lib/response";
+import { emptyOk, jsonBody, mustRow, parseJson } from "../lib/response";
 import { canEnterThread } from "../lib/threads";
-import { fetchUserById, fetchUsersByIds, resolveUserIdsByHandles } from "../lib/users";
+import { fetchUsersByIds, requireUserById, resolveUserIdsByHandles } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
-
-async function jsonBody<T>(c: AppCtx): Promise<T> {
-  try {
-    return (await c.req.json()) as T;
-  } catch {
-    throw HttpApiError.badRequest("invalid JSON body");
-  }
-}
-
-/** 查询必须命中一行（写后回读场景），否则按内部错误抛出 */
-async function mustRow<T>(query: Promise<T[]>, what: string): Promise<T> {
-  const list = await query;
-  const first = list[0];
-  if (first === undefined) throw HttpApiError.internal(`${what} row not found`);
-  return first;
-}
-
-function parseJson<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-async function loadChannelRow(db: ReturnType<typeof dbOf>, channelId: string): Promise<ChannelRow> {
-  const row = (await db.select().from(channels).where(eq(channels.id, channelId)).limit(1))[0];
-  if (!row) throw HttpApiError.notFound("channel not found");
-  return row;
-}
 
 /** 频道消息行 -> Message 实体（JSON 字段解码） */
 function rowToMessage(row: MessageRow): Message {
@@ -101,12 +71,6 @@ function rowToMessage(row: MessageRow): Message {
   };
 }
 
-async function authorOf(d1: D1Database, userId: string): Promise<User> {
-  const user = await fetchUserById(d1, userId);
-  if (!user) throw HttpApiError.internal("user not found");
-  return user;
-}
-
 /** 组装一条对外消息（带 author，可能带 replyTo 及其中层 author） */
 async function messageItem(
   db: ReturnType<typeof dbOf>,
@@ -114,19 +78,18 @@ async function messageItem(
   row: MessageRow,
 ): Promise<Message & { author: User; replyTo?: (Message & { author: User }) | null }> {
   const base = rowToMessage(row);
-  const author = await authorOf(d1, row.authorId);
+  const author = await requireUserById(d1, row.authorId);
   let replyTo: (Message & { author: User }) | null = null;
   if (row.replyToId) {
     const parent = (
       await db.select().from(messages).where(eq(messages.id, row.replyToId)).limit(1)
     )[0];
     if (parent) {
-      replyTo = { ...rowToMessage(parent), author: await authorOf(d1, parent.authorId) };
+      replyTo = { ...rowToMessage(parent), author: await requireUserById(d1, parent.authorId) };
     }
   }
   return { ...base, author, replyTo };
 }
-
 // ================================================================
 // 频道维度：/api/channels/:id/messages + read-state
 // ================================================================
@@ -308,11 +271,11 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     }
   }
 
-  // shareCard：由 /api/shares 创建后引用（MVP 中 shares 尚未开通，有值即报错）
+  // shareCard：引用一条已登记的分享（来自 /api/shares），卡片随消息一同展示/删除
   let shareCard: Message["shareCard"] = null;
   if (body.shareId) {
     const share = (await db.select().from(shares).where(eq(shares.id, body.shareId)).limit(1))[0];
-    if (!share) throw HttpApiError.badRequest("shareId 无效（分享尚未开通或不存在）");
+    if (!share) throw HttpApiError.badRequest("shareId 无效（分享不存在）");
     shareCard = {
       shareId: share.id,
       kind: share.kind,
@@ -555,6 +518,17 @@ messagesApi.delete("/:id", async (c) => {
   const row = await loadMessageRow(db, c.req.param("id"));
   await assertCanRetractMessage(db, row, userId);
   await db.delete(messages).where(eq(messages.id, row.id));
+  // 卡片即消息：撤回带分享卡片的消息时，一并清掉它引用的分享（先删 R2 包体再删登记行）
+  const shareCard = parseJson<Message["shareCard"]>(row.shareCard);
+  if (shareCard?.shareId) {
+    const share = (
+      await db.select().from(shares).where(eq(shares.id, shareCard.shareId)).limit(1)
+    )[0];
+    if (share) {
+      await c.env.R2.delete(share.r2Key).catch(() => undefined);
+      await db.delete(shares).where(eq(shares.id, share.id));
+    }
+  }
   // 讨论组消息被删除时回退计数
   if (row.threadId) {
     await db

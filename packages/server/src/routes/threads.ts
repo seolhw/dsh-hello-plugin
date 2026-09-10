@@ -30,7 +30,6 @@ import { Hono } from "hono";
 import { THREAD_NAME_MAX, THREAD_STARTER_SNIPPET_MAX } from "../constants";
 import {
   type ChannelRow,
-  channels,
   communityMembers,
   messages,
   type NewThread,
@@ -41,11 +40,12 @@ import {
 } from "../db/schema";
 import { getMembership, requireMember, requireModerator } from "../lib/access";
 import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
+import { loadChannelRow } from "../lib/channels";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { hashPasscode, PASSCODE_MAX, PASSCODE_MIN, verifyPasscode } from "../lib/passcode";
-import { type AppCtx, emptyOk } from "../lib/response";
+import { emptyOk, jsonBody } from "../lib/response";
 import {
   canEnterThread,
   getThreadSummary,
@@ -55,19 +55,9 @@ import {
 import { fetchUserById } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
-function jsonBody<T>(c: AppCtx): Promise<T> {
-  return c.req.json() as Promise<T>;
-}
-
 async function loadThreadRow(db: ReturnType<typeof dbOf>, threadId: string): Promise<ThreadRow> {
   const row = (await db.select().from(threads).where(eq(threads.id, threadId)).limit(1))[0];
   if (!row) throw HttpApiError.notFound("thread not found");
-  return row;
-}
-
-async function loadChannelRow(db: ReturnType<typeof dbOf>, channelId: string): Promise<ChannelRow> {
-  const row = (await db.select().from(channels).where(eq(channels.id, channelId)).limit(1))[0];
-  if (!row) throw HttpApiError.notFound("channel not found");
   return row;
 }
 

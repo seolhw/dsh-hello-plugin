@@ -4,11 +4,15 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
 const BASE = "http://127.0.0.1:8787";
+// 认证请求必须带 Origin（缺了 better-auth 直接拒 MISSING_OR_NULL_ORIGIN），
+// 且必须「已信任 + 与 Worker 不同源」：同源时 wrangler dev 会按 wrangler.jsonc 的
+// routes 把它改写成自定义域 Origin，该域不在本地白名单里 → 403 INVALID_ORIGIN。
+const ORIGIN = "http://127.0.0.1:3000";
 const WS = BASE.replace(/^http/, "ws");
 const ts = Date.now();
 
 async function call(method, path, body, token) {
-  const headers = { origin: BASE };
+  const headers = { origin: ORIGIN };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";
   const res = await fetch(`${BASE}${path}`, {
@@ -31,7 +35,7 @@ async function uploadAttachment(token, name, bytes, contentType) {
   const res = await fetch(`${BASE}/api/r2/objects`, {
     method: "PUT",
     headers: {
-      origin: BASE,
+      origin: ORIGIN,
       authorization: `Bearer ${token}`,
       "x-file-name": encodeURIComponent(name),
       "content-type": contentType,
@@ -209,28 +213,47 @@ const getRes = await fetch(sentAtt.url);
 assert(getRes.status === 200, "附件 GET 200");
 assert((getRes.headers.get("content-type") ?? "").startsWith("image/png"), "附件 GET content-type 正确");
 
-// Shares：快照当前频道 → 查看/下载包体/删除
-const snap = await call("POST", "/api/shares/snapshot", { channelId }, tokenA);
-assert(
-  snap.status === 201 &&
-    snap.json?.share?.kind === "channel-snapshot" &&
-    snap.json.share.r2Key.startsWith("shr") &&
-    typeof snap.json.downloadUrl === "string",
-  "A 生成频道快照",
+// Shares：登记一条 DSH 会话分享（先直传包体到 R2）→ 查看/随卡片消息级联删除
+const packBody = Buffer.from(JSON.stringify({ kind: "agent-session", events: [] }));
+const packUp = await uploadAttachment(tokenA, "session.json", packBody, "application/json");
+assert(packUp.status === 201 && packUp.json?.r2Key?.startsWith("att"), "A 直传会话包到 R2");
+const share = await call(
+  "POST",
+  "/api/shares/agent-session",
+  {
+    r2Key: packUp.json.r2Key,
+    title: "会话分享冒烟",
+    sizeBytes: packBody.byteLength,
+    manifest: {},
+    communityId: comm.json.id,
+  },
+  tokenA,
 );
-const shareId = snap.json.share.id;
-const dlRes = await fetch(snap.json.downloadUrl);
-assert(dlRes.status === 200, "快照包 GET 200");
-const snapBody = await dlRes.json();
-assert(snapBody.channel?.name === "全员" && Array.isArray(snapBody.messages), "快照包含频道信息与消息列表");
-const mine = await call("GET", "/api/shares/mine", undefined, tokenA);
-assert(mine.status === 200 && mine.json.items.some((s) => s.id === shareId), "mine 列表含快照");
+assert(
+  share.status === 201 &&
+    share.json?.share?.kind === "agent-session" &&
+    share.json.share.r2Key === packUp.json.r2Key &&
+    typeof share.json.downloadUrl === "string",
+  "A 登记会话分享",
+);
+const shareId = share.json.share.id;
 const view = await call("GET", `/api/shares/${shareId}`, undefined, tokenB);
 assert(view.status === 200 && typeof view.json.downloadUrl === "string", "社区成员可查看分享");
-const del = await call("DELETE", `/api/shares/${shareId}`, undefined, tokenA);
-assert(del.status === 200, "作者可删除分享");
+// 删除分享 = 撤回卡片消息：发一条带分享卡片的消息，撤回它，分享随之消失
+const cardMsg = await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "分享卡片消息", shareId },
+  tokenA,
+);
+assert(
+  cardMsg.status === 201 && cardMsg.json?.shareCard?.shareId === shareId,
+  "A 发送带分享卡片的消息",
+);
+const delCard = await call("DELETE", `/api/messages/${cardMsg.json.id}`, undefined, tokenA);
+assert(delCard.status === 200, "A 撤回卡片消息");
 const gone = await call("GET", `/api/shares/${shareId}`, undefined, tokenB);
-assert(gone.status === 404, "删除后 404");
+assert(gone.status === 404, "分享随消息一并删除（404）");
 
 // 非成员直连同一频道 DO 被拒（握手前 403）
 const outsider = await signup("chout");

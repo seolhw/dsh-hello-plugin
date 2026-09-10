@@ -11,7 +11,7 @@ import { invites, type NotificationRow, notifications } from "../db/schema";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
-import { emptyOk } from "../lib/response";
+import { emptyOk, parseJson, parseLimitOffset } from "../lib/response";
 import type { Env, HonoAppVariables } from "../types";
 
 const notificationsApi = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
@@ -20,34 +20,13 @@ export const notificationsRoutes = notificationsApi;
 
 notificationsApi.use("*", createBearerAuth("required"));
 
-function parseJson<T>(raw: string | null): T | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
-}
-
-function parseLimitOffset(query: Record<string, string | undefined>): {
-  limit: number;
-  offset: number;
-} {
-  const rawLimit = Number.parseInt(query.limit ?? "", 10);
-  const rawOffset = Number.parseInt(query.offset ?? "", 10);
-  return {
-    limit: Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50) : 20,
-    offset: Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : 0,
-  };
-}
-
 // --- GET / —— 我的站内信（新→旧）+ 未读数 ---
 notificationsApi.get("/", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const q = c.req.query() as ListNotificationsQuery;
   const onlyUnread = q.onlyUnread === true;
-  const { limit, offset } = parseLimitOffset(c.req.query());
+  const { limit, offset } = parseLimitOffset(c.req.query(), 20, 50);
 
   const scopeConds = [eq(notifications.userId, userId)];
   if (onlyUnread) scopeConds.push(eq(notifications.isRead, false));

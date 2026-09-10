@@ -6,11 +6,13 @@
 
 import type { AcceptInviteResponse } from "@dsh-talk/types/api";
 import type { MemberRole } from "@dsh-talk/types/entities";
-import { asc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { channels, communities, communityMembers, type InviteRow, invites } from "../db/schema";
+import { communities, communityMembers, type InviteRow, invites } from "../db/schema";
 import { getMembership, requireNotBanned } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
+import { listChannels } from "../lib/channels";
+import { mapCommunity } from "../lib/communities";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { finalizePendingInvites } from "../lib/invites";
@@ -27,14 +29,6 @@ async function loadInviteOr404(db: ReturnType<typeof dbOf>, inviteId: string): P
   const row = (await db.select().from(invites).where(eq(invites.id, inviteId)).limit(1))[0];
   if (!row) throw new HttpApiError(404, "INVITE_INVALID", "邀请不存在或已被撤销");
   return row;
-}
-
-async function listChannels(db: ReturnType<typeof dbOf>, communityId: string) {
-  return db
-    .select()
-    .from(channels)
-    .where(eq(channels.communityId, communityId))
-    .orderBy(asc(channels.position));
 }
 
 // --- POST /:id/accept —— 接受邀请并加入社区 ---
@@ -74,18 +68,8 @@ invitesApi.post("/:id/accept", async (c) => {
   const chans = await listChannels(db, communityRow.id);
   const role = (existing?.role ?? "member") as MemberRole;
   const body: AcceptInviteResponse = {
-    id: communityRow.id,
-    name: communityRow.name,
-    slug: communityRow.slug,
-    description: communityRow.description,
-    privacy: communityRow.privacy,
-    ownerId: communityRow.ownerId,
-    iconUrl: communityRow.iconUrl,
-    bannerUrl: communityRow.bannerUrl,
-    inviteCode: communityRow.inviteCode,
+    ...mapCommunity(communityRow),
     memberCount: communityRow.memberCount + (existing ? 0 : 1),
-    createdAt: communityRow.createdAt,
-    updatedAt: communityRow.updatedAt,
     channels: chans,
     myRole: role,
   };

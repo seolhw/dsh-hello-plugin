@@ -37,6 +37,7 @@ import {
 } from "@dsh-talk/types/entities";
 import type { AgentSessionPackage, LocalSessionSummary, TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
+import { sortBy, uniq } from "es-toolkit/array";
 import { useEffect, useReducer } from "react";
 import {
   hostClone,
@@ -553,14 +554,10 @@ export async function refreshCommunities(): Promise<void> {
 
 /** 打开收件箱并拉取我的站内信 */
 export async function openInbox(): Promise<void> {
-  if (!state.open || !serverOf()) return;
+  const server = serverOf();
+  if (!state.open || !server) return;
   setState({ inboxOpen: true, inboxLoading: true });
   try {
-    const server = serverOf();
-    if (!server) {
-      setState({ inboxOpen: false, inboxLoading: false });
-      return;
-    }
     const res = await server.listNotifications({ limit: 50 });
     setState({ notifications: res.items, inboxUnread: res.unread, inboxLoading: false });
   } catch (error) {
@@ -1311,8 +1308,7 @@ function upsertMessage(item: MessageItem, appended: boolean): void {
   } else {
     next = [item, ...list];
   }
-  next.sort((a, b) => a.createdAt - b.createdAt);
-  patchView({ messages: next });
+  patchView({ messages: sortBy(next, ["createdAt"]) });
 }
 
 function removeMessage(messageId: string): void {
@@ -1479,7 +1475,7 @@ function buildMessageBody(
     mentionHandles?: string[];
   } = { content };
   if (attachments.length > 0) body.attachments = attachments;
-  const handles = [...new Set(mentionHandlesOf(content))];
+  const handles = uniq(mentionHandlesOf(content));
   if (handles.length > 0) body.mentionHandles = handles;
   return body;
 }

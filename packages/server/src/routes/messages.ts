@@ -29,6 +29,8 @@ import {
 } from "@dsh-talk/types/entities";
 import type { EvtMessageDeleted, EvtMessageNew, EvtMessageUpdated } from "@dsh-talk/types/ws";
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, sql } from "drizzle-orm";
+import { compact, uniq } from "es-toolkit/array";
+import { clamp } from "es-toolkit/math";
 import { Hono } from "hono";
 import { MAX_ATTACHMENT_NAME, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from "../constants";
 import {
@@ -136,7 +138,7 @@ channelMessagesApi.get("/:id/messages", async (c) => {
   const d1 = c.env.DB;
   const q = c.req.query() as ListMessagesQuery;
   const rawLimit = c.req.query("limit") ?? "";
-  const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 50, 1), 100);
+  const limit = clamp(Number.parseInt(rawLimit, 10) || 50, 1, 100);
   const direction: "desc" | "asc" = q.direction === "asc" ? "asc" : "desc";
   const cursor = q.cursor && q.cursor.trim().length > 0 ? Number.parseInt(q.cursor, 10) : null;
 
@@ -246,12 +248,8 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     if (unresolved.length > 0) {
       throw HttpApiError.badRequest(`无法识别的 @handle：${unresolved.join(", ")}`);
     }
-    const resolvedIds: string[] = [];
-    for (const handle of body.mentionHandles) {
-      const id = resolved.get(handle.trim());
-      if (id) resolvedIds.push(id);
-    }
-    mentions.push(...new Set(resolvedIds));
+    const resolvedIds = compact(body.mentionHandles.map((h) => resolved.get(h.trim())));
+    mentions.push(...uniq(resolvedIds));
   }
 
   // replyTo：必须与被回复消息在同一个房间（主频道对主频道 / 同一讨论组内）
@@ -557,7 +555,7 @@ messagesApi.get("/search", async (c) => {
   await requireMember(db, communityId, userId);
 
   const rawLimit = c.req.query("limit") ?? "";
-  const limit = Math.min(Math.max(Number.parseInt(rawLimit, 10) || 20, 1), 50);
+  const limit = clamp(Number.parseInt(rawLimit, 10) || 20, 1, 50);
   const rawCursor = c.req.query("cursor") ?? "";
   const cursor = rawCursor.trim().length > 0 ? Number.parseInt(rawCursor, 10) : null;
 
@@ -572,7 +570,7 @@ messagesApi.get("/search", async (c) => {
 
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const users = await fetchUsersByIds(c.env.DB, [...new Set(page.map((r) => r.authorId))]);
+  const users = await fetchUsersByIds(c.env.DB, uniq(page.map((r) => r.authorId)));
   const userById = new Map(users.map((u) => [u.id, u]));
   const channelRows = page.length
     ? await db
@@ -588,9 +586,7 @@ messagesApi.get("/search", async (c) => {
   const channelById = new Map(channelRows.map((ch) => [ch.id, ch]));
 
   // 命中在讨论组里的消息：带上讨论组摘要便于客户端跳到对应房间
-  const threadIds = [
-    ...new Set(page.map((r) => r.threadId).filter((x): x is string => x !== null)),
-  ];
+  const threadIds = uniq(compact(page.map((r) => r.threadId)));
   const threadRows = threadIds.length
     ? await db.select().from(threads).where(inArray(threads.id, threadIds))
     : [];

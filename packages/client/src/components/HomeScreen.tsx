@@ -41,6 +41,7 @@ import type {
   User,
 } from "@dsh-talk/types/entities";
 import type { LocalSessionSummary } from "@dsh-talk/types/rpc";
+import { orderBy, partition } from "es-toolkit/array";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -1105,10 +1106,9 @@ function ForumTopicBoard({
   if (channel?.kind !== "forum") return null;
   const canPost = (talk.view.community?.myRole ?? null) !== null;
   const all = (talk.view.community?.threads ?? []).filter((t) => t.channelId === channelId);
-  const byRecent = (a: ThreadSummary, b: ThreadSummary): number =>
-    b.lastActivityAt - a.lastActivityAt;
-  const active = all.filter((t) => t.status === "active").sort(byRecent);
-  const archived = all.filter((t) => t.status === "archived").sort(byRecent);
+  const [activeRaw, archivedRaw] = partition(all, (t) => t.status === "active");
+  const active = orderBy(activeRaw, [(t) => t.lastActivityAt], ["desc"]);
+  const archived = orderBy(archivedRaw, [(t) => t.lastActivityAt], ["desc"]);
 
   if (active.length === 0 && archived.length === 0) {
     return (

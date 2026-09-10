@@ -20,6 +20,8 @@ import type {
   LocalSessionSummary,
   TalkSettings,
 } from "@dsh-talk/types/rpc";
+import { orderBy } from "es-toolkit/array";
+import { isPlainObject } from "es-toolkit/predicate";
 
 export const name = "dsh-talk";
 
@@ -70,9 +72,6 @@ const errorOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 // 允许客户端 patch 的字段（白名单 + 粗校验，防止把 settings 文档写坏）
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
 function sanitizePatch(raw: unknown): Partial<TalkSettings> {
   if (!isPlainObject(raw)) return {};
   const patch: Partial<TalkSettings> = {};
@@ -219,8 +218,7 @@ function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRou
         if (!persistence) return;
         try {
           const headers = await persistence.list();
-          const sessions = [...headers]
-            .sort((a, b) => b.createdAt - a.createdAt)
+          const sessions = orderBy(headers, [(h) => h.createdAt], ["desc"])
             .slice(0, 200)
             .map(
               (h): LocalSessionSummary => ({

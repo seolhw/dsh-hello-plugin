@@ -85,6 +85,8 @@ import type {
   UploadAttachmentResponse,
   VerifyEmailOTPRequest,
 } from "@dsh-talk/types/api";
+import { pickBy } from "es-toolkit/object";
+import { isPlainObject } from "es-toolkit/predicate";
 
 export class ServerApiError extends Error {
   constructor(
@@ -145,14 +147,9 @@ export interface AuthCallResult {
   token: string | null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function toQuery(params: Record<string, string | number | undefined>): string {
-  const entries = Object.entries(params).filter(
-    (entry): entry is [string, string | number] =>
-      entry[1] !== undefined && entry[1] !== null && String(entry[1]).length > 0,
+  const entries = Object.entries(
+    pickBy(params, (v) => v !== undefined && v !== null && String(v).length > 0),
   );
   if (entries.length === 0) return "";
   return `?${entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`;
@@ -229,8 +226,9 @@ export class ServerClient {
     });
     const data = await parseResponse<unknown>(res);
     const tokenFromHeader = res.headers.get("set-auth-token");
-    const tokenFromBody = isRecord(data) && typeof data.token === "string" ? data.token : null;
-    const user = isRecord(data) && isRecord(data.user) ? (data.user as unknown as AuthUser) : null;
+    const tokenFromBody = isPlainObject(data) && typeof data.token === "string" ? data.token : null;
+    const user =
+      isPlainObject(data) && isPlainObject(data.user) ? (data.user as unknown as AuthUser) : null;
     return { user, token: tokenFromHeader ?? tokenFromBody };
   }
 

@@ -6,6 +6,7 @@
 import type { InboxItem, ListNotificationsQuery } from "@dsh-talk/types/api";
 import type { NotificationData } from "@dsh-talk/types/entities";
 import { and, count, desc, eq, inArray } from "drizzle-orm";
+import { compact, uniq } from "es-toolkit/array";
 import { Hono } from "hono";
 import { invites, type NotificationRow, notifications } from "../db/schema";
 import { createBearerAuth, requireUserId } from "../lib/auth";
@@ -49,16 +50,17 @@ notificationsApi.get("/", async (c) => {
     .offset(offset);
 
   // 批量补 invite 实时状态（invite 行随社区被删级联消失 -> null）
-  const inviteIds = rows
-    .filter((r) => r.kind === "invite")
-    .map((r) => parseJson<NotificationData>(r.data)?.inviteId)
-    .filter((id): id is string => typeof id === "string" && id.length > 0);
+  const inviteIds = compact(
+    rows
+      .filter((r) => r.kind === "invite")
+      .map((r) => parseJson<NotificationData>(r.data)?.inviteId),
+  );
   const inviteStatusById = new Map<string, "pending" | "accepted" | "declined">();
   if (inviteIds.length > 0) {
     const found = await db
       .select({ id: invites.id, status: invites.status })
       .from(invites)
-      .where(inArray(invites.id, [...new Set(inviteIds)]));
+      .where(inArray(invites.id, uniq(inviteIds)));
     for (const inv of found) inviteStatusById.set(inv.id, inv.status);
   }
 

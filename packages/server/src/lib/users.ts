@@ -6,6 +6,7 @@
 
 import type { D1Database } from "@cloudflare/workers-types";
 import type { ID, User } from "@dsh-talk/types/entities";
+import { uniq } from "es-toolkit/array";
 import { HttpApiError } from "./errors";
 
 interface AuthUserRow {
@@ -97,7 +98,7 @@ export async function requireUserById(db: D1Database, userId: string): Promise<U
 
 /** 批量查（用于成员/作者列表补全）；不保证顺序与入参一致 */
 export async function fetchUsersByIds(db: D1Database, ids: string[]): Promise<User[]> {
-  const unique = [...new Set(ids)].filter(Boolean);
+  const unique = uniq(ids.filter(Boolean));
   const users: User[] = [];
   for (const id of unique) {
     const user = await fetchUserById(db, id);

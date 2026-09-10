@@ -9,6 +9,7 @@
 import type { ThreadSummary } from "@dsh-talk/types/api";
 import type { Thread } from "@dsh-talk/types/entities";
 import { and, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import { uniq } from "es-toolkit/array";
 import { THREAD_AUTO_ARCHIVE_MS } from "../constants";
 import {
   communityMembers,
@@ -99,7 +100,7 @@ async function enrichWithUnread(
     .where(and(eq(threadMembers.userId, userId), inArray(threadMembers.threadId, ids)));
   const memberSet = new Set(memberRows.map((r) => r.threadId));
 
-  const communityIds = [...new Set(rows.map((r) => r.communityId))];
+  const communityIds = uniq(rows.map((r) => r.communityId));
   const modRows = await db
     .select({ communityId: communityMembers.communityId, role: communityMembers.role })
     .from(communityMembers)

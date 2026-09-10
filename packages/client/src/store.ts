@@ -90,7 +90,6 @@ export interface ViewState {
   replyingTo: MessageItem | null;
   /** 跳转高亮目标：消息加载后滚动定位并短暂高亮，随后清除 */
   focusMessageId: string | null;
-  drafts: Record<string, string>;
   /** 当前社区成员缓存（@ 提及自动补全用；进入社区时拉一次） */
   members: MemberLite[];
   membersLoading: boolean;
@@ -134,7 +133,6 @@ const INITIAL_VIEW: ViewState = {
   onlineCount: 0,
   replyingTo: null,
   focusMessageId: null,
-  drafts: {},
   members: [],
   membersLoading: false,
 };
@@ -250,11 +248,13 @@ export function activateTalk(): void {
     setState({ open: true });
     void refresh();
   }
+  bindPresenceListeners();
 }
 
 export function deactivateTalk(): void {
   if (!state.open) return;
   closeRealtime();
+  unbindPresenceListeners();
   setState({ open: false });
 }
 
@@ -1039,6 +1039,41 @@ export async function updateChannelById(
   }
 }
 
+/**
+ * 频道排序（owner/admin）：与相邻频道交换位置。
+ * 频道列表按 position 升序渲染，但历史数据 position 可能重复，
+ * 因此按当前顺序整体重排为 0..n-1，只 PATCH 真正变化的频道。
+ */
+export async function moveChannel(channelId: string, direction: "up" | "down"): Promise<boolean> {
+  const server = serverOf();
+  const community = state.view.community;
+  if (!server || !community) return false;
+  const ordered = [...community.channels];
+  const index = ordered.findIndex((c) => c.id === channelId);
+  const swapIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || swapIndex < 0 || swapIndex >= ordered.length) return false;
+  const current = ordered[index];
+  const target = ordered[swapIndex];
+  if (!current || !target) return false;
+  const reordered = ordered.map((c) => {
+    if (c.id === current.id) return target;
+    if (c.id === target.id) return current;
+    return c;
+  });
+  try {
+    for (const [position, channel] of reordered.entries()) {
+      if (channel.position !== position) {
+        await server.updateChannel(channel.id, { position });
+      }
+    }
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
 /** 删除频道（owner/admin）；若正打开该频道则关闭它 */
 export async function deleteChannelById(channelId: string): Promise<boolean> {
   const server = serverOf();
@@ -1232,6 +1267,39 @@ function closeRealtime(): void {
   if (state.view.live) patchView({ live: false });
 }
 
+// ---------------- 在线状态（presence） ----------------
+
+/** 窗口不可见 / 失焦视为「离开」，否则「在线」；离线由断连自动处理 */
+function desiredPresence(): "online" | "away" {
+  if (typeof document === "undefined") return "online";
+  if (document.visibilityState === "hidden" || !document.hasFocus()) return "away";
+  return "online";
+}
+
+/** 上报当前在线状态到当前房间（未连接时静默丢弃） */
+function pushPresence(): void {
+  socket?.send({ type: "presence.set", payload: { kind: desiredPresence() } });
+}
+
+let presenceBound = false;
+function onPresenceSignal(): void {
+  pushPresence();
+}
+function bindPresenceListeners(): void {
+  if (presenceBound) return;
+  presenceBound = true;
+  document.addEventListener("visibilitychange", onPresenceSignal);
+  window.addEventListener("focus", onPresenceSignal);
+  window.addEventListener("blur", onPresenceSignal);
+}
+function unbindPresenceListeners(): void {
+  if (!presenceBound) return;
+  presenceBound = false;
+  document.removeEventListener("visibilitychange", onPresenceSignal);
+  window.removeEventListener("focus", onPresenceSignal);
+  window.removeEventListener("blur", onPresenceSignal);
+}
+
 function wsUrl(roomId: string): string {
   const settings = state.settings;
   const base = (settings?.serverUrl ?? "http://127.0.0.1:8787").replace(/^http/, "ws");
@@ -1275,6 +1343,7 @@ function handleServerFrame(frame: ServerFrame): void {
   if (frame.type === "evt.hello") {
     patchView({ live: true, onlineCount: frame.payload.onlineCount });
     socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
+    pushPresence();
     return;
   }
   if (roomId === null) return;
@@ -1569,13 +1638,6 @@ export async function deleteMessage(messageId: string): Promise<void> {
     notify(errorText(error));
     throw error;
   }
-}
-
-/** 设置当前房间（主频道/讨论组各自独立）的输入草稿（内存） */
-export function setDraft(text: string): void {
-  const room = state.view.threadId ?? state.view.channelId;
-  if (!room) return;
-  patchView({ drafts: { ...state.view.drafts, [room]: text } });
 }
 
 /** 取分享详情（含作者/大小/时间与下载地址）；失败返回 null */

@@ -89,7 +89,6 @@ import {
   searchCommunityMessages,
   selectChannel,
   sendMessage,
-  setDraft,
   setThreadArchived,
   shareDownloadUrl,
   shareLocalSession,
@@ -1618,6 +1617,7 @@ function ChatPane(): ReactElement | null {
   const [onlineMembers, setOnlineMembers] = useState<ChannelOnlineMember[]>([]);
   // 输入框 / @ 提及自动补全 / 消息搜索
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const [composerText, setComposerText] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [mentionActive, setMentionActive] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
@@ -1635,7 +1635,6 @@ function ChatPane(): ReactElement | null {
 
   const threadId = talk.view.threadId;
   const roomKey = threadId ?? channelId;
-  const draft = roomKey ? (talk.view.drafts[roomKey] ?? "") : "";
   const currentThread =
     channelId && threadId
       ? (talk.view.community?.threads.find((t) => t.id === threadId) ?? null)
@@ -1708,9 +1707,10 @@ function ChatPane(): ReactElement | null {
     if (grew && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [roomKey, messageCount]);
 
-  // 切房间：收起 @ 补全弹层与回复提示
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 需要在切换房间时重置弹层
+  // 切房间：清空输入框，收起 @ 补全弹层与回复提示
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 需要在切换房间时重置弹层与输入
   useEffect(() => {
+    setComposerText("");
     setMentionActive(false);
     setMentionQuery("");
     setMentionIndex(0);
@@ -1768,14 +1768,14 @@ function ChatPane(): ReactElement | null {
 
   /** 把选中的成员插入正文，替换掉当前 @token */
   function acceptMention(member: MemberLite): void {
-    const text = draft;
+    const text = composerText;
     const caret = composerRef.current?.selectionStart ?? text.length;
     const start =
       mentionStartRef.current >= 0
         ? mentionStartRef.current
         : Math.max(0, caret - mentionQuery.length - 1);
     const next = `${text.slice(0, start)}@${member.handle} ${text.slice(caret)}`;
-    setDraft(next);
+    setComposerText(next);
     setMentionActive(false);
     setMentionQuery("");
     mentionStartRef.current = -1;
@@ -1790,7 +1790,7 @@ function ChatPane(): ReactElement | null {
   }
 
   function handleComposerChange(value: string): void {
-    setDraft(value);
+    setComposerText(value);
     const caret = composerRef.current?.selectionStart ?? value.length;
     const hit = mentionAtCaret(value, caret);
     if (hit) {
@@ -1830,11 +1830,11 @@ function ChatPane(): ReactElement | null {
   }
 
   async function submit(): Promise<void> {
-    const text = draft;
+    const text = composerText;
     if (text.trim().length === 0 && pendingFiles.length === 0) return;
     const ok = await sendMessage(text, pendingFiles);
     if (ok) {
-      setDraft("");
+      setComposerText("");
       setPendingFiles([]);
       setMentionActive(false);
       mentionStartRef.current = -1;
@@ -2286,7 +2286,7 @@ function ChatPane(): ReactElement | null {
                     ) : null}
                     <textarea
                       ref={composerRef}
-                      value={draft}
+                      value={composerText}
                       onChange={(e) => handleComposerChange(e.target.value)}
                       onKeyDown={handleComposerKeyDown}
                       placeholder={
@@ -2302,7 +2302,8 @@ function ChatPane(): ReactElement | null {
                     size="md"
                     icon={<IconSendOutline16 />}
                     disabled={
-                      talk.view.sending || (draft.trim().length === 0 && pendingFiles.length === 0)
+                      talk.view.sending ||
+                      (composerText.trim().length === 0 && pendingFiles.length === 0)
                     }
                     onClick={() => void submit()}
                     aria-label="发送"

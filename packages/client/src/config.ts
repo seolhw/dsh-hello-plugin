@@ -1,6 +1,6 @@
 // ================================================================
 // client → host 本地接口（同源 fetch）
-//   /api/talk/config           配置读写（语义 = SettingsRpc 的 get/set）
+//   /api/talk/config           配置读写（语义 = TalkSettings 的 GET 读 / POST patch）
 //   /api/talk/sessions         本机可分享的 DSH 会话列表
 //   /api/talk/session-package  打包一个会话（返回包体原始文本）
 //   /api/talk/clone            下载分享包；会话包会直接还原成本地会话

@@ -5,13 +5,13 @@
  *  - entities.ts        D1 表对应实体
  *  - api/*              Server REST API 请求/响应 + 路由契约注释
  *  - ws.ts              Server WebSocket 帧协议
- *  - rpc.ts             DSH 插件 client ↔ host 的 RPC 接口
+ *  - rpc.ts             DSH 插件 client ↔ host 的本地 HTTP 接口契约
  *
  * 使用方式：
  *   import type { User, Community } from "@dsh-talk/types/entities";
  *   import type { CreateCommunityRequest } from "@dsh-talk/types/api";
  *   import type { ClientFrame, ServerFrame } from "@dsh-talk/types/ws";
- *   import type { TalkHostRpc } from "@dsh-talk/types/rpc";
+ *   import type { TalkSettings } from "@dsh-talk/types/rpc";
  */
 
 export * as Api from "./api";

@@ -4,7 +4,7 @@
 
 本仓库是 dsh-talk 插件及其 Cloudflare 后端的 pnpm TypeScript 工作区。
 
-- `packages/types/src/`：共享实体、REST 接口契约、WebSocket 协议和 Host RPC 类型；通过各层的 `index.ts` 导出公共类型。
+- `packages/types/src/`：共享实体、REST 接口契约、WebSocket 协议和 Host 本地接口类型；通过各层的 `index.ts` 导出公共类型。
 - `packages/host/src/`：注册 Host 侧配置与本地接口。
 - `packages/client/src/`：React 浏览器界面、状态管理、连接层和组件样式。
 - `packages/server/src/`：Hono/Cloudflare Worker 后端；路由位于 `routes/`，通用服务位于 `lib/`，Drizzle Schema 位于 `db/schema.ts`。

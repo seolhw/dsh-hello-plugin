@@ -6,6 +6,7 @@
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   Button,
+  IconChevronLeftOutline14,
   IconCopyOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
@@ -32,6 +33,7 @@ import {
   leaveCommunity,
   listBannedUsers,
   listMembers,
+  moveChannel,
   notify,
   setMemberRole,
   unbanUser,
@@ -726,18 +728,58 @@ function ChannelDialog({
   );
 }
 
-/** 每行的频道管理菜单（改名 / 主题 / 删除；owner/admin 可见） */
+/** 频道上移 / 下移图标（复用左箭头旋转，避免额外图标依赖） */
+const moveUpIcon: CSSProperties = { display: "inline-flex", transform: "rotate(90deg)" };
+const moveDownIcon: CSSProperties = { display: "inline-flex", transform: "rotate(-90deg)" };
+
+/** 每行的频道管理菜单（排序 / 改名 / 主题 / 删除；owner/admin 可见） */
 export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement | null {
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   if (!isModerator(talk.view.community?.myRole)) return null;
 
+  const channels = talk.view.community?.channels ?? [];
+  const index = channels.findIndex((c) => c.id === channel.id);
+  const canMoveUp = index > 0;
+  const canMoveDown = index >= 0 && index < channels.length - 1;
+
   async function remove(): Promise<void> {
     if (!window.confirm(`删除频道 #${channel.name}？其中的消息将一并删除。`)) return;
     const ok = await deleteChannelById(channel.id);
     if (ok) setMenuOpen(false);
   }
+
+  const items: MenuEntry[] = [
+    ...(canMoveUp
+      ? [
+          {
+            id: "up",
+            label: "上移",
+            icon: (
+              <span style={moveUpIcon}>
+                <IconChevronLeftOutline14 />
+              </span>
+            ),
+          },
+        ]
+      : []),
+    ...(canMoveDown
+      ? [
+          {
+            id: "down",
+            label: "下移",
+            icon: (
+              <span style={moveDownIcon}>
+                <IconChevronLeftOutline14 />
+              </span>
+            ),
+          },
+        ]
+      : []),
+    { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
+    { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
+  ];
 
   return (
     <>
@@ -748,6 +790,8 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
           setMenuOpen(false);
           if (id === "edit") setEditing(true);
           if (id === "delete") void remove();
+          if (id === "up") void moveChannel(channel.id, "up");
+          if (id === "down") void moveChannel(channel.id, "down");
         }}
         anchor={
           <Button
@@ -761,10 +805,7 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
             aria-label={`管理 #${channel.name}`}
           />
         }
-        items={[
-          { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
-          { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
-        ]}
+        items={items}
         portal
       />
       {editing ? <ChannelDialog open channel={channel} onClose={() => setEditing(false)} /> : null}

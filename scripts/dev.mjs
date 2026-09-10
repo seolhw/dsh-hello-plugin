@@ -91,7 +91,7 @@ function killTree(pid) {
 }
 
 function bootServer(first) {
-  const prefix = first ? "npx --yes @deepseek-ai/dsh" : "npx --no-install @deepseek-ai/dsh";
+  const prefix = "npx --yes @deepseek-ai/dsh";
   const noOpen = first ? "" : " --no-open";
   const cmd = `${prefix} web --patch ./cordis.yml${noOpen}`;
   if (!first) {
@@ -143,7 +143,7 @@ async function checkServerHealth() {
   } else {
     console.error(
       `\n[dsh-talk] ❌ 无法连通后端 Server（${SERVER_URL}）。社区页将报 net::ERR_CONNECTION_REFUSED。\n` +
-        "[dsh-talk] 请另开一个终端运行：pnpm dev:server\n",
+      "[dsh-talk] 请另开一个终端运行：pnpm dev:server\n",
     );
   }
 }

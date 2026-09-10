@@ -81,7 +81,7 @@ export class ChannelActor extends DurableObject<Env> {
     if (url.pathname.endsWith("/connect")) {
       return this.handleConnect(request);
     }
-    return new Response("channel actor ok", { status: 200 });
+    return Response.json({ ok: true, message: "channel actor ok" });
   }
 
   private async handleConnect(req: Request): Promise<Response> {
@@ -114,7 +114,10 @@ export class ChannelActor extends DurableObject<Env> {
         .bind(this.channelId, userId)
         .first());
     if (!allowed) {
-      return new Response("forbidden: not a member of this room's community", { status: 403 });
+      return Response.json(
+        { code: "FORBIDDEN", message: "not a member of this room's community" },
+        { status: 403 },
+      );
     }
 
     const pair = new WebSocketPair();

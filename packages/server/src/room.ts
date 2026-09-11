@@ -168,7 +168,7 @@ export class ChannelActor extends DurableObject<Env> {
         },
         serverTime: Date.now(),
         heartbeatIntervalSec: 30,
-        onlineCount: this.sessions.size,
+        onlineCount: this.onlineUserCount(),
       },
     } as unknown as ServerFrame);
 
@@ -259,6 +259,17 @@ export class ChannelActor extends DurableObject<Env> {
   }
 
   // ---------------- 连接/会话维护 ----------------
+
+  /**
+   * 在线人数：按用户去重。
+   * 同一用户可能短时存在多条连接（重连竞态、休眠恢复、多标签），
+   * 直接数连接会把同一个人算成两人；口径与 online() 的成员名单保持一致。
+   */
+  private onlineUserCount(): number {
+    const users = new Set<string>();
+    for (const session of this.sessions.values()) users.add(session.userId);
+    return users.size;
+  }
 
   private async unregister(ws: WebSocket): Promise<void> {
     const session = this.sessions.get(ws);

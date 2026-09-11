@@ -16,14 +16,24 @@
 import type { ClientContext } from "@deepseek-ai/dsh-client-runtime/client";
 import "./augment";
 import { TalkPage } from "./components";
-import { bindSessionOpener, refresh } from "./store";
+import { bindSessionOpener, bindSessionTree, refresh, type ShareSessionRow } from "./store";
 
 export const inject: string[] = ["slots", "sessions"];
 
-/** 客户端 sessions 服务里本插件用到的最小面（open/refresh 不在公开 ISessions 上） */
+/** 宿主会话树快照里本插件用到的字段（SessionListState 的子集） */
+interface SessionsListSnapshot {
+  ids: string[];
+  byId: Record<
+    string,
+    { id: string; displayTitle?: string; cwd?: string; blank?: boolean; origin?: string }
+  >;
+}
+
+/** 客户端 sessions 服务里本插件用到的最小面（open/refresh/list 不在公开 ISessions 上） */
 interface SessionsFace {
   open(id: string): void;
   refresh(): Promise<void>;
+  list: { getSnapshot(): SessionsListSnapshot };
 }
 
 export function apply(ctx: ClientContext): void {
@@ -42,6 +52,24 @@ export function apply(ctx: ClientContext): void {
     } catch {
       return false;
     }
+  });
+
+  // 分享会话选择器：用左侧会话栏同源的会话树（工作区 → 会话，带标题）
+  bindSessionTree(() => {
+    if (!sessions) return [];
+    const snapshot = sessions.list.getSnapshot();
+    const rows: ShareSessionRow[] = [];
+    for (const id of snapshot.ids) {
+      const row = snapshot.byId[id];
+      // 空白会话（还没有任何事件）与子代理会话不参与分享
+      if (!row || row.blank || row.origin === "subagent") continue;
+      rows.push({
+        id: row.id,
+        title: row.displayTitle ?? row.id,
+        ...(row.cwd ? { cwd: row.cwd } : {}),
+      });
+    }
+    return rows;
   });
 
   try {

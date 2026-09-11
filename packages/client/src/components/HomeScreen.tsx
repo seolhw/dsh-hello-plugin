@@ -40,7 +40,6 @@ import type {
   ThreadVisibility,
   User,
 } from "@dsh-talk/types/entities";
-import type { LocalSessionSummary } from "@dsh-talk/types/rpc";
 import { orderBy, partition } from "es-toolkit/array";
 import type {
   ChangeEvent,
@@ -70,7 +69,7 @@ import {
   joinCommunityByCode,
   joinPublicCommunity,
   joinThreadWithPasscode,
-  listLocalSessions,
+  listShareableSessions,
   listThreadCandidates,
   listThreadMembers,
   loadOlderMessages,
@@ -92,6 +91,7 @@ import {
   setThreadArchived,
   shareDownloadUrl,
   shareLocalSession,
+  type ShareSessionRow,
   updateMessage,
   updateThread,
   updateUserAvatar,
@@ -590,15 +590,22 @@ function CommunitiesRail({
           >
             <IconEditOutline16 />
           </button>
-          <button
-            type="button"
-            style={railAction}
-            onClick={() => void logout()}
-            aria-label="退出登录"
-            title="退出登录"
-          >
-            <IconRightUpOutline16 />
-          </button>
+          <HoverCard
+            openDelayMs={150}
+            content={
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 168 }}>
+                <span style={{ fontSize: 12.5, color: palette.text }}>确定要退出登录吗？</span>
+                <Button size="sm" variant="primary" onClick={() => void logout()}>
+                  退出登录
+                </Button>
+              </div>
+            }
+            anchor={
+              <button type="button" style={railAction} aria-label="退出登录" title="退出登录">
+                <IconRightUpOutline16 />
+              </button>
+            }
+          />
         </div>
       ) : null}
     </div>
@@ -607,7 +614,11 @@ function CommunitiesRail({
 
 // ---------------- 频道列表 ----------------
 
-function ChannelList(): ReactElement | null {
+function ChannelList({
+  onCreateThread,
+}: {
+  onCreateThread: (channelId: string) => void;
+}): ReactElement | null {
   const talk = useTalkState();
   const community = talk.view.community;
   const activeChannel = talk.view.channelId;
@@ -696,7 +707,7 @@ function ChannelList(): ReactElement | null {
                     {ch.name}
                   </span>
                 </button>
-                <ChannelRowMenu channel={ch} />
+                <ChannelRowMenu channel={ch} onCreateThread={onCreateThread} />
               </div>
               <ChannelThreadsOf channelId={ch.id} />
             </Fragment>
@@ -1502,7 +1513,14 @@ function MessageRow({
 
 // ---------------- 聊天面板 ----------------
 
-function ChatPane(): ReactElement | null {
+function ChatPane({
+  onCreateThread,
+}: {
+  onCreateThread: (
+    channelId: string,
+    seed: { name: string; starterMessageId?: string } | null,
+  ) => void;
+}): ReactElement | null {
   const talk = useTalkState();
   const channelId = talk.view.channelId;
   const community = talk.view.community;
@@ -1527,11 +1545,6 @@ function ChatPane(): ReactElement | null {
   const [mentionQuery, setMentionQuery] = useState("");
   const [mentionIndex, setMentionIndex] = useState(0);
   const mentionStartRef = useRef(-1);
-  // 创建讨论组弹窗（空白 / 从消息发起）
-  const [threadCreateOpen, setThreadCreateOpen] = useState(false);
-  const [threadSeed, setThreadSeed] = useState<{ name: string; starterMessageId?: string } | null>(
-    null,
-  );
   // 私密讨论组成员管理弹窗
   const [threadMembersOpen, setThreadMembersOpen] = useState(false);
   // 讨论组设置弹窗（改名 / 可见性 / 密码）
@@ -1551,9 +1564,9 @@ function ChatPane(): ReactElement | null {
   /** 与 @mentionQuery 匹配的候选成员（不含自己，最多 8 个） */
   const mentionCandidates: MemberLite[] = mentionActive
     ? talk.view.members
-        .filter((m) => m.userId !== talk.me?.id)
-        .filter((m) => m.handle.toLowerCase().includes(mentionQuery.toLowerCase()))
-        .slice(0, 8)
+      .filter((m) => m.userId !== talk.me?.id)
+      .filter((m) => m.handle.toLowerCase().includes(mentionQuery.toLowerCase()))
+      .slice(0, 8)
     : [];
 
   /** 回复目标（composer 提示条）展示信息 */
@@ -1569,18 +1582,16 @@ function ChatPane(): ReactElement | null {
     currentThread !== null &&
     (currentThread.createdBy === talk.me?.id || myRole === "owner" || myRole === "admin");
 
-  /** 在主频道头部开一个空白讨论组 */
+  /** 在主频道头部开一个空白讨论组（弹窗由 HomeScreen 承载） */
   function openBlankThread(): void {
-    setThreadSeed(null);
-    setThreadCreateOpen(true);
+    if (channelId) onCreateThread(channelId, null);
   }
 
   /** 从某条消息发起讨论组（自动用消息摘要取名） */
   function openThreadFromMessage(item: MessageItem): void {
     const raw = item.content.replace(/\s+/g, " ").trim();
     const name = raw.length > 40 ? `${raw.slice(0, 40)}…` : raw || "话题讨论";
-    setThreadSeed({ name, starterMessageId: item.id });
-    setThreadCreateOpen(true);
+    if (channelId) onCreateThread(channelId, { name, starterMessageId: item.id });
   }
 
   /** 归档 / 恢复当前讨论组 */
@@ -2245,12 +2256,6 @@ function ChatPane(): ReactElement | null {
         onClose={() => setShareOpen(false)}
         channelId={channelId ?? ""}
         communityId={community?.id ?? null}
-      />
-      <ThreadCreateModal
-        open={threadCreateOpen}
-        onClose={() => setThreadCreateOpen(false)}
-        channelId={channelId}
-        seed={threadSeed}
       />
       {isThread && currentThread ? (
         <>
@@ -3065,7 +3070,7 @@ function OnlineMembersModal({
       onClose={onClose}
       title="在线成员"
       closeLabel="关闭"
-      description="本频道当前保持连接的成员（关闭面板即下线）。"
+      description="本频道当前保持连接的成员。"
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 300 }}>
         {loading ? (
@@ -3525,6 +3530,29 @@ function UpdateUsernameModal({
 
 // ---------------- 弹窗：分享 DSH 会话 ----------------
 
+/** 工作区展示名：路径最后一段（对齐宿主左侧会话栏） */
+function workspaceLabel(cwd: string): string {
+  const parts = cwd.split(/[\\/]/).filter((part) => part.length > 0);
+  return parts[parts.length - 1] ?? cwd;
+}
+
+/** 会话树按工作区（cwd）分组：保持工作区在会话树里首次出现的顺序 */
+function groupSessionsByWorkspace(
+  rows: ShareSessionRow[],
+): { key: string; label: string; rows: ShareSessionRow[] }[] {
+  const groups = new Map<string, { key: string; label: string; rows: ShareSessionRow[] }>();
+  for (const row of rows) {
+    const key = row.cwd ?? "";
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label: key.length > 0 ? workspaceLabel(key) : "未知工作区", rows: [] };
+      groups.set(key, group);
+    }
+    group.rows.push(row);
+  }
+  return [...groups.values()];
+}
+
 function ShareSnapshotModal({
   open,
   onClose,
@@ -3540,15 +3568,15 @@ function ShareSnapshotModal({
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // DSH 会话分享：本机可分享会话 + 选中的会话
-  const [sessions, setSessions] = useState<LocalSessionSummary[]>([]);
+  // DSH 会话分享：整个会话树（工作区 → 会话）+ 选中的会话
+  const [sessions, setSessions] = useState<ShareSessionRow[]>([]);
   const [sessionId, setSessionId] = useState("");
 
   useEffect(() => {
     if (!open) return;
     const current = getCurrentDshSession();
     setSessionId(current ?? "");
-    void listLocalSessions().then((list) => {
+    void listShareableSessions().then((list) => {
       setSessions(list);
       if (!current && list.length > 0) setSessionId(list[0]?.id ?? "");
     });
@@ -3570,11 +3598,14 @@ function ShareSnapshotModal({
     onClose();
   }
 
+  const sessionGroups = groupSessionsByWorkspace(sessions);
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title="分享 DSH 会话"
+      description="把本机一个 DSH 会话打包上传，社区成员可「克隆到会话」还原出同样的会话。"
       closeLabel="关闭"
       footer={
         <>
@@ -3592,6 +3623,55 @@ function ShareSnapshotModal({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              maxHeight: 240,
+              overflowY: "auto",
+            }}
+          >
+            {sessionGroups.length === 0 ? (
+              <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
+            ) : (
+              sessionGroups.map((group) => (
+                <div key={group.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span
+                    title={group.key.length > 0 ? group.key : undefined}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 650,
+                      color: palette.caption,
+                      letterSpacing: "0.04em",
+                    }}
+                  >
+                    {group.label}
+                  </span>
+                  {group.rows.map((row) => (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setSessionId(row.id)}
+                      title={row.id}
+                      style={{
+                        ...pillStyle(row.id === sessionId),
+                        textAlign: "left",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {row.title}
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -3602,37 +3682,6 @@ function ShareSnapshotModal({
           onChange={(e) => setSummary(e.target.value)}
           placeholder="一句话摘要（可选）"
         />
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ ...smallText, fontSize: 12 }}>
-            把本机一个 DSH 会话打包上传，社区成员可「克隆到会话」还原出同样的 会话。当前：
-            {getCurrentDshSession() ?? "（未识别到当前会话）"}
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              maxHeight: 200,
-              overflowY: "auto",
-            }}
-          >
-            {sessions.length === 0 ? (
-              <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
-            ) : (
-              sessions.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setSessionId(s.id)}
-                  style={{ ...pillStyle(s.id === sessionId), textAlign: "left" }}
-                >
-                  {s.id}
-                  {s.cwd ? `（${s.cwd}）` : ""}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
       </div>
     </Modal>
   );
@@ -3810,6 +3859,11 @@ export function HomeScreen(): ReactElement {
   const talk = useTalkState();
   const [showAdd, setShowAdd] = useState(false);
   const [showUsername, setShowUsername] = useState(false);
+  /** 创建讨论组弹窗：由 HomeScreen 承载，频道列表菜单与会话头部共用 */
+  const [threadCreate, setThreadCreate] = useState<{
+    channelId: string;
+    seed: { name: string; starterMessageId?: string } | null;
+  } | null>(null);
   const inCommunity = talk.view.communityId !== null;
 
   return (
@@ -3822,8 +3876,8 @@ export function HomeScreen(): ReactElement {
       />
       {inCommunity ? (
         <>
-          <ChannelList />
-          <ChatPane />
+          <ChannelList onCreateThread={(channelId) => setThreadCreate({ channelId, seed: null })} />
+          <ChatPane onCreateThread={(channelId, seed) => setThreadCreate({ channelId, seed })} />
         </>
       ) : (
         <div style={{ ...chatCol, alignItems: "center", justifyContent: "center" }}>
@@ -3843,10 +3897,18 @@ export function HomeScreen(): ReactElement {
               从左侧选择一个社区开始聊天，
               <br />
               点左栏「＋」发现公开社区、用邀请码加入，或创建一个新社区。
+              <br />
+              请不要输入如 密码、银行卡、APIKEY 等敏感信息。
             </span>
           </div>
         </div>
       )}
+      <ThreadCreateModal
+        open={threadCreate !== null}
+        onClose={() => setThreadCreate(null)}
+        channelId={threadCreate?.channelId ?? null}
+        seed={threadCreate?.seed ?? null}
+      />
       <CommunityAddModal open={showAdd} onClose={() => setShowAdd(false)} />
       <UpdateUsernameModal open={showUsername} onClose={() => setShowUsername(false)} />
       <InboxDialog />

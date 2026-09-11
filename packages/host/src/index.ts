@@ -116,23 +116,33 @@ function effectiveSettings(scope: SettingsScope<TalkSettings>): TalkSettings {
 
 // ---------- 本地 DSH 会话：服务取用 + 打包 / 还原 ----------
 
-/** DSH 会话持久化服务的最小结构面（不引入 @deepseek-ai/dsh-session 类型包依赖） */
+/** DSH 会话 header 的最小结构面（不引入 @deepseek-ai/dsh-session 类型包依赖） */
 interface SessionHeaderLike {
   version: number;
   id: string;
   createdAt: number;
   cwd?: string;
   parentSession?: string;
-  seedLength?: number;
+  /** 是否含 fork 继承的事件前缀 */
+  isSeeded?: boolean;
+}
+
+/** 已打开的会话读写句柄（read 只取事件，close 释放句柄与写所有权） */
+interface SessionHandleLike {
+  readonly header: SessionHeaderLike;
+  /** fork 继承的事件前缀长度（0 = 全新会话） */
+  readonly inheritedEventCount: number;
+  read(offset?: number, length?: number): Promise<{ events: readonly unknown[] }>;
+  close(): Promise<void>;
 }
 
 interface SessionPersistenceLike {
-  list(signal?: AbortSignal): Promise<SessionHeaderLike[]>;
-  readFrom(
+  list(options?: { signal?: AbortSignal }): Promise<readonly { header: SessionHeaderLike }[]>;
+  open(
     id: string,
-    fromSeq: number,
-    signal?: AbortSignal,
-  ): Promise<{ meta: SessionHeaderLike; events: unknown[] }>;
+    access: "read" | "write",
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionHandleLike>;
 }
 
 interface SessionStoreLike {
@@ -179,7 +189,11 @@ function pickWorkspaceCwd(wanted: string | undefined, fromPack: string | undefin
   return process.cwd();
 }
 
-function buildSessionPackage(meta: SessionHeaderLike, events: unknown[]): AgentSessionPackage {
+function buildSessionPackage(
+  meta: SessionHeaderLike,
+  events: readonly unknown[],
+  inheritedEventCount: number,
+): AgentSessionPackage {
   return {
     kind: "agent-session",
     manifest: {
@@ -196,9 +210,10 @@ function buildSessionPackage(meta: SessionHeaderLike, events: unknown[]): AgentS
       createdAt: meta.createdAt,
       ...(meta.cwd ? { cwd: meta.cwd } : {}),
       ...(meta.parentSession ? { parentSession: meta.parentSession } : {}),
-      ...(typeof meta.seedLength === "number" ? { seedLength: meta.seedLength } : {}),
+      ...(meta.isSeeded ? { isSeeded: true } : {}),
+      ...(inheritedEventCount > 0 ? { inheritedEventCount } : {}),
     },
-    events,
+    events: [...events],
   };
 }
 
@@ -223,17 +238,18 @@ function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRou
         const persistence = persistenceOr503(ctx, res);
         if (!persistence) return;
         try {
-          const headers = await persistence.list();
-          const sessions = orderBy(headers, [(h) => h.createdAt], ["desc"])
+          const snapshots = await persistence.list();
+          const sessions = orderBy(snapshots, [(s) => s.header.createdAt], ["desc"])
             .slice(0, 200)
-            .map(
-              (h): LocalSessionSummary => ({
-                id: h.id,
-                createdAt: h.createdAt,
-                ...(h.cwd ? { cwd: h.cwd } : {}),
-                ...(h.parentSession ? { parentSession: h.parentSession } : {}),
-              }),
-            );
+            .map((snapshot): LocalSessionSummary => {
+              const header = snapshot.header;
+              return {
+                id: header.id,
+                createdAt: header.createdAt,
+                ...(header.cwd ? { cwd: header.cwd } : {}),
+                ...(header.parentSession ? { parentSession: header.parentSession } : {}),
+              };
+            });
           sendJson(res, 200, { sessions } satisfies HostSessionsStatus);
         } catch (error) {
           sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
@@ -254,22 +270,33 @@ function sessionRoutes(ctx: Context, scope: SettingsScope<TalkSettings>): WebRou
           return;
         }
         try {
-          const { meta, events } = await persistence.readFrom(sessionId, 0);
-          const body = Buffer.from(JSON.stringify(buildSessionPackage(meta, events)), "utf8");
-          const maxBytes = scope.get().share.maxSizeMb * 1024 * 1024;
-          if (body.byteLength > maxBytes) {
-            const mb = Math.round(maxBytes / 1024 / 1024);
-            sendJson(res, 413, {
-              code: "PAYLOAD_TOO_LARGE",
-              message: `会话包超过 ${mb} MiB 上限`,
+          // 只读句柄：open('read') 不抢写所有权，读完 close 释放
+          const handle = await persistence.open(sessionId, "read");
+          try {
+            const { events } = await handle.read(0);
+            const body = Buffer.from(
+              JSON.stringify(
+                buildSessionPackage(handle.header, events, handle.inheritedEventCount),
+              ),
+              "utf8",
+            );
+            const maxBytes = scope.get().share.maxSizeMb * 1024 * 1024;
+            if (body.byteLength > maxBytes) {
+              const mb = Math.round(maxBytes / 1024 / 1024);
+              sendJson(res, 413, {
+                code: "PAYLOAD_TOO_LARGE",
+                message: `会话包超过 ${mb} MiB 上限`,
+              });
+              return;
+            }
+            res.writeHead(200, {
+              "content-type": "application/json; charset=utf-8",
+              "content-length": String(body.byteLength),
             });
-            return;
+            res.end(body);
+          } finally {
+            await handle.close();
           }
-          res.writeHead(200, {
-            "content-type": "application/json; charset=utf-8",
-            "content-length": String(body.byteLength),
-          });
-          res.end(body);
         } catch (error) {
           sendJson(res, 500, { code: "INTERNAL", message: errorOf(error) });
         }

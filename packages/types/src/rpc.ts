@@ -90,7 +90,10 @@ export interface AgentSessionPackage {
     createdAt: number;
     cwd?: string;
     parentSession?: string;
-    seedLength?: number;
+    /** 是否含 fork 继承的事件前缀 */
+    isSeeded?: boolean;
+    /** fork 继承的事件前缀长度 */
+    inheritedEventCount?: number;
   };
   /** 会话事件（append-only、lossless JSON） */
   events: unknown[];

@@ -6,6 +6,7 @@
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   Button,
+  IconBranchOutline16,
   IconChevronLeftOutline14,
   IconCopyOutline16,
   IconEditOutline16,
@@ -681,7 +682,7 @@ function ChannelDialog({
         </div>
         <div style={fieldBlock}>
           <label htmlFor="talk-channel-topic" style={fieldLabel}>
-            主题
+            主题（可选）
           </label>
           <Input
             id="talk-channel-topic"
@@ -732,17 +733,29 @@ function ChannelDialog({
 const moveUpIcon: CSSProperties = { display: "inline-flex", transform: "rotate(90deg)" };
 const moveDownIcon: CSSProperties = { display: "inline-flex", transform: "rotate(-90deg)" };
 
-/** 每行的频道管理菜单（排序 / 改名 / 主题 / 删除；owner/admin 可见） */
-export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement | null {
+/**
+ * 每行的频道呼出菜单：创建讨论组（所有成员可见，公告频道除外）+
+ * 排序 / 改名 / 删除（owner/admin 可见）。无可用项时不渲染。
+ */
+export function ChannelRowMenu({
+  channel,
+  onCreateThread,
+}: {
+  channel: Channel;
+  onCreateThread: (channelId: string) => void;
+}): ReactElement | null {
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  if (!isModerator(talk.view.community?.myRole)) return null;
+  const moderator = isModerator(talk.view.community?.myRole);
 
   const channels = talk.view.community?.channels ?? [];
   const index = channels.findIndex((c) => c.id === channel.id);
-  const canMoveUp = index > 0;
-  const canMoveDown = index >= 0 && index < channels.length - 1;
+  const canMoveUp = moderator && index > 0;
+  const canMoveDown = moderator && index >= 0 && index < channels.length - 1;
+  // 公告频道不能建讨论组，与会话头部入口的条件一致
+  const canCreateThread = channel.kind !== "announcement";
+  const isForum = channel.kind === "forum";
 
   async function remove(): Promise<void> {
     if (!window.confirm(`删除频道 #${channel.name}？其中的消息将一并删除。`)) return;
@@ -751,6 +764,15 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
   }
 
   const items: MenuEntry[] = [
+    ...(canCreateThread
+      ? [
+          {
+            id: "create-thread",
+            label: isForum ? "新建话题" : "创建讨论组",
+            icon: <IconBranchOutline16 />,
+          },
+        ]
+      : []),
     ...(canMoveUp
       ? [
           {
@@ -777,9 +799,14 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
           },
         ]
       : []),
-    { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
-    { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
+    ...(moderator
+      ? [
+          { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
+          { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
+        ]
+      : []),
   ];
+  if (items.length === 0) return null;
 
   return (
     <>
@@ -788,6 +815,7 @@ export function ChannelRowMenu({ channel }: { channel: Channel }): ReactElement 
         onClose={() => setMenuOpen(false)}
         onSelect={(id) => {
           setMenuOpen(false);
+          if (id === "create-thread") onCreateThread(channel.id);
           if (id === "edit") setEditing(true);
           if (id === "delete") void remove();
           if (id === "up") void moveChannel(channel.id, "up");

@@ -35,7 +35,7 @@ import {
   type ThreadVisibility,
   type User,
 } from "@dsh-talk/types/entities";
-import type { AgentSessionPackage, LocalSessionSummary, TalkSettings } from "@dsh-talk/types/rpc";
+import type { AgentSessionPackage, TalkSettings } from "@dsh-talk/types/rpc";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { sortBy, uniq } from "es-toolkit/array";
 import { useEffect, useReducer } from "react";
@@ -1687,11 +1687,38 @@ export function bindSessionOpener(fn: SessionOpener | null): void {
   openSessionFn = fn;
 }
 
-/** 本机可分享的 DSH 会话（host 读会话持久化层得到） */
-export async function listLocalSessions(): Promise<LocalSessionSummary[]> {
+/** 可分享会话（会话树的一行）：展示名 + 所属工作区 */
+export interface ShareSessionRow {
+  id: string;
+  /** 展示名：宿主已折算为 durable title → 工程名 → 会话 id */
+  title: string;
+  /** 会话所属工作区绝对路径；缺失时归入「未知工作区」 */
+  cwd?: string;
+}
+
+type SessionTreeReader = () => ShareSessionRow[];
+
+let sessionTreeFn: SessionTreeReader | null = null;
+
+/** 由 client 入口 apply 注入「读取宿主会话树」实现（与左侧会话栏同源） */
+export function bindSessionTree(fn: SessionTreeReader | null): void {
+  sessionTreeFn = fn;
+}
+
+/**
+ * 本机可分享的 DSH 会话：优先用宿主会话树（带标题、按工作区分组展示），
+ * 宿主不可用时回退到 host 持久化列表（只有 id / cwd）。
+ */
+export async function listShareableSessions(): Promise<ShareSessionRow[]> {
+  const tree = sessionTreeFn?.() ?? [];
+  if (tree.length > 0) return tree;
   try {
     const res = await hostSessions();
-    return res.sessions;
+    return res.sessions.map((s) => ({
+      id: s.id,
+      title: s.id,
+      ...(s.cwd ? { cwd: s.cwd } : {}),
+    }));
   } catch (error) {
     notify(errorText(error));
     return [];

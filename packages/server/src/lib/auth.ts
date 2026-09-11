@@ -25,7 +25,12 @@ import {
   dispatchVerificationOTPEmail,
 } from "./email";
 import { HttpApiError } from "./errors";
-import { uniqueUsernameForEmail } from "./users";
+import {
+  uniqueUsernameForEmail,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+  USERNAME_PATTERN,
+} from "./users";
 
 // better-auth 选项类型（不显式 import，避免与实例泛型不一致）
 type BetterAuthOptions = Parameters<typeof betterAuth>[0];
@@ -53,6 +58,8 @@ const AUTH_TRUSTED_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
 ] as const;
+
+// ---- 用户名规则（详见 lib/users.ts 的 assertUsernameChangeAllowed）----
 
 function buildAuthOptions(env: Env): BetterAuthOptions {
   const secret = env.BETTER_AUTH_SECRET?.trim();
@@ -96,8 +103,20 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
         dispatchVerificationEmail(env, request, user, url);
       },
     },
+    // 扩展 user 表：仅服务端维护的「上次修改用户名时间」，用于每周一次的限制。
+    // input:false 表示客户端不能提交该字段（避免伪造时间戳绕过冷却）。
+    user: {
+      additionalFields: {
+        usernameChangedAt: { type: "number", required: false, input: false },
+      },
+    },
     plugins: [
-      username({ minUsernameLength: 4 }),
+      // 用户名只允许大小写字母和数字；长度 4..30（与前端提示一致）
+      username({
+        minUsernameLength: USERNAME_MIN_LENGTH,
+        maxUsernameLength: USERNAME_MAX_LENGTH,
+        usernameValidator: (value) => USERNAME_PATTERN.test(value),
+      }),
       // 纯 API / 桌面端认证：登录响应头 set-auth-token 即会话 token，
       // 之后所有请求带 Authorization: Bearer <token> 即等价于带 session cookie
       bearer(),
@@ -131,6 +150,15 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
             if (!email || existingUsername) return { data: user };
             const username = await uniqueUsernameForEmail(env.DB, email);
             return { data: { ...user, username } };
+          },
+        },
+        update: {
+          // 用户名真的变化时记录时间戳（字段 input:false，客户端无法自行写入）。
+          // 只返回要写入的字段，避免覆盖 username 插件已做的归一化。
+          before: async (data) => {
+            const incoming = (data as { username?: unknown }).username;
+            if (typeof incoming !== "string" || incoming.trim().length === 0) return;
+            return { data: { usernameChangedAt: Date.now() } as typeof data };
           },
         },
       },

@@ -21,6 +21,7 @@ import {
 import { bindExecutionCtx, unbindExecutionCtx } from "./lib/email";
 import { HttpApiError } from "./lib/errors";
 import { applyGlobalMiddleware } from "./lib/middleware";
+import { assertUsernameChangeAllowed } from "./lib/users";
 import { channelsRoutes, communitiesRoutes } from "./routes/communities";
 import { invitesRoutes } from "./routes/invites";
 import { channelMessagesRoutes, messagesRoutes } from "./routes/messages";
@@ -60,6 +61,20 @@ app.get("/healthz", (c) =>
     env: { DB: !!c.env.DB, R2: !!c.env.R2, ROOM: !!c.env.ROOM_ACTOR },
   }),
 );
+
+// ----------------- 改用户名前置校验（字符集 / 长度 / 每周一次 / 唯一） -----------------
+// Better Auth 的 hooks.before 阶段解析不了 Bearer 会话（bearer 插件在它之后才把
+// Authorization 转成会话 Cookie），所以在挂载 auth 之前用应用自身的 Bearer 鉴权拦截，
+// 通过后再交给 Better Auth 落库（用户名插件会再校验一遍字符集与长度）。
+app.post("/api/auth/update-user", createBearerAuth("required"), async (c) => {
+  const request = c.req.raw.clone();
+  const body = (await c.req.raw.json().catch(() => null)) as { username?: unknown } | null;
+  const raw = body?.username;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    await assertUsernameChangeAllowed(c.env.DB, requireUserId(c), raw);
+  }
+  return getAuth(c.env).handler(request);
+});
 
 // ----------------- Better Auth（/api/auth/*，接管身份/会话/注册/找回密码） -----------------
 app.all("/api/auth/*", async (c) => {

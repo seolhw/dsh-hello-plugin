@@ -1,0 +1,294 @@
+// ================================================================
+// 个人中心：改头像 / 改昵称 / 改用户名 / 改密码；邮箱只读；退出登录。
+// ================================================================
+
+import { Button, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import type { CSSProperties, ReactElement } from "react";
+import { useEffect, useState } from "react";
+import {
+  changePassword,
+  logout,
+  notify,
+  removeUserAvatar,
+  updateUserAvatar,
+  updateUserNickname,
+  updateUserUsername,
+  useTalkState,
+} from "../store";
+import { AvatarPicker, fieldLabel, palette, smallText } from "./styles";
+
+/** 只读信息行：左侧标签，右侧值（单行省略） */
+const infoRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "8px 10px",
+  borderRadius: 10,
+  background: palette.inputBg,
+  border: `1px solid ${palette.border}`,
+};
+
+const infoValue: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: palette.text,
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+export function ProfileModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}): ReactElement | null {
+  const talk = useTalkState();
+  const me = talk.me;
+  const [nickname, setNickname] = useState("");
+  const [nicknameBusy, setNicknameBusy] = useState(false);
+  const [username, setUsername] = useState("");
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirmPwd, setConfirmPwd] = useState("");
+  const [pwdBusy, setPwdBusy] = useState(false);
+
+  // 打开时用当前昵称预填（保存成功后 displayName 变化也会同步回填）
+  useEffect(() => {
+    if (open) setNickname(me?.displayName ?? "");
+  }, [open, me?.displayName]);
+
+  // 打开时用当前用户名预填（保存成功后 handle 变化也会同步回填）
+  useEffect(() => {
+    if (open) setUsername(me?.handle ?? "");
+  }, [open, me?.handle]);
+
+  // 每次打开清空密码表单，避免残留
+  useEffect(() => {
+    if (open) {
+      setCurrentPwd("");
+      setNewPwd("");
+      setConfirmPwd("");
+    }
+  }, [open]);
+
+  if (!me) return null;
+
+  async function pickAvatar(file: File): Promise<void> {
+    setAvatarBusy(true);
+    await updateUserAvatar(file);
+    setAvatarBusy(false);
+  }
+
+  async function removeAvatar(): Promise<void> {
+    setAvatarBusy(true);
+    await removeUserAvatar();
+    setAvatarBusy(false);
+  }
+
+  async function saveNickname(): Promise<void> {
+    if (nicknameBusy) return;
+    setNicknameBusy(true);
+    await updateUserNickname(nickname);
+    setNicknameBusy(false);
+  }
+
+  async function saveUsername(): Promise<void> {
+    if (usernameBusy) return;
+    setUsernameBusy(true);
+    await updateUserUsername(username);
+    setUsernameBusy(false);
+  }
+
+  async function submitPassword(): Promise<void> {
+    if (pwdBusy) return;
+    if (currentPwd.length === 0) {
+      notify("请输入当前密码");
+      return;
+    }
+    if (newPwd.length < 8) {
+      notify("新密码至少 8 位");
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      notify("两次输入的新密码不一致");
+      return;
+    }
+    setPwdBusy(true);
+    const ok = await changePassword({ currentPassword: currentPwd, newPassword: newPwd });
+    setPwdBusy(false);
+    if (ok) {
+      setCurrentPwd("");
+      setNewPwd("");
+      setConfirmPwd("");
+    }
+  }
+
+  function confirmLogout(): void {
+    if (window.confirm("确定要退出登录吗？")) void logout();
+  }
+
+  const canSubmitPwd =
+    !pwdBusy && currentPwd.length > 0 && newPwd.length >= 8 && newPwd === confirmPwd;
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="个人中心"
+      closeLabel="关闭"
+      description="管理你的头像、昵称、用户名与登录密码。"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
+          <Button variant="outline" onClick={confirmLogout}>
+            退出登录
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>个人资料</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={fieldLabel}>头像</span>
+            <AvatarPicker
+              src={me.avatarUrl}
+              label={me.handle}
+              size={60}
+              onPick={(file) => void pickAvatar(file)}
+              onRemove={() => void removeAvatar()}
+              busy={avatarBusy}
+            />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label htmlFor="talk-profile-nickname" style={fieldLabel}>
+              昵称
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input
+                id="talk-profile-nickname"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveNickname();
+                  }
+                }}
+                placeholder={me.handle}
+              />
+              <Button
+                variant="primary"
+                disabled={nicknameBusy || nickname.trim().length === 0}
+                onClick={() => void saveNickname()}
+              >
+                {nicknameBusy ? "保存中…" : "保存"}
+              </Button>
+            </div>
+            <span style={{ ...smallText, fontSize: 11.5 }}>昵称会显示在消息与成员列表里。</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>账号信息</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label htmlFor="talk-profile-username" style={fieldLabel}>
+              用户名
+            </label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Input
+                id="talk-profile-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveUsername();
+                  }
+                }}
+                placeholder={me.handle}
+              />
+              <Button
+                variant="primary"
+                disabled={usernameBusy || username.trim().length === 0}
+                onClick={() => void saveUsername()}
+              >
+                {usernameBusy ? "保存中…" : "保存"}
+              </Button>
+            </div>
+            <span style={{ ...smallText, fontSize: 11.5 }}>
+              仅限大小写字母和数字，至少 4 个字符，每周只能修改一次。
+            </span>
+          </div>
+          <div style={infoRow}>
+            <span style={{ ...smallText, fontSize: 12, flex: "0 0 auto" }}>邮箱</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <span style={infoValue}>{talk.meEmail ?? "—"}</span>
+              <span
+                style={{
+                  flex: "0 0 auto",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: palette.success,
+                }}
+              >
+                已验证
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>修改密码</span>
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={currentPwd}
+            onChange={(e) => setCurrentPwd(e.target.value)}
+            placeholder="当前密码"
+            aria-label="当前密码"
+          />
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={newPwd}
+            onChange={(e) => setNewPwd(e.target.value)}
+            placeholder="新密码（至少 8 位）"
+            aria-label="新密码"
+          />
+          <Input
+            type="password"
+            autoComplete="new-password"
+            value={confirmPwd}
+            onChange={(e) => setConfirmPwd(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void submitPassword();
+              }
+            }}
+            placeholder="确认新密码"
+            aria-label="确认新密码"
+          />
+          <div>
+            <Button
+              variant="primary"
+              disabled={!canSubmitPwd}
+              onClick={() => void submitPassword()}
+            >
+              {pwdBusy ? "更新中…" : "更新密码"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}

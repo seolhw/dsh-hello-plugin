@@ -101,6 +101,8 @@ export interface TalkState {
   phase: TalkPhase;
   settings: TalkSettings | null;
   me: User | null;
+  /** 当前登录账号的邮箱（个人中心只读展示；User 实体不对外暴露邮箱） */
+  meEmail: string | null;
   communities: GetMyCommunitiesResponse;
   error: string;
   toast: string;
@@ -143,6 +145,7 @@ const INITIAL: TalkState = {
   phase: "booting",
   settings: null,
   me: null,
+  meEmail: null,
   communities: [],
   error: "",
   toast: "",
@@ -360,6 +363,7 @@ export async function applySession(result: { user: AuthUser; token: string }): P
       phase: "ready",
       settings: next,
       me,
+      meEmail: result.user.email,
       communities,
       view: { ...INITIAL_VIEW },
     });
@@ -370,13 +374,51 @@ export async function applySession(result: { user: AuthUser; token: string }): P
   }
 }
 
-/** 修改用户名：调用 Better Auth update-user，成功后同步本地 me 与 host handle。 */
-export async function updateUserName(username: string): Promise<boolean> {
+/** 修改昵称（displayName）：调用 Better Auth update-user，成功后同步本地 me。 */
+export async function updateUserNickname(nickname: string): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  const trimmed = nickname.trim();
+  if (trimmed.length === 0) return false;
+  if (trimmed === (state.me?.displayName ?? "")) {
+    notify("昵称没有变化");
+    return false;
+  }
+  try {
+    const body: UpdateUserRequest = { name: trimmed };
+    await server.updateUser(body);
+    const me = (await refreshedUser(server)) ?? state.me;
+    if (!me) {
+      notify("无法获取最新用户信息");
+      return false;
+    }
+    setState({ me });
+    notify("昵称已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/**
+ * 修改用户名（@handle）：客户端先做字符集/长度预检，最终以服务端校验为准
+ * （唯一性、每周一次都由服务端强制），成功后同步本地 me 与 host 侧 handle。
+ */
+export async function updateUserUsername(username: string): Promise<boolean> {
   const server = serverOf();
   if (!server) return false;
   const trimmed = username.trim();
   if (trimmed.length === 0) return false;
-  if (trimmed === state.me?.handle) {
+  if (!/^[A-Za-z0-9]+$/.test(trimmed)) {
+    notify("用户名只能包含大小写字母和数字");
+    return false;
+  }
+  if (trimmed.length < 4) {
+    notify("用户名至少需要 4 个字符");
+    return false;
+  }
+  if (trimmed.toLowerCase() === (state.me?.handle ?? "").toLowerCase()) {
     notify("用户名没有变化");
     return false;
   }
@@ -388,14 +430,32 @@ export async function updateUserName(username: string): Promise<boolean> {
       notify("无法获取最新用户信息");
       return false;
     }
-    try {
-      const next = await hostConfigSet({ handle: me.handle });
-      setState({ me, settings: next });
-    } catch {
-      // 本地写 handle 失败不阻塞用户名更新
-      setState({ me });
+    setState({ me });
+    if (state.settings && state.settings.handle !== me.handle) {
+      try {
+        setState({ settings: await hostConfigSet({ handle: me.handle }) });
+      } catch {
+        // 写失败忽略：下次 refresh 会再同步
+      }
     }
     notify("用户名已更新");
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 修改密码：调用 Better Auth change-password（服务端校验当前密码） */
+export async function changePassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.changePassword(input);
+    notify("密码已更新");
     return true;
   } catch (error) {
     notify(errorText(error));
@@ -481,6 +541,7 @@ export async function logout(): Promise<void> {
     open: true,
     phase: "anon",
     me: null,
+    meEmail: null,
     communities: [],
     error: "",
     view: { ...INITIAL_VIEW },
@@ -519,7 +580,14 @@ export async function refresh(): Promise<void> {
     const communities = await server.myCommunities();
     const nextSettings =
       settings.handle === me.handle ? settings : { ...settings, handle: me.handle };
-    setState({ busy: false, phase: "ready", settings: nextSettings, me, communities });
+    setState({
+      busy: false,
+      phase: "ready",
+      settings: nextSettings,
+      me,
+      meEmail: session.user.email,
+      communities,
+    });
     void refreshInboxUnread();
   } catch (error) {
     if (error instanceof ServerApiError && error.status === 401) {
@@ -528,6 +596,7 @@ export async function refresh(): Promise<void> {
         phase: "anon",
         busy: false,
         me: null,
+        meEmail: null,
         communities: [],
         settings: state.settings,
         pendingEmail: null,

@@ -183,11 +183,14 @@ export function Avatar({
   color,
   size = 28,
   src,
+  inset,
 }: {
   label: string;
   color?: string;
   size?: number;
   src?: string | null;
+  /** 图片相对圆块的内缩（px）：留出一圈底色与 logo 的缝隙；不传则图片铺满整圆 */
+  inset?: number;
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -219,7 +222,14 @@ export function Avatar({
           src={src ?? ""}
           alt={label}
           onError={() => setFailed(true)}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            // inset 时改用 contain：logo 完整落在内缩后的区域，四周露出底色
+            objectFit: inset ? "contain" : "cover",
+            ...(inset ? { boxSizing: "border-box" as const, padding: inset } : {}),
+          }}
         />
       ) : (
         label.slice(0, 1).toUpperCase()

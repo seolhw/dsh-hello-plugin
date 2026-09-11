@@ -430,7 +430,7 @@ function CommunityMetaCard({
   return (
     <div style={{ minWidth: 180, maxWidth: 280 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Avatar label={community.name} src={community.iconUrl} size={32} />
+        <Avatar color="#fff" label={community.name} src={community.iconUrl} size={32} inset={3} />
         <div style={{ minWidth: 0 }}>
           <div
             style={{
@@ -553,7 +553,7 @@ function CommunitiesRail({
                 content={<CommunityMetaCard community={c} />}
                 anchor={
                   <span style={railAvatar}>
-                    <Avatar label={c.name} src={c.iconUrl} size={44} />
+                    <Avatar color="#fff" label={c.name} src={c.iconUrl} size={44} inset={4} />
                     {mention > 0 ? (
                       <span style={{ ...railBubble, background: palette.accent }}>{mention}</span>
                     ) : unread > 0 ? (

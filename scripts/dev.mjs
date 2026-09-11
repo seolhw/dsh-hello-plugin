@@ -6,10 +6,11 @@
  *  2. 轮询 lib/ 产物，编译结果稳定后拉起 / 重启
  *     `npx @deepseek-ai/dsh web --patch ./cordis.yml`。
  *
- * 为什么不能只改 npm script：dsh CLI 自身没有 watch / 热重载，插件代码是从
- * lib/* 在启动时加载的，产物更新后必须重启进程才生效。每次重启只在本机 npx
- * 缓存里跑（--no-install），并加 --no-open 避免反复弹浏览器（首次启动仍会
- * 自动打开）。看到日志提示重启后，刷新已打开的 DSH Web 页即可。
+ * 只有 host 半边（lib/index.mjs）变化才会重启进程：它是启动时被 import 的
+ * Node 侧插件（配置接口 / 会话打包 / 还原），改动必须重启才生效。client 半边
+ * （lib/client.js）不用重启——DSH 的 client-hmr 会轮询产物并把新模块热重载进
+ * 浏览器（~1s），所以改 UI 只需等 tsdown 打包完成即可，浏览器会自动更新。
+ * 重启在本机 npx 缓存里跑，并加 --no-open 避免反复弹浏览器（首次仍会自动打开）。
  */
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
@@ -21,6 +22,10 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // 决定「可以启动/重启 server」的产物：host 入口 + client 入口。
 const WATCH_TARGETS = ["lib/index.mjs", "lib/client.js"];
+// 必须重启进程的产物：只有 host 半边（Node 侧插件：配置接口 / 会话打包 / 还原）。
+// client 半边（lib/client.js）由 DSH 自带的 client-hmr 轮询（~500ms）热重载到
+// 浏览器：改 UI 只需 tsdown 重新打包，浏览器会自动 invalidate 该插件模块，无需重启。
+const RESTART_TARGETS = ["lib/index.mjs"];
 // 产物连续无新写入这么久，才认为一次编译完成（合并同一轮的多次写入）。
 const SETTLE_MS = 700;
 // 轮询 lib/ 产物 mtime 的间隔。
@@ -74,6 +79,7 @@ let relaunchQueued = false;
 let previousSig = "";
 let stableAt = 0;
 let handledSig = "";
+let handledHostSig = "";
 let seenWrite = false;
 
 /** 后端 Server 健康状态：null=未知 / false=未就绪 / true=已就绪。仅记录+提示。 */
@@ -88,18 +94,24 @@ function run(command, env = {}) {
   });
 }
 
-/** 读取产物（存在性 + size + mtime）作为“是否需要重启”的信号。 */
-function signature() {
-  const parts = [];
-  for (const rel of WATCH_TARGETS) {
-    try {
-      const st = statSync(path.join(ROOT, rel));
-      parts.push(`${rel}:${st.size}:${Math.floor(st.mtimeMs)}`);
-    } catch {
-      parts.push(`${rel}:missing`);
-    }
+/** 单个产物的存在性 + size + mtime 信号。 */
+function fileSignal(rel) {
+  try {
+    const st = statSync(path.join(ROOT, rel));
+    return `${rel}:${st.size}:${Math.floor(st.mtimeMs)}`;
+  } catch {
+    return `${rel}:missing`;
   }
-  return parts.join("|");
+}
+
+/** 构建完成判定用的整体产物信号（缺任何一个都算未就绪）。 */
+function signature() {
+  return WATCH_TARGETS.map(fileSignal).join("|");
+}
+
+/** 重启判定用的信号：只看 host 半边。 */
+function restartSignature() {
+  return RESTART_TARGETS.map(fileSignal).join("|");
 }
 
 function complete(sig) {
@@ -121,7 +133,7 @@ function killTree(pid) {
 }
 
 function bootServer(first) {
-  const prefix = "npx --yes @deepseek-ai/dsh";
+  const prefix = "npx --yes --no-install @deepseek-ai/dsh";
   const noOpen = first ? "" : " --no-open";
   const cmd = `${prefix} web --patch ./cordis.yml${noOpen}`;
   if (!first) {
@@ -201,10 +213,20 @@ function tick() {
   handledSig = sig;
   if (!everStarted) {
     everStarted = true;
+    handledHostSig = restartSignature();
     bootServer(true);
-  } else {
-    restartServer();
+    return;
   }
+  const hostSig = restartSignature();
+  if (hostSig === handledHostSig) {
+    // 只有 client 半边变了：client-hmr 会热重载浏览器侧模块，进程不用重启
+    console.log(
+      "\n[dsh-talk] client 已重建，浏览器会在 1s 内自动热重载（无需重启 DSH web）。\n",
+    );
+    return;
+  }
+  handledHostSig = hostSig;
+  restartServer();
 }
 
 function shutdown(exitCode = 0) {

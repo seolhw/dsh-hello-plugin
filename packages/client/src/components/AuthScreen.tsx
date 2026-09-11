@@ -17,7 +17,7 @@ import {
   useTalkState,
   verifyOtp,
 } from "../store";
-import { fieldLabel, palette, pillGroup } from "./styles";
+import { BrandLogo, fieldLabel, palette, pillGroup } from "./styles";
 
 type Mode = "login" | "register";
 
@@ -32,22 +32,6 @@ const card: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 16,
-};
-
-const brandMark: CSSProperties = {
-  width: 42,
-  height: 42,
-  borderRadius: 12,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background:
-    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 20,
-  userSelect: "none",
-  flex: "0 0 auto",
 };
 
 const fieldHint: CSSProperties = { fontSize: 11, color: palette.caption };
@@ -90,7 +74,7 @@ function errorMessage(err: unknown): string {
 function BrandHeader({ title, subtitle }: { title: string; subtitle: string }): ReactElement {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <span style={brandMark}>T</span>
+      <BrandLogo size={42} title="dsh-talk 社区" />
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>{title}</div>
         <div style={{ ...fieldHint, fontSize: 12.5 }}>{subtitle}</div>

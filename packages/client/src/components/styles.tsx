@@ -138,6 +138,45 @@ export const listCardName: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/**
+ * 项目 logo（构建期由 tsdown 读 packages/client/public/logo.svg 注入）转 data URL。
+ * 源文件是纯黑单色图形，这里统一用 CSS mask 渲染、以宿主语义文字色填充，
+ * 因此亮/暗主题下都可见（详见 BrandLogo）。
+ */
+export const talkLogoUrl = `data:image/svg+xml;utf8,${encodeURIComponent(__DSH_TALK_LOGO_SVG__)}`;
+
+/** 品牌 logo 标记：单色 mask 跟随宿主文字色，尺寸自定 */
+export function BrandLogo({
+  size = 34,
+  title,
+}: {
+  size?: number;
+  title?: string;
+}): ReactElement {
+  return (
+    <span
+      role="img"
+      aria-label={title ?? "dsh-talk"}
+      title={title}
+      style={{
+        width: size,
+        height: size,
+        flex: "0 0 auto",
+        display: "inline-block",
+        backgroundColor: palette.text,
+        maskImage: `url("${talkLogoUrl}")`,
+        WebkitMaskImage: `url("${talkLogoUrl}")`,
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskPosition: "center",
+        WebkitMaskPosition: "center",
+        maskSize: "contain",
+        WebkitMaskSize: "contain",
+      }}
+    />
+  );
+}
+
 /** 头像圆块：有 url 时显示图片，无 url / 加载失败时回退到 handle 首字符字母头像 */
 export function Avatar({
   label,
@@ -234,7 +273,7 @@ export function AvatarPicker({
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/svg+xml"
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];

@@ -32,4 +32,12 @@ export interface DshTalkViewOwnerProps {
   children?: never;
 }
 
+/**
+ * 构建期注入的 logo 源文本：tsdown.config.ts 读取 packages/client/public/logo.svg
+ * 后经 `define` 替换成字符串字面量，消费方见 components/styles.tsx 的 talkLogoUrl。
+ */
+declare global {
+  const __DSH_TALK_LOGO_SVG__: string;
+}
+
 export type { ILayout, SidebarFooterActionOwnerProps, SidebarSettingsOwnerProps };

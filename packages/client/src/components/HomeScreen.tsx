@@ -104,6 +104,7 @@ import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
 import {
   Avatar,
   AvatarPicker,
+  BrandLogo,
   fieldBlock,
   fieldLabel,
   listCard,
@@ -360,23 +361,6 @@ const pendingChip: CSSProperties = {
   maxWidth: 260,
 };
 
-// 与登录/注册一致的品牌渐变元素（@_@）
-const brandMark: CSSProperties = {
-  width: 52,
-  height: 52,
-  borderRadius: 14,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background:
-    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 24,
-  userSelect: "none",
-  flex: "0 0 auto",
-};
-
 const emptyCard: CSSProperties = {
   width: 380,
   maxWidth: "calc(100vw - 56px)",
@@ -412,23 +396,6 @@ const privacyBadge: CSSProperties = {
   padding: "0 6px",
   lineHeight: "16px",
   whiteSpace: "nowrap",
-};
-
-// 社区栏顶部的迷你品牌标志（登录/注册品牌渐变的小号版本）
-const railMark: CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 10,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background:
-    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
-  color: "#fff",
-  fontWeight: 700,
-  fontSize: 17,
-  userSelect: "none",
-  flex: "0 0 auto",
 };
 
 // 分段式激活态（对齐 AuthScreen 的 Segmented 控件）
@@ -531,9 +498,7 @@ function CommunitiesRail({
   const unreadLabel = talk.inboxUnread > 99 ? "99+" : String(talk.inboxUnread);
   return (
     <div style={rail}>
-      <span style={railMark} title="dsh-talk 社区">
-        {me?.handle.slice(0, 1).toUpperCase() ?? "T"}
-      </span>
+      <BrandLogo size={34} title="dsh-talk 社区" />
       <div
         style={{
           display: "flex",
@@ -642,69 +607,6 @@ function CommunitiesRail({
 
 // ---------------- 频道列表 ----------------
 
-/** 话题（forum）频道小图标：气泡内两根横线 = 一帖一话题，点进去聊 */
-function ForumGlyph(): ReactElement {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.9"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M6 8.5h8M6 12h5" />
-      <path d="M20 20l-3.4-2.7H9a4 4 0 0 1-4-4V9a4 4 0 0 1 4-4h7a4 4 0 0 1 4 4v5.6a2 2 0 0 1-2 2h-.6z" />
-    </svg>
-  );
-}
-
-/** 频道类型图标：文字 # / 公告 ! / 话题（气泡+横线），便于成员快速区分频道定位 */
-function ChannelGlyph({ kind }: { kind: Channel["kind"] }): ReactElement {
-  if (kind === "announcement") {
-    return (
-      <span
-        title="公告频道"
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 16,
-          height: 16,
-          borderRadius: 5,
-          background: "var(--dsw-alias-state-warn-primary)",
-          color: "#fff",
-          fontSize: 11,
-          fontWeight: 800,
-          lineHeight: 1,
-          flex: "0 0 auto",
-        }}
-      >
-        !
-      </span>
-    );
-  }
-  if (kind === "forum") {
-    return (
-      <span
-        title="话题频道"
-        style={{
-          color: palette.accent,
-          display: "inline-flex",
-          alignItems: "center",
-          flex: "0 0 auto",
-        }}
-      >
-        <ForumGlyph />
-      </span>
-    );
-  }
-  return <span style={{ color: palette.muted }}>#</span>;
-}
-
 function ChannelList(): ReactElement | null {
   const talk = useTalkState();
   const community = talk.view.community;
@@ -779,8 +681,8 @@ function ChannelList(): ReactElement | null {
                     textAlign: "left",
                   }}
                 >
-                  <span style={{ display: "inline-flex", flex: "0 0 auto" }}>
-                    <ChannelGlyph kind={ch.kind} />
+                  <span style={{ display: "inline-flex", flex: "0 0 auto", color: palette.muted }}>
+                    #
                   </span>
                   <span
                     style={{
@@ -1132,9 +1034,11 @@ function ForumTopicBoard({
               color: palette.accent,
               background: palette.inputBg,
               border: `1px solid ${palette.border}`,
+              fontSize: 19,
+              fontWeight: 700,
             }}
           >
-            <ForumGlyph />
+            #
           </span>
           <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>这里还没有话题</span>
           <span style={{ fontSize: 12, lineHeight: 1.6 }}>
@@ -1888,7 +1792,11 @@ function ChatPane(): ReactElement | null {
               flex: "0 0 auto",
             }}
           >
-            {isThread ? <IconBranchOutline16 /> : <ChannelGlyph kind={channel?.kind ?? "text"} />}
+            {isThread ? (
+              <IconBranchOutline16 />
+            ) : (
+              <span style={{ color: palette.muted }}>#</span>
+            )}
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
@@ -2070,15 +1978,12 @@ function ChatPane(): ReactElement | null {
                       borderRadius: 14,
                       fontSize: 19,
                       fontWeight: 700,
-                      color: channel?.kind === "announcement" ? "#fff" : palette.accent,
-                      background:
-                        channel?.kind === "announcement"
-                          ? "var(--dsw-alias-state-warn-primary)"
-                          : palette.inputBg,
-                      border: channel?.kind === "text" ? `1px solid ${palette.border}` : "none",
+                      color: palette.accent,
+                      background: palette.inputBg,
+                      border: `1px solid ${palette.border}`,
                     }}
                   >
-                    {channel?.kind === "announcement" ? "!" : "#"}
+                    #
                   </span>
                   <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>
                     {channel?.kind === "announcement" ? "暂无公告" : "还没有消息"}
@@ -3070,7 +2975,7 @@ function SearchMessagesModal({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <ChannelGlyph kind={hit.channel.kind} />
+                  <span style={{ color: palette.muted }}>#</span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: palette.text }}>
                     {hit.channel.name}
                   </span>
@@ -3923,7 +3828,7 @@ export function HomeScreen(): ReactElement {
       ) : (
         <div style={{ ...chatCol, alignItems: "center", justifyContent: "center" }}>
           <div style={emptyCard}>
-            <span style={brandMark}>T</span>
+            <BrandLogo size={52} />
             <div
               style={{
                 fontSize: 15,

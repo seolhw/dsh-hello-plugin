@@ -6,7 +6,7 @@
  *    web shell；react / cordis / ui-slots 等平台模块由 loader 的模块表提供，
  *    因此 externals（neverBundle），其余一律内联。
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { UserConfig } from "tsdown";
 
@@ -47,6 +47,10 @@ export default (): UserConfig[] => {
   ];
 
   if (existsSync(resolve(process.cwd(), "packages/client/src/index.ts"))) {
+    // 项目 logo：`public/` 不在 web shell 的静态目录里，浏览器侧拿不到这个文件，
+    // 因此在构建期读成字符串注入（源码在 packages/client/public/logo.svg，
+    // 消费方见 packages/client/src/components/styles.tsx 的 talkLogoUrl）。
+    const logoSvg = readFileSync(resolve(process.cwd(), "packages/client/public/logo.svg"), "utf8");
     configs.push({
       name: "dsh-talk/client",
       entry: { client: "packages/client/src/index.ts" },
@@ -66,6 +70,7 @@ export default (): UserConfig[] => {
         "process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "production"),
         "import.meta.env.MODE": JSON.stringify(process.env.NODE_ENV ?? "production"),
         "import.meta.env": JSON.stringify({ MODE: process.env.NODE_ENV ?? "production" }),
+        __DSH_TALK_LOGO_SVG__: JSON.stringify(logoSvg),
       },
       outputOptions: {
         entryFileNames: "client.js",

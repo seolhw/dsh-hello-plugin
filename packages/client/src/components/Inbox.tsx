@@ -3,7 +3,7 @@
 // 打开/关闭由 store.inboxOpen 控制（社区栏铃铛触发 openInbox()）
 // ================================================================
 
-import { Button, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { InboxItem } from "@dsh-talk/types/api";
 import type { CSSProperties, ReactElement } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   useTalkState,
 } from "../store";
 import { Avatar, palette, smallText, timeLabel } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 function BellGlyph(): ReactElement {
   return (

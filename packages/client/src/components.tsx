@@ -94,7 +94,7 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
   }
 
   return (
-    <div style={pageRoot}>
+    <div style={pageRoot} data-dsht-page-root>
       {body}
       {talk.toast.length > 0 ? <Toast text={talk.toast} onDone={() => dismissToast()} /> : null}
     </div>

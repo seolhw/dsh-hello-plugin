@@ -2,7 +2,7 @@
 // 「加入 / 发现 / 创建」社区合并弹窗：顶部 tab 切换，默认「加入」。
 // ================================================================
 
-import { Button, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { Community } from "@dsh-talk/types/entities";
 import { type CSSProperties, type ReactElement, useEffect, useState } from "react";
 import {
@@ -24,6 +24,7 @@ import {
   pillStyle,
   smallText,
 } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 // 发现页的社区行（头像 + 名称/成员数 + 简介 + 加入按钮）
 const discoverRow: CSSProperties = {

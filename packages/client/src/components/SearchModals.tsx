@@ -2,13 +2,14 @@
 // 聊天相关弹窗：社区内消息搜索（命中可跳转定位）、当前频道在线成员。
 // ================================================================
 
-import { Button, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ChannelOnlineMember, SearchMessageResult } from "@dsh-talk/types/api";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { notify, revealMessage, searchCommunityMessages } from "../store";
 import { emptyMsg, liveDot } from "./homeStyles";
 import { Avatar, listCardName, palette, smallText, timeLabel } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 /** 高亮命中关键词（不区分大小写） */
 function highlightMatch(text: string, keyword: string): ReactNode {

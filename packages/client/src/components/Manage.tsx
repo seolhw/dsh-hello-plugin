@@ -17,7 +17,6 @@ import {
   IconUserOutline16,
   Input,
   Menu,
-  Modal,
   writeClipboard,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CommunityBanItem } from "@dsh-talk/types/api";
@@ -56,6 +55,7 @@ import {
   smallText,
   timeLabel,
 } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 const isModerator = (role: MemberRole | null | undefined): boolean =>
   role === "owner" || role === "admin";

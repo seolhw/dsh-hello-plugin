@@ -2,7 +2,7 @@
 // 讨论组（thread）相关弹窗：创建 / 输入密码进入 / 设置 / 私密成员管理。
 // ================================================================
 
-import { Button, IconPlusOutline16, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, IconPlusOutline16, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ThreadMemberItem, ThreadSummary, UpdateThreadRequest } from "@dsh-talk/types/api";
 import type { ThreadVisibility, User } from "@dsh-talk/types/entities";
 import { type ReactElement, useEffect, useState } from "react";
@@ -28,6 +28,7 @@ import {
   pillStyle,
   smallText,
 } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 /** 创建讨论组 / 话题：按来源预填标题，可设为公开或私密（可带进入密码） */
 export function ThreadCreateModal({

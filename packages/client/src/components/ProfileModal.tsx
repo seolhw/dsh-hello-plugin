@@ -2,7 +2,7 @@
 // 个人中心：改头像 / 改昵称 / 改用户名 / 改密码；邮箱只读；退出登录。
 // ================================================================
 
-import { Button, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
@@ -16,6 +16,7 @@ import {
   useTalkState,
 } from "../store";
 import { AvatarPicker, fieldLabel, palette, smallText } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 /** 只读信息行：左侧标签，右侧值（单行省略） */
 const infoRow: CSSProperties = {

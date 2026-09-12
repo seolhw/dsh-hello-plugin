@@ -2,7 +2,7 @@
 // DSH 会话分享：选择本机会话分享到频道、消息内嵌卡片、分享详情（下载 / 克隆）。
 // ================================================================
 
-import { Button, Input, Modal } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { GetShareResponse } from "@dsh-talk/types/api";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
@@ -20,6 +20,7 @@ import {
 } from "../store";
 import { formatBytes } from "./homeStyles";
 import { palette, pillStyle, smallText, timeLabel } from "./styles";
+import { TalkModal as Modal } from "./TalkModal";
 
 /** 工作区展示名：路径最后一段（对齐宿主左侧会话栏） */
 function workspaceLabel(cwd: string): string {

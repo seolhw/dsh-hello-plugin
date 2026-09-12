@@ -1,5 +1,5 @@
 // ================================================================
-// 「加入 / 发现 / 创建」社区合并弹窗：顶部 tab 切换，默认「加入」。
+// 「发现 / 加入 / 创建」社区合并弹窗：顶部 tab 切换，默认「发现」。
 // ================================================================
 
 import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -53,7 +53,7 @@ const discoverDesc: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/** 「加入 / 发现 / 创建」合并为一个弹窗：顶部 tab 切换，默认「加入」 */
+/** 「发现 / 加入 / 创建」合并为一个弹窗：顶部 tab 切换，默认「发现」 */
 export function CommunityAddModal({
   open,
   onClose,
@@ -62,7 +62,7 @@ export function CommunityAddModal({
   onClose: () => void;
 }): ReactElement {
   const talk = useTalkState();
-  const [tab, setTab] = useState<"join" | "discover" | "create">("join");
+  const [tab, setTab] = useState<"join" | "discover" | "create">("discover");
   // 加入：邀请码
   const [code, setCode] = useState("");
   // 发现：公开社区目录
@@ -80,10 +80,11 @@ export function CommunityAddModal({
   // 我已在的社区（发现页据此把「加入」换成「进入」）
   const joinedIds = new Set(talk.communities.map((c) => c.id));
 
-  // 每次打开：重置表单，默认落在「加入」
+  // 每次打开：重置表单，默认落在「发现」
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 仅在弹窗打开时拉取一次热门列表
   useEffect(() => {
     if (open) {
-      setTab("join");
+      setTab("discover");
       setCode("");
       setKeyword("");
       setDiscoverItems([]);
@@ -92,6 +93,7 @@ export function CommunityAddModal({
       setDescription("");
       setPrivacy("public");
       setIconUrl(null);
+      void loadDiscover("");
     }
   }, [open]);
 
@@ -182,11 +184,8 @@ export function CommunityAddModal({
       }
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* tab 顶栏：加入（默认）/ 发现 / 创建 */}
+        {/* tab 顶栏：发现（默认）/ 加入 / 创建 */}
         <div style={pillGroup}>
-          <button type="button" style={pillStyle(tab === "join")} onClick={() => setTab("join")}>
-            加入
-          </button>
           <button
             type="button"
             style={pillStyle(discovering)}
@@ -196,6 +195,9 @@ export function CommunityAddModal({
             }}
           >
             发现
+          </button>
+          <button type="button" style={pillStyle(tab === "join")} onClick={() => setTab("join")}>
+            加入
           </button>
           <button type="button" style={pillStyle(creating)} onClick={() => setTab("create")}>
             创建

@@ -35,6 +35,7 @@ import { EmojiPopover } from "./EmojiPicker";
 import { ForumTopicBoard } from "./ForumTopicBoard";
 import {
   chatCol,
+  composerBox,
   composerWrap,
   creatorRow,
   emptyMsg,
@@ -75,7 +76,7 @@ export function ChatPane({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const MAX_ATTACH = 4;
   const [shareOpen, setShareOpen] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(true);
   // 输入框 / @ 提及自动补全 / 消息搜索
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerText, setComposerText] = useState("");
@@ -604,208 +605,220 @@ export function ChatPane({
             <div style={composerWrap}>
               {canPost ? (
                 <>
-                  {/* 分享 DSH 会话：仅主频道（讨论组/话题内不分享） */}
-                  {!isThread ? (
+                  {/* 输入整体外框：左侧操作区与输入框合并在一起 */}
+                  <div style={composerBox}>
+                    {/* 分享 DSH 会话：仅主频道（讨论组/话题内不分享） */}
+                    {!isThread ? (
+                      <Button
+                        size="md"
+                        variant="ghost"
+                        icon={<IconShareOutline16 />}
+                        onClick={() => setShareOpen(true)}
+                        disabled={talk.view.sending}
+                        aria-label="分享"
+                        title="把本机 DSH 会话分享到社区"
+                      />
+                    ) : null}
+                    <EmojiPopover
+                      open={emojiOpen}
+                      onOpenChange={(next) => {
+                        setEmojiOpen(next);
+                        // 表情面板与 @ 补全弹层都贴在输入框上方，同时展开会互相遮挡
+                        if (next) setMentionActive(false);
+                      }}
+                      onPick={insertEmoji}
+                      disabled={talk.view.sending}
+                    />
                     <Button
                       size="md"
                       variant="ghost"
-                      icon={<IconShareOutline16 />}
-                      onClick={() => setShareOpen(true)}
+                      icon={<IconPaperclipOutline16 />}
+                      onClick={() => fileInputRef.current?.click()}
                       disabled={talk.view.sending}
-                      aria-label="分享"
-                      title="把本机 DSH 会话分享到社区"
+                      aria-label="添加附件"
+                      title="添加附件"
                     />
-                  ) : null}
-                  <EmojiPopover
-                    open={emojiOpen}
-                    onOpenChange={(next) => {
-                      setEmojiOpen(next);
-                      // 表情面板与 @ 补全弹层都贴在输入框上方，同时展开会互相遮挡
-                      if (next) setMentionActive(false);
-                    }}
-                    onPick={insertEmoji}
-                    disabled={talk.view.sending}
-                  />
-                  <Button
-                    size="md"
-                    variant="ghost"
-                    icon={<IconPaperclipOutline16 />}
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={talk.view.sending}
-                    aria-label="添加附件"
-                    title="添加附件"
-                  />
-                  <div
-                    style={{
-                      flex: 1,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 6,
-                      minWidth: 0,
-                    }}
-                  >
-                    {replyingPreview ? (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                          background: palette.inputBg,
-                          border: `1px solid ${palette.border}`,
-                          borderRadius: 8,
-                          padding: "2px 4px 2px 8px",
-                        }}
-                      >
-                        <span style={{ color: palette.accent, display: "inline-flex" }}>
-                          <ReplyGlyph />
-                        </span>
-                        <span
+                    <div
+                      style={{
+                        flex: 1,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                        minWidth: 0,
+                      }}
+                    >
+                      {replyingPreview ? (
+                        <div
                           style={{
-                            flex: 1,
-                            minWidth: 0,
-                            fontSize: 14,
-                            color: palette.muted,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            background: palette.inputBg,
+                            border: `1px solid ${palette.border}`,
+                            borderRadius: 8,
+                            padding: "2px 4px 2px 8px",
                           }}
                         >
-                          正在回复{" "}
-                          <span style={{ fontWeight: 600, color: palette.text }}>
-                            @{replyingPreview.author}
+                          <span style={{ color: palette.accent, display: "inline-flex" }}>
+                            <ReplyGlyph />
                           </span>
-                          {replyingPreview.content ? (
-                            <span>：{replyingPreview.content}</span>
-                          ) : null}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<IconCloseOutline16 />}
-                          onClick={() => {
-                            cancelReply();
-                            composerRef.current?.focus();
-                          }}
-                          aria-label="取消回复"
-                        />
-                      </div>
-                    ) : null}
-                    {pendingFiles.length > 0 ? (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {pendingFiles.map((f, i) => (
                           <span
-                            key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`}
-                            style={pendingChip}
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              fontSize: 14,
+                              color: palette.muted,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
                           >
-                            <span
-                              style={{
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {f.name}
+                            正在回复{" "}
+                            <span style={{ fontWeight: 600, color: palette.text }}>
+                              @{replyingPreview.author}
                             </span>
-                            <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>
-                              {formatBytes(f.size)}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              icon={<IconCloseOutline16 />}
-                              onClick={() => removePending(i)}
-                              aria-label={`移除 ${f.name}`}
-                            />
+                            {replyingPreview.content ? (
+                              <span>：{replyingPreview.content}</span>
+                            ) : null}
                           </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    {mentionActive ? (
-                      <div
-                        style={{
-                          background: palette.elevated,
-                          border: `1px solid ${palette.border}`,
-                          borderRadius: 10,
-                          padding: 4,
-                          maxHeight: 220,
-                          overflowY: "auto",
-                          boxShadow: shadow.menu,
-                        }}
-                      >
-                        {talk.view.membersLoading ? (
-                          <div
-                            style={{
-                              fontSize: 14,
-                              color: palette.muted,
-                              padding: "8px 10px",
-                              textAlign: "center",
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<IconCloseOutline16 />}
+                            onClick={() => {
+                              cancelReply();
+                              composerRef.current?.focus();
                             }}
-                          >
-                            加载成员…
-                          </div>
-                        ) : mentionCandidates.length === 0 ? (
-                          <div
-                            style={{
-                              fontSize: 14,
-                              color: palette.muted,
-                              padding: "8px 10px",
-                              textAlign: "center",
-                            }}
-                          >
-                            {mentionQuery.length > 0
-                              ? `没有匹配「${mentionQuery}」的成员`
-                              : "还没有成员"}
-                          </div>
-                        ) : (
-                          mentionCandidates.map((member, i) => (
-                            <button
-                              key={member.userId}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => acceptMention(member)}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                width: "100%",
-                                border: "none",
-                                background: i === mentionIndex ? palette.hover : "transparent",
-                                borderRadius: 8,
-                                padding: "5px 8px",
-                                cursor: "pointer",
-                                textAlign: "left",
-                              }}
+                            aria-label="取消回复"
+                          />
+                        </div>
+                      ) : null}
+                      {pendingFiles.length > 0 ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {pendingFiles.map((f, i) => (
+                            <span
+                              key={`${f.name}-${f.size}-${f.lastModified}-${f.type}`}
+                              style={pendingChip}
                             >
-                              <Avatar label={member.handle} src={member.avatarUrl} size={18} />
                               <span
                                 style={{
-                                  fontSize: 14,
-                                  fontWeight: 600,
-                                  color: palette.text,
-                                  flex: "0 0 auto",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
                                 }}
                               >
-                                {member.displayName ?? member.handle}
+                                {f.name}
                               </span>
-                              <span style={{ fontSize: 14, color: palette.muted }}>
-                                @{member.handle}
+                              <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>
+                                {formatBytes(f.size)}
                               </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    ) : null}
-                    <textarea
-                      ref={composerRef}
-                      value={composerText}
-                      onChange={(e) => handleComposerChange(e.target.value)}
-                      onKeyDown={handleComposerKeyDown}
-                      placeholder={
-                        isThread && currentThread
-                          ? `在「${currentThread.name}」里发消息…`
-                          : `在 #${channel?.name ?? ""} 发消息…`
-                      }
-                      style={textArea}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                icon={<IconCloseOutline16 />}
+                                onClick={() => removePending(i)}
+                                aria-label={`移除 ${f.name}`}
+                              />
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {mentionActive ? (
+                        <div
+                          style={{
+                            background: palette.elevated,
+                            border: `1px solid ${palette.border}`,
+                            borderRadius: 10,
+                            padding: 4,
+                            maxHeight: 220,
+                            overflowY: "auto",
+                            boxShadow: shadow.menu,
+                          }}
+                        >
+                          {talk.view.membersLoading ? (
+                            <div
+                              style={{
+                                fontSize: 14,
+                                color: palette.muted,
+                                padding: "8px 10px",
+                                textAlign: "center",
+                              }}
+                            >
+                              加载成员…
+                            </div>
+                          ) : mentionCandidates.length === 0 ? (
+                            <div
+                              style={{
+                                fontSize: 14,
+                                color: palette.muted,
+                                padding: "8px 10px",
+                                textAlign: "center",
+                              }}
+                            >
+                              {mentionQuery.length > 0
+                                ? `没有匹配「${mentionQuery}」的成员`
+                                : "还没有成员"}
+                            </div>
+                          ) : (
+                            mentionCandidates.map((member, i) => (
+                              <button
+                                key={member.userId}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => acceptMention(member)}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  width: "100%",
+                                  border: "none",
+                                  background: i === mentionIndex ? palette.hover : "transparent",
+                                  borderRadius: 8,
+                                  padding: "5px 8px",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                }}
+                              >
+                                <Avatar label={member.handle} src={member.avatarUrl} size={18} />
+                                <span
+                                  style={{
+                                    fontSize: 14,
+                                    fontWeight: 600,
+                                    color: palette.text,
+                                    flex: "0 0 auto",
+                                  }}
+                                >
+                                  {member.displayName ?? member.handle}
+                                </span>
+                                <span style={{ fontSize: 14, color: palette.muted }}>
+                                  @{member.handle}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      ) : null}
+                      <textarea
+                        ref={composerRef}
+                        value={composerText}
+                        onChange={(e) => handleComposerChange(e.target.value)}
+                        onKeyDown={handleComposerKeyDown}
+                        placeholder={
+                          isThread && currentThread
+                            ? `在「${currentThread.name}」里发消息…`
+                            : `在 #${channel?.name ?? ""} 发消息…`
+                        }
+                        style={textArea}
+                      />
+                    </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      onChange={(e) => pickFiles(e)}
+                      style={{ display: "none" }}
+                      aria-hidden
+                      tabIndex={-1}
                     />
                   </div>
                   <Button
@@ -818,15 +831,6 @@ export function ChatPane({
                     }
                     onClick={() => void submit()}
                     aria-label="发送"
-                  />
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={(e) => pickFiles(e)}
-                    style={{ display: "none" }}
-                    aria-hidden
-                    tabIndex={-1}
                   />
                 </>
               ) : (

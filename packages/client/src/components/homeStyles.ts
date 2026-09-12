@@ -103,7 +103,7 @@ export const railDivider: CSSProperties = {
 };
 
 export const midCol: CSSProperties = {
-  width: 216,
+  width: 300,
   flex: "0 0 auto",
   background: palette.page,
   borderRight: `1px solid ${palette.border}`,
@@ -226,16 +226,29 @@ export const composerWrap: CSSProperties = {
   alignItems: "flex-end",
 };
 
-export const textArea: CSSProperties = {
+/** 输入整体外框：左侧操作区（分享 / 表情 / 附件）与输入框合并为同一个圆角容器 */
+export const composerBox: CSSProperties = {
   flex: 1,
-  minHeight: 40,
-  maxHeight: 160,
-  resize: "none",
-  borderRadius: 10,
+  minWidth: 0,
+  display: "flex",
+  alignItems: "flex-end",
+  gap: 4,
+  padding: 4,
+  borderRadius: 12,
   border: `1px solid ${palette.border}`,
   background: palette.inputBg,
+};
+
+/** 已并入 composerBox 外框，故自身不再描边、不再铺底色 */
+export const textArea: CSSProperties = {
+  flex: 1,
+  minHeight: 34,
+  maxHeight: 160,
+  resize: "none",
+  border: "none",
+  background: "transparent",
   color: palette.text,
-  padding: "8px 10px",
+  padding: "7px 6px 7px 2px",
   font: "inherit",
   fontSize: 14,
   outline: "none",

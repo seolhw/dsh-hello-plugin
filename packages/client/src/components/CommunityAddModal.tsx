@@ -216,6 +216,7 @@ export function CommunityAddModal({
                 uploadLabel="设置头像"
                 removeLabel="移除头像"
                 busy={busy}
+                kind="community"
               />
             </div>
             <div style={fieldBlock}>
@@ -297,7 +298,7 @@ export function CommunityAddModal({
                   const joined = joinedIds.has(item.id);
                   return (
                     <div key={item.id} style={discoverRow}>
-                      <Avatar label={item.name} src={item.iconUrl} />
+                      <Avatar label={item.name} src={item.iconUrl} kind="community" />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={discoverName}>
                           {item.name}

@@ -171,13 +171,44 @@ export function BrandLogo({ size = 34, title }: { size?: number; title?: string 
   );
 }
 
-/** 头像圆块：有 url 时显示图片，无 url / 加载失败时回退到 handle 首字符字母头像 */
+// ---------------- 默认头像（DiceBear 占位图） ----------------
+// 用户与社区走不同 style + 不同配色，避免默认头像看起来是一类东西：
+//   用户 = notionists 手绘人物 + 低饱和马卡龙底色（纸面透明）
+//   社区 = shapes 几何图形 + 高饱和底色 + 白色图形，更接近社区徽标
+const DICEBEAR_API = "https://api.dicebear.com/10.x";
+
+const USER_PLACEHOLDER_BG = "b6e3f4";
+// const USER_PLACEHOLDER_BG = "b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf";
+const COMMUNITY_PLACEHOLDER_BG = "7c3aed";
+// const COMMUNITY_PLACEHOLDER_BG = "2563eb,7c3aed,db2777,0d9488,ea580c";
+
+/** 头像归属：用户 / 社区，决定默认占位图的风格 */
+export type AvatarKind = "user" | "community";
+
+/** 拼装 DiceBear 占位图 URL；seed 相同则每次生成同一张图，可稳定替代自定义头像 */
+export function dicebearAvatarUrl(kind: AvatarKind, seed: string): string {
+  const search = new URLSearchParams({ seed, size: "96" });
+  if (kind === "community") {
+    search.set("backgroundColor", COMMUNITY_PLACEHOLDER_BG);
+    for (const key of ["shape1Color", "shape2Color", "shape3Color"]) {
+      search.set(key, "ffffff");
+    }
+    return `${DICEBEAR_API}/planets/svg?${search}`;
+  }
+  search.set("backgroundColor", USER_PLACEHOLDER_BG);
+  // 纸面透明，让底色铺满整个头像圆块
+  search.set("paperColor", "00000000");
+  return `${DICEBEAR_API}/voxel-bot/svg?${search}`;
+}
+
+/** 头像圆块：有 url 时显示图片；无 url / 加载失败时回退到 DiceBear 默认占位图 */
 export function Avatar({
   label,
   color,
   size = 28,
   src,
   inset,
+  kind = "user",
 }: {
   label: string;
   color?: string;
@@ -185,12 +216,17 @@ export function Avatar({
   src?: string | null;
   /** 图片相对圆块的内缩（px）：留出一圈底色与 logo 的缝隙；不传则图片铺满整圆 */
   inset?: number;
+  /** 头像归属：用户 / 社区，决定默认占位图风格（默认用户） */
+  kind?: AvatarKind;
 }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     if (src) setFailed(false);
   }, [src]);
+  const placeholder = dicebearAvatarUrl(kind, label);
   const showImage = Boolean(src) && !failed;
+  const showPlaceholder = !showImage && placeholder;
+
   return (
     <span
       style={{
@@ -225,6 +261,18 @@ export function Avatar({
             ...(inset ? { boxSizing: "border-box" as const, padding: inset } : {}),
           }}
         />
+      ) : showPlaceholder ? (
+        <img
+          src={placeholder}
+          alt={label}
+          onError={() => setFailed(true)}
+          style={{
+            width: "100%",
+            height: "100%",
+            display: "block",
+            objectFit: "cover",
+          }}
+        />
       ) : (
         label.slice(0, 1).toUpperCase()
       )}
@@ -242,6 +290,7 @@ export function AvatarPicker({
   uploadLabel = "修改头像",
   removeLabel = "移除头像",
   busy,
+  kind = "user",
 }: {
   src?: string | null;
   label: string;
@@ -251,11 +300,13 @@ export function AvatarPicker({
   uploadLabel?: string;
   removeLabel?: string;
   busy?: boolean;
+  /** 头像归属：用户 / 社区，决定默认占位图风格（默认用户） */
+  kind?: AvatarKind;
 }): ReactElement {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <Avatar label={label} src={src ?? null} size={size} />
+      <Avatar label={label} src={src ?? null} size={size} kind={kind} />
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ display: "flex", gap: 6 }}>
           <Button

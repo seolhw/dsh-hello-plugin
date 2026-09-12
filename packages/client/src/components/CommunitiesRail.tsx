@@ -50,7 +50,14 @@ function CommunityMetaCard({ community }: { community: Community }): ReactElemen
   return (
     <div style={tipWrap}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Avatar color="#fff" label={community.name} src={community.iconUrl} size={32} inset={3} />
+        <Avatar
+          color="#fff"
+          label={community.name}
+          src={community.iconUrl}
+          size={32}
+          inset={3}
+          kind="community"
+        />
         <div style={{ minWidth: 0 }}>
           <div
             style={{
@@ -201,7 +208,14 @@ export function CommunitiesRail({
               {active ? <span style={railPill} /> : null}
               {withTip(
                 <span style={railAvatar}>
-                  <Avatar color="#fff" label={c.name} src={c.iconUrl} size={44} inset={4} />
+                  <Avatar
+                    color="#fff"
+                    label={c.name}
+                    src={c.iconUrl}
+                    size={44}
+                    inset={4}
+                    kind="community"
+                  />
                   {mention > 0 ? (
                     <span style={{ ...railBubble, background: palette.accent }}>{mention}</span>
                   ) : unread > 0 ? (

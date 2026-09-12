@@ -59,7 +59,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
 
   return (
     <div style={rowWrap}>
-      <Avatar label={communityName || "邀"} src={icon} size={34} />
+      <Avatar label={communityName || "邀"} src={icon} size={34} kind="community" />
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
         <div
           style={{

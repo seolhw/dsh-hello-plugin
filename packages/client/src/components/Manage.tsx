@@ -367,6 +367,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             uploadLabel="设置头像"
             removeLabel="移除头像"
             busy={busy}
+            kind="community"
           />
         </div>
         <div style={fieldBlock}>

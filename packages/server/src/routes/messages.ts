@@ -37,7 +37,7 @@ import type {
   EvtMessageReactions,
   EvtMessageUpdated,
 } from "@dsh-talk/types/ws";
-import { and, asc, desc, eq, gt, inArray, isNull, like, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, sql } from "drizzle-orm";
 import { compact, uniq } from "es-toolkit/array";
 import { clamp } from "es-toolkit/math";
 import { Hono } from "hono";
@@ -631,14 +631,27 @@ messagesApi.post("/:id/reactions", async (c) => {
   return c.json({ messageId: row.id, reactions } satisfies ToggleMessageReactionResponse);
 });
 
-// --- GET /search —— 社区内消息全文搜索（成员可用；倒序 + cursor 分页） ---
+// --- GET /search —— 社区内消息搜索（成员可用；关键词 + 频道/作者/时间范围/@我，倒序 + cursor 分页） ---
 messagesApi.get("/search", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = (c.req.query("communityId") ?? "").trim();
   const q = (c.req.query("q") ?? "").trim();
   if (!communityId) throw HttpApiError.badRequest("communityId required");
-  if (q.length === 0) return c.json({ items: [], nextCursor: null, count: 0 });
+
+  // 可选筛选：频道 / 作者 / 时间范围（含端点）/ 只看提及我的
+  const channelId = (c.req.query("channelId") ?? "").trim();
+  const authorId = (c.req.query("authorId") ?? "").trim();
+  const rawFrom = Number.parseInt(c.req.query("from") ?? "", 10);
+  const rawTo = Number.parseInt(c.req.query("to") ?? "", 10);
+  const from = Number.isFinite(rawFrom) ? rawFrom : null;
+  const to = Number.isFinite(rawTo) ? rawTo : null;
+  const mentionsMe = (c.req.query("mentionsMe") ?? "") === "true";
+
+  // 关键词与筛选全空时不返回全量（避免一次拉光社区消息）
+  if (q.length === 0 && !channelId && !authorId && from === null && to === null && !mentionsMe) {
+    return c.json({ items: [], nextCursor: null, count: 0 });
+  }
   await requireMember(db, communityId, userId);
 
   const rawLimit = c.req.query("limit") ?? "";
@@ -646,7 +659,14 @@ messagesApi.get("/search", async (c) => {
   const rawCursor = c.req.query("cursor") ?? "";
   const cursor = rawCursor.trim().length > 0 ? Number.parseInt(rawCursor, 10) : null;
 
-  const conds = [eq(messages.communityId, communityId), like(messages.content, `%${q}%`)];
+  const conds = [eq(messages.communityId, communityId)];
+  if (q.length > 0) conds.push(like(messages.content, `%${q}%`));
+  if (channelId) conds.push(eq(messages.channelId, channelId));
+  if (authorId) conds.push(eq(messages.authorId, authorId));
+  if (from !== null) conds.push(gte(messages.createdAt, from));
+  if (to !== null) conds.push(lte(messages.createdAt, to));
+  // mentions 存的是 JSON 字符串数组，用带引号的子串匹配，避免 userId 前缀误命中
+  if (mentionsMe) conds.push(like(messages.mentions, `%"${userId}"%`));
   if (cursor !== null && Number.isFinite(cursor)) conds.push(lt(messages.createdAt, cursor));
   const rows = await db
     .select()

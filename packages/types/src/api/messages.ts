@@ -4,6 +4,7 @@ import type {
   ID,
   Message,
   MessageReaction,
+  TimestampMs,
   User,
 } from "../entities";
 import type { CursorPaginated, CursorPaginationQuery, EmptyResponse } from "./common";
@@ -111,11 +112,21 @@ export interface SearchMessageResult extends Message {
   } | null;
 }
 
-/** GET /api/messages/search —— 社区内消息搜索 */
+/** GET /api/messages/search —— 社区内消息搜索（各条件之间为「与」关系） */
 export interface SearchMessagesQuery extends CursorPaginationQuery {
   communityId: ID;
-  /** 搜索关键词（匹配消息正文；倒序返回） */
+  /** 搜索关键词（匹配消息正文）；留空时至少要给一个筛选条件 */
   q: string;
+  /** 只看某个频道；留空 = 全社区 */
+  channelId?: ID | null;
+  /** 只看某个作者发的消息 */
+  authorId?: ID | null;
+  /** 起始时间（unix ms，含） */
+  from?: TimestampMs | null;
+  /** 结束时间（unix ms，含） */
+  to?: TimestampMs | null;
+  /** 只看提及我的消息 */
+  mentionsMe?: boolean;
 }
 
 export type SearchMessagesResponse = CursorPaginated<SearchMessageResult>;

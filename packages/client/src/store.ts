@@ -56,6 +56,13 @@ import {
   hostSessionPackage,
   hostSessions,
 } from "./config";
+import {
+  getReminderSettings,
+  type ReminderSettings,
+  requestNotificationPermission,
+  saveReminderSettings,
+  showDesktopNotification,
+} from "./reminders";
 import { ServerApiError, ServerClient } from "./server";
 import { TalkSocket } from "./ws";
 
@@ -133,6 +140,8 @@ export interface TalkState {
   inboxUnread: number;
   /** 正在处理（接受/拒绝）的站内信 id，用于按钮禁用 */
   inboxBusyId: string | null;
+  /** 本机提醒设置（桌面通知 / 免打扰），个人中心可改 */
+  reminderSettings: ReminderSettings;
 }
 
 // ---------------- 初始状态 ----------------
@@ -195,9 +204,14 @@ const INITIAL: TalkState = {
   inboxLoading: false,
   inboxUnread: 0,
   inboxBusyId: null,
+  reminderSettings: { desktop: false, dnd: false },
 };
 
-let state: TalkState = { ...INITIAL, view: { ...INITIAL_VIEW } };
+let state: TalkState = {
+  ...INITIAL,
+  view: { ...INITIAL_VIEW },
+  reminderSettings: getReminderSettings(),
+};
 const listeners = new Set<() => void>();
 let toastTimer: number | null = null;
 
@@ -585,6 +599,35 @@ export async function uploadImage(file: File): Promise<string | null> {
     notify(errorText(error));
     return null;
   }
+}
+
+// ---------------- 提醒设置（桌面通知 / 免打扰） ----------------
+
+/**
+ * 更新本机提醒设置。开启桌面通知前先要浏览器授权：
+ * 被拒绝时给出提示并保持原状，避免出现「开关亮着却弹不出来」。
+ */
+export async function updateReminderSettings(patch: Partial<ReminderSettings>): Promise<void> {
+  if (patch.desktop === true) {
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      notify("浏览器未授予通知权限，请在站点设置里允许通知后重试");
+      return;
+    }
+  }
+  setState({ reminderSettings: saveReminderSettings(patch) });
+}
+
+/** 被 @ 且页面在后台时弹桌面通知（受设置与浏览器授权双重约束） */
+function notifyMention(item: MessageItem): void {
+  const { desktop, dnd } = state.reminderSettings;
+  if (!desktop || dnd || !document.hidden) return;
+  const who = item.author.displayName ?? item.author.handle;
+  const text = item.content.replace(/\s+/g, " ").trim();
+  showDesktopNotification(
+    `${who} 在 DSH Talk 提到了你`,
+    text.length > 120 ? `${text.slice(0, 120)}…` : text,
+  );
 }
 
 /** 修改用户头像：先上传拿 URL，再更新 Better Auth user.image，并同步本地 me */
@@ -1808,10 +1851,13 @@ function handleServerFrame(frame: ServerFrame): void {
   }
   if (roomId === null) return;
   switch (frame.type) {
-    case "evt.message.new":
+    case "evt.message.new": {
       if (frame.payload.channelId !== roomId) return;
       upsertMessage(frame.payload.message as MessageItem, true);
+      // 被 @ 且页面在后台：按提醒设置补一条桌面通知（不影响站内状态）
+      if (frame.payload.mentionMe) notifyMention(frame.payload.message as MessageItem);
       return;
+    }
     case "evt.message.updated":
       if (frame.payload.channelId !== roomId) return;
       upsertMessage(frame.payload.message as MessageItem, true);
@@ -2521,19 +2567,35 @@ export async function refreshCommunityMembers(communityId: string): Promise<void
 
 // ---------------- 消息搜索 ----------------
 
-/** 在当前社区搜索消息（返回 null 表示失败，错误已 toast） */
+/** 消息搜索的可选筛选（与 REST 查询参数一一对应） */
+export interface MessageSearchFilters {
+  /** 只看某个频道 */
+  channelId?: string;
+  /** 只看某个作者 */
+  authorId?: string;
+  /** 起始时间（unix ms，含） */
+  from?: number;
+  /** 结束时间（unix ms，含） */
+  to?: number;
+  /** 只看提及我的消息 */
+  mentionsMe?: boolean;
+}
+
+/** 在当前社区搜索消息（关键词可留空，此时需带筛选；返回 null 表示失败，错误已 toast） */
 export async function searchCommunityMessages(
   q: string,
   cursor?: string,
+  filters: MessageSearchFilters = {},
 ): Promise<{ items: SearchMessageResult[]; nextCursor: string | null } | null> {
   const server = serverOf();
   const communityId = state.view.communityId;
   if (!server || !communityId) return null;
   try {
-    const res =
-      cursor === undefined
-        ? await server.searchMessages(communityId, q, { limit: 30 })
-        : await server.searchMessages(communityId, q, { cursor, limit: 30 });
+    const res = await server.searchMessages(communityId, q, {
+      ...filters,
+      limit: 30,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
     return { items: res.items, nextCursor: res.nextCursor };
   } catch (error) {
     notify(errorText(error));

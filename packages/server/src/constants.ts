@@ -4,10 +4,10 @@
 // ================================================================
 
 /** 每用户每天可创建社区的个数上限 */
-export const COMMUNITY_CREATE_DAILY_LIMIT = 3;
+export const COMMUNITY_CREATE_DAILY_LIMIT = 5;
 
 /** 每用户最多可加入的社区数（含自建） */
-export const MAX_COMMUNITIES_PER_USER = 10;
+export const MAX_COMMUNITIES_PER_USER = 20;
 
 /** 单条消息最大长度（字符） */
 export const MAX_MESSAGE_LENGTH = 4000;

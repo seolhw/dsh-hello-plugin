@@ -42,8 +42,9 @@ import {
   type PermissionFlags,
   type User,
 } from "@dsh-talk/types/entities";
-import { and, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { COMMUNITY_CREATE_DAILY_LIMIT, MAX_COMMUNITIES_PER_USER } from "../constants";
 import {
   type ChannelOverwriteRow,
   type ChannelRow,
@@ -253,7 +254,7 @@ communitiesApi.post("/", async (c) => {
   const body = await jsonBody<CreateCommunityRequest>(c);
   validateCommunityName(body.name ?? "");
 
-  // 限额（常量在 constants.ts）
+  // 限额（常量见 constants.ts）：加入总数 / 自建总数 / 自建频率
   const memberCountRows = await db
     .select({ value: count() })
     .from(communityMembers)
@@ -262,10 +263,34 @@ communitiesApi.post("/", async (c) => {
     .select({ value: count() })
     .from(communities)
     .where(eq(communities.ownerId, userId));
-  if ((memberCountRows[0]?.value ?? 0) >= 10)
-    throw new HttpApiError(409, "COMMUNITY_TOTAL_LIMIT", "超过最多加入的社区数（10）");
-  if ((totalOwned[0]?.value ?? 0) >= 10)
-    throw new HttpApiError(409, "COMMUNITY_TOTAL_LIMIT", "自建社区已达上限");
+  if ((memberCountRows[0]?.value ?? 0) >= MAX_COMMUNITIES_PER_USER)
+    throw new HttpApiError(
+      409,
+      "COMMUNITY_TOTAL_LIMIT",
+      `超过最多加入的社区数（${MAX_COMMUNITIES_PER_USER}）`,
+    );
+  if ((totalOwned[0]?.value ?? 0) >= MAX_COMMUNITIES_PER_USER)
+    throw new HttpApiError(
+      409,
+      "COMMUNITY_TOTAL_LIMIT",
+      `自建社区已达上限（${MAX_COMMUNITIES_PER_USER}）`,
+    );
+  // 自建频率：按最近 24 小时滚动窗口计数（不用自然日，免去时区歧义）
+  const recentOwned = await db
+    .select({ value: count() })
+    .from(communities)
+    .where(
+      and(
+        eq(communities.ownerId, userId),
+        gte(communities.createdAt, Date.now() - 24 * 60 * 60 * 1000),
+      ),
+    );
+  if ((recentOwned[0]?.value ?? 0) >= COMMUNITY_CREATE_DAILY_LIMIT)
+    throw new HttpApiError(
+      409,
+      "COMMUNITY_DAILY_LIMIT",
+      `24 小时内最多创建 ${COMMUNITY_CREATE_DAILY_LIMIT} 个社区，请稍后再试`,
+    );
 
   const id = newId();
   const now = Date.now();

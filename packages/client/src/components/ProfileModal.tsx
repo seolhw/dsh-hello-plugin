@@ -11,6 +11,7 @@ import {
   logout,
   notify,
   removeUserAvatar,
+  updateReminderSettings,
   updateUserAvatar,
   updateUserNickname,
   updateUserUsername,
@@ -40,6 +41,60 @@ const infoValue: CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
 };
+
+/** 开关行：无现成 Switch 组件，按站内样式手写一个（role=switch，可键盘操作） */
+function ToggleRow({
+  label,
+  hint,
+  checked,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onToggle: () => void;
+}): ReactElement {
+  return (
+    <div style={infoRow}>
+      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: palette.text }}>{label}</span>
+        <span style={{ ...smallText, fontSize: 14 }}>{hint}</span>
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={onToggle}
+        style={{
+          flex: "0 0 auto",
+          width: 40,
+          height: 22,
+          padding: 0,
+          borderRadius: 999,
+          border: "none",
+          cursor: "pointer",
+          background: checked ? palette.accent : palette.border,
+          position: "relative",
+          transition: "background 0.15s",
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 2,
+            left: checked ? 20 : 2,
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#fff",
+            transition: "left 0.15s",
+          }}
+        />
+      </button>
+    </div>
+  );
+}
 
 export function ProfileModal({
   open,
@@ -300,6 +355,24 @@ export function ProfileModal({
               {pwdBusy ? "更新中…" : "更新密码"}
             </Button>
           </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 650, color: palette.text }}>提醒</span>
+          <ToggleRow
+            label="桌面通知"
+            hint="页面在后台时，当前房间有人 @ 我会弹系统通知（需浏览器授权）"
+            checked={talk.reminderSettings.desktop}
+            onToggle={() =>
+              void updateReminderSettings({ desktop: !talk.reminderSettings.desktop })
+            }
+          />
+          <ToggleRow
+            label="免打扰"
+            hint="开启后只保留未读角标，不再弹桌面通知"
+            checked={talk.reminderSettings.dnd}
+            onToggle={() => void updateReminderSettings({ dnd: !talk.reminderSettings.dnd })}
+          />
         </div>
       </div>
     </Modal>

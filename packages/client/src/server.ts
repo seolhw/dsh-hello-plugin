@@ -893,17 +893,35 @@ export class ServerClient {
     );
   }
 
-  /** GET /api/messages/search —— 社区内消息搜索（按正文模糊匹配，倒序） */
+  /** GET /api/messages/search —— 社区内消息搜索（关键词 + 可选频道/作者/时间/@我 筛选，倒序） */
   searchMessages(
     communityId: string,
     q: string,
-    opts: { cursor?: string; limit?: number } = {},
+    opts: {
+      cursor?: string;
+      limit?: number;
+      /** 只看某个频道 */
+      channelId?: string;
+      /** 只看某个作者 */
+      authorId?: string;
+      /** 起始时间（unix ms，含） */
+      from?: number;
+      /** 结束时间（unix ms，含） */
+      to?: number;
+      /** 只看提及我的消息 */
+      mentionsMe?: boolean;
+    } = {},
   ): Promise<SearchMessagesResponse> {
     const query = toQuery({
       communityId,
       q,
       cursor: opts.cursor ?? "",
       limit: opts.limit ?? 20,
+      channelId: opts.channelId ?? "",
+      authorId: opts.authorId ?? "",
+      from: opts.from ?? "",
+      to: opts.to ?? "",
+      mentionsMe: opts.mentionsMe ? "true" : "",
     });
     return this.call<SearchMessagesResponse>(
       "GET",

@@ -31,6 +31,14 @@ body > div[role="presentation"]:has(> .${DIALOG_MARKER}) {
 body > div[role="presentation"] > .${DIALOG_MARKER} {
   width: min(560px, 100%);
 }
+
+/* HoverCard 卡片同样经 body portal 渲染、固定 z-index 100，会被上面的遮罩
+   （z-index 1000）盖住；把带说明卡的 portal root 提到遮罩之上（只读卡片，
+   无需交互）。标记属性见 Manage.tsx 的 ActionTip，宿主类名是构建期哈希，
+   故只能用结构选择器。 */
+body > div:has(> [data-dsht-hover-tip]) {
+  z-index: 1100;
+}
 `;
 
 let styleInjected = false;

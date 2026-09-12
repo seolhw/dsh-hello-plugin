@@ -13,7 +13,7 @@ import type { Channel } from "@dsh-talk/types/entities";
 import { Fragment, type ReactElement, useState } from "react";
 import { backToCommunities, openThread, selectChannel, useTalkState } from "../store";
 import { activeTile, midCol, privacyBadge, railScroll, sectionTitle } from "./homeStyles";
-import { ChannelRowMenu, CommunityTools, CreateChannelButton } from "./Manage";
+import { ChannelRowMenu, CommunityTools } from "./Manage";
 import { palette } from "./styles";
 import { ThreadJoinModal } from "./ThreadModals";
 
@@ -37,14 +37,6 @@ export function ChannelList({
           gap: 4,
         }}
       >
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<IconChevronLeftOutline14 />}
-          onClick={() => backToCommunities()}
-          aria-label="返回社区列表"
-          title="返回社区列表"
-        />
         <span
           style={{
             fontSize: 14,
@@ -132,7 +124,6 @@ export function ChannelList({
             </Fragment>
           );
         })}
-        <CreateChannelButton />
       </div>
     </div>
   );

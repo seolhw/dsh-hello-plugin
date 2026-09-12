@@ -116,6 +116,8 @@ export interface TalkState {
   communities: GetMyCommunitiesResponse;
   error: string;
   toast: string;
+  /** 待确认的站内确认弹窗（替代 window.confirm；非空时由 ConfirmDialog 渲染） */
+  confirm: ConfirmRequest | null;
   view: ViewState;
   /** 待验证的邮箱；非空时 AuthScreen 切换到验证码界面 */
   pendingEmail: string | null;
@@ -131,6 +133,25 @@ export interface TalkState {
 }
 
 // ---------------- 初始状态 ----------------
+
+/** askConfirm 的入参（confirmLabel / cancelLabel / danger 可选） */
+export interface ConfirmOptions {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** 危险操作：确认按钮用错误色 */
+  danger?: boolean;
+}
+
+/** 渲染中的确认弹窗内容（字段已补全默认值） */
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  danger: boolean;
+}
 
 const INITIAL_VIEW: ViewState = {
   communityId: null,
@@ -161,6 +182,7 @@ const INITIAL: TalkState = {
   communities: [],
   error: "",
   toast: "",
+  confirm: null,
   view: INITIAL_VIEW,
   pendingEmail: null,
   pendingEmailReason: null,
@@ -231,6 +253,39 @@ export function dismissToast(): void {
     toastTimer = null;
   }
   setState({ toast: "" });
+}
+
+/**
+ * 站内确认弹窗（替代 window.confirm）：
+ * confirmResolver 保存本次弹窗的 Promise resolver，弹窗关闭时以 true/false 结算，
+ * 调用点即可像 window.confirm 一样顺序书写。
+ */
+let confirmResolver: ((ok: boolean) => void) | null = null;
+
+/** 弹出站内确认弹窗，resolve 用户是否确认 */
+export function askConfirm(options: ConfirmOptions): Promise<boolean> {
+  // 同一时间只保留一个确认弹窗：未决的旧弹窗按「取消」结算，避免 Promise 悬挂
+  settleConfirm(false);
+  return new Promise<boolean>((resolve) => {
+    confirmResolver = resolve;
+    setState({
+      confirm: {
+        title: options.title,
+        message: options.message,
+        confirmLabel: options.confirmLabel ?? "确认",
+        cancelLabel: options.cancelLabel ?? "取消",
+        danger: options.danger ?? false,
+      },
+    });
+  });
+}
+
+/** 结算并关闭当前确认弹窗（由 ConfirmDialog 的按钮 / 关闭回调调用） */
+export function settleConfirm(ok: boolean): void {
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  if (resolve !== null) resolve(ok);
+  if (state.confirm !== null) setState({ confirm: null });
 }
 
 /** 清空站内信状态（登出 / 切换账号时调用） */
@@ -399,6 +454,8 @@ export async function applySession(result: { user: AuthUser; token: string }): P
     const next = await hostConfigSet({ token: result.token, handle: me.handle });
     const server = makeServer(next);
     const communities = await server.myCommunities();
+    // 切换账号：未决的确认弹窗按「取消」结算
+    settleConfirm(false);
     resetInbox();
     setState({
       busy: false,
@@ -570,6 +627,8 @@ export async function removeUserAvatar(): Promise<boolean> {
 
 export async function logout(): Promise<void> {
   closeRealtime();
+  // 未决的确认弹窗按「取消」结算，避免登出后 Promise 悬挂
+  settleConfirm(false);
   const settings = state.settings;
   if (settings && settings.token.length > 0) {
     try {

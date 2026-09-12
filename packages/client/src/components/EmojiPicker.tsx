@@ -6,7 +6,8 @@
 
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { palette, shadow, slimScrollbar } from "./styles";
 
 /** 手绘笑脸 glyph：表情按钮用（图标库没有对应图标） */
@@ -301,13 +302,22 @@ const pickerWrap: CSSProperties = {
   alignSelf: "flex-end",
 };
 
-/** 面板向上弹出（输入框贴底，向下会出屏） */
+/** 面板宽度：定位计算需要，故提为常量 */
+const PANEL_WIDTH = 320;
+
+/** 面板与视口边缘的最小留白 */
+const PANEL_MARGIN = 8;
+
+/**
+ * 面板经 portal 挂到 body、以 fixed 定位浮在触发按钮上方。
+ * 原因：面板原先用 absolute 相对按钮定位，而消息操作条在 messagesWrap
+ * （overflowY: auto）滚动容器内，消息靠上时整个面板会被容器裁剪 / 被聊天区
+ * 上层元素盖住。改为 fixed 视口定位后不再受任何祖先 overflow 影响。
+ */
 const panel: CSSProperties = {
-  position: "absolute",
-  bottom: "calc(100% + 8px)",
-  left: 0,
-  zIndex: 30,
-  width: 320,
+  position: "fixed",
+  zIndex: 900,
+  width: PANEL_WIDTH,
   background: palette.elevated,
   border: `1px solid ${palette.border}`,
   borderRadius: 10,
@@ -360,7 +370,8 @@ const emojiButton: CSSProperties = {
 };
 
 /**
- * 表情选择器：自带触发按钮，面板锚定在按钮上方（输入框/消息操作条都贴边，向下会出屏）。
+ * 表情选择器：自带触发按钮，面板经 body portal 以 fixed 定位浮在按钮上方
+ * （输入框贴底，向下会出屏；也避免被聊天区滚动容器裁剪）。
  * open 由外部持有，便于切房间 / 发送后统一收起。
  * align="right" 时面板向右对齐按钮（消息行操作条在右侧，避免面板溢出屏幕）。
  */
@@ -387,12 +398,56 @@ export function EmojiPopover({
 }): ReactElement {
   const [groupIndex, setGroupIndex] = useState(0);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  /** 触发按钮的视口矩形；未测到时不渲染面板 */
+  const [anchorRect, setAnchorRect] = useState<{
+    top: number;
+    bottom: number;
+    left: number;
+    right: number;
+  } | null>(null);
+  /** 面板实测高度：用于判断向上还是向下弹出 */
+  const [panelHeight, setPanelHeight] = useState(0);
 
-  // 点击面板外 / 按 Esc 收起；按钮本身在 wrap 内，不会误触关闭
+  // 面板 fixed 定位：按触发按钮的视口坐标实时计算，滚动 / 改窗口尺寸都要重算
+  useLayoutEffect(() => {
+    if (!open) {
+      setAnchorRect(null);
+      return;
+    }
+    function update(): void {
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setAnchorRect({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
+    }
+    update();
+    // 捕获阶段监听：聊天区（messagesWrap）自身的滚动不会冒泡到 window
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
+
+  // 面板渲染后量一次高度，用于决定向上 / 向下弹出
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelHeight(0);
+      return;
+    }
+    const height = panelRef.current?.offsetHeight ?? 0;
+    if (height !== panelHeight) setPanelHeight(height);
+  }, [open, panelHeight]);
+
+  // 点击面板外 / 按 Esc 收起；按钮与面板都识别为「内部」，不会误触关闭
   useEffect(() => {
     if (!open) return;
     function onMouseDown(event: MouseEvent): void {
-      if (!wrapRef.current?.contains(event.target as Node)) onOpenChange(false);
+      const target = event.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      onOpenChange(false);
     }
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") onOpenChange(false);
@@ -407,6 +462,22 @@ export function EmojiPopover({
 
   const group = EMOJI_GROUPS[groupIndex] ?? FREQUENT_GROUP;
 
+  /** 面板定位：默认向上弹（输入框贴底），上方放不下则翻到按钮下方 */
+  function panelStyle(): CSSProperties {
+    if (!anchorRect) return panel;
+    const rawLeft = align === "right" ? anchorRect.right - PANEL_WIDTH : anchorRect.left;
+    const maxLeft = window.innerWidth - PANEL_WIDTH - PANEL_MARGIN;
+    const left = Math.max(PANEL_MARGIN, Math.min(rawLeft, Math.max(PANEL_MARGIN, maxLeft)));
+    const fitsAbove = anchorRect.top - PANEL_MARGIN >= panelHeight;
+    return {
+      ...panel,
+      left,
+      ...(fitsAbove
+        ? { bottom: window.innerHeight - anchorRect.top + PANEL_MARGIN }
+        : { top: anchorRect.bottom + PANEL_MARGIN }),
+    };
+  }
+
   return (
     <div ref={wrapRef} style={pickerWrap}>
       <Button
@@ -419,47 +490,46 @@ export function EmojiPopover({
         aria-expanded={open}
         title={title}
       />
-      {open ? (
-        <div
-          style={align === "right" ? { ...panel, right: 0, left: "auto" } : panel}
-          role="dialog"
-          aria-label="表情面板"
-        >
-          <div style={tabRow}>
-            {EMOJI_GROUPS.map((item, index) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setGroupIndex(index)}
-                style={index === groupIndex ? { ...tab, ...tabActive } : tab}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ ...grid, ...slimScrollbar }}>
-            {group.emojis.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                title={emoji}
-                aria-label={emoji}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onPick(emoji)}
-                style={emojiButton}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = palette.hover;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
+      {open && anchorRect
+        ? createPortal(
+            <div ref={panelRef} style={panelStyle()} role="dialog" aria-label="表情面板">
+              <div style={tabRow}>
+                {EMOJI_GROUPS.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setGroupIndex(index)}
+                    style={index === groupIndex ? { ...tab, ...tabActive } : tab}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ ...grid, ...slimScrollbar }}>
+                {group.emojis.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    title={emoji}
+                    aria-label={emoji}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => onPick(emoji)}
+                    style={emojiButton}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = palette.hover;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 // ================================================================
-// 消息行：作者/时间/正文（@ 高亮）/附件/分享卡片 + 表情回应 + hover 操作条
-// （加表情回应/回复/讨论组/编辑/撤回）。
+// 消息行：作者/时间/正文（Markdown 渲染，含 @ 高亮）/附件/分享卡片
+// + 表情回应 + hover 操作条（加表情回应/回复/讨论组/编辑/撤回）。
 // ================================================================
 
 import {
@@ -13,9 +13,10 @@ import {
   IconTrashOutline16,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import { type MessageAttachment, Permission } from "@dsh-talk/types/entities";
-import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent, ReactElement } from "react";
 import { useState } from "react";
 import {
+  askConfirm,
   canEditMessage,
   canRetractMessage,
   channelPermissions,
@@ -30,40 +31,9 @@ import {
 } from "../store";
 import { EmojiPopover } from "./EmojiPicker";
 import { formatBytes, msgChip, msgRow, replyParts, textAreaEdit } from "./homeStyles";
+import { Markdown } from "./Markdown";
 import { ShareCardView } from "./ShareModals";
 import { Avatar, palette, smallText, timeLabel } from "./styles";
-
-/** 正文里的 @mention 高亮（自己用品牌底色反白） */
-function renderMentions(text: string, selfHandle: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const re = /@([\p{L}\p{N}_]+)/gu;
-  let last = 0;
-  let index = 0;
-  let match: RegExpExecArray | null = re.exec(text);
-  while (match !== null) {
-    if (match.index > last) nodes.push(text.slice(last, match.index));
-    const isSelf = match[1] === selfHandle;
-    nodes.push(
-      <span
-        key={`mention-${index}`}
-        style={{
-          color: isSelf ? palette.onColor : palette.accent,
-          background: isSelf ? palette.accent : palette.mentionBg,
-          borderRadius: 4,
-          padding: isSelf ? "0 3px" : "0 2px",
-          fontWeight: 500,
-        }}
-      >
-        {match[0]}
-      </span>,
-    );
-    last = match.index + match[0].length;
-    index += 1;
-    match = re.exec(text);
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
-}
 
 /** 回复（引用）小图标：拐角返回箭头，随按钮颜色 */
 export function ReplyGlyph(): ReactElement {
@@ -240,8 +210,20 @@ export function MessageRow({
 
   /** 撤回（自己的消息，2 分钟内）或删除（owner/admin） */
   async function remove(): Promise<void> {
-    const confirmed = window.confirm(
-      mine ? "撤回这条消息？2 分钟内可撤回，超过 2 分钟只能编辑。" : "删除这条消息？",
+    const confirmed = await askConfirm(
+      mine
+        ? {
+            title: "撤回这条消息",
+            message: "撤回后消息将从频道移除，2 分钟内可撤回，超过 2 分钟只能编辑。",
+            confirmLabel: "撤回",
+            danger: true,
+          }
+        : {
+            title: "删除这条消息",
+            message: "删除后消息将从频道永久移除，且无法恢复。",
+            confirmLabel: "删除",
+            danger: true,
+          },
     );
     if (!confirmed) return;
     try {
@@ -343,16 +325,7 @@ export function MessageRow({
             style={textAreaEdit}
           />
         ) : (
-          <div
-            style={{
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              fontSize: 14,
-              lineHeight: 1.55,
-            }}
-          >
-            {renderMentions(item.content, talk.me?.handle ?? "")}
-          </div>
+          <Markdown text={item.content} selfHandle={talk.me?.handle ?? ""} />
         )}
         <AttachmentList attachments={item.attachments ?? []} />
         {item.shareCard ? <ShareCardView card={item.shareCard} /> : null}

@@ -8,6 +8,7 @@
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
 import {
   Button,
+  HoverCard,
   IconBranchOutline16,
   IconChevronLeftOutline14,
   IconCopyOutline16,
@@ -27,6 +28,7 @@ import {
   type Channel,
   type ChannelOverwrite,
   type CommunityRole,
+  DEFAULT_ADMIN_ROLE_NAME,
   EVERYONE_TARGET_ID,
   type ID,
   type OverwriteTargetType,
@@ -40,6 +42,7 @@ import { useEffect, useState } from "react";
 import {
   adminRole,
   adminRoles,
+  askConfirm,
   banUser,
   canBanMembers,
   canInviteMembers,
@@ -134,15 +137,45 @@ const dialogHint: CSSProperties = {
   lineHeight: 1.6,
 };
 
-type CommunityDialog = null | "members" | "roles" | "invite-user" | "invite" | "settings";
+/** hover 说明卡的容器（标记属性供 TalkModal 提升层级，避免被弹窗遮罩盖住） */
+const tipWrap: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 176,
+  maxWidth: 260,
+};
 
-/** 频道列表顶部的社区管理菜单（成员 / 角色 / 邀请码 / 设置 / 退出） */
+const tipTitle: CSSProperties = { fontSize: 16, fontWeight: 600, color: palette.text };
+const tipHint: CSSProperties = { fontSize: 14, lineHeight: 1.5, color: palette.muted };
+
+/** 成员操作按钮的 hover 说明卡：标题 + 行为说明 */
+function ActionTip({ title, hint }: { title: string; hint: string }): ReactElement {
+  return (
+    <div data-dsht-hover-tip style={tipWrap}>
+      <span style={tipTitle}>{title}</span>
+      <span style={tipHint}>{hint}</span>
+    </div>
+  );
+}
+
+type CommunityDialog =
+  | null
+  | "members"
+  | "roles"
+  | "create-channel"
+  | "invite-user"
+  | "invite"
+  | "settings";
+
+/** 频道列表顶部的社区管理菜单（成员 / 角色 / 新建频道 / 邀请 / 设置 / 退出） */
 export function CommunityTools(): ReactElement | null {
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<CommunityDialog>(null);
   const communityId = talk.view.communityId;
   const canRoles = canManageRoles();
+  const canChannel = isModerator();
   const canInvite = canInviteMembers();
   const canCommunity = canManageCommunity();
   // 成员管理里同时含角色分配 / 踢人 / 封禁 / 转让，任一可见即显示
@@ -153,6 +186,8 @@ export function CommunityTools(): ReactElement | null {
   const menuItems: MenuEntry[] = [];
   if (canMembers) menuItems.push({ id: "members", label: "成员管理", icon: <IconUserOutline16 /> });
   if (canRoles) menuItems.push({ id: "roles", label: "角色管理", icon: <IconUserOutline16 /> });
+  if (canChannel)
+    menuItems.push({ id: "create-channel", label: "新建频道", icon: <IconPlusOutline16 /> });
   if (canInvite)
     menuItems.push({ id: "invite-user", label: "邀请用户", icon: <IconPlusOutline16 /> });
   if (member) menuItems.push({ id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> });
@@ -171,14 +206,23 @@ export function CommunityTools(): ReactElement | null {
           if (
             id === "members" ||
             id === "roles" ||
+            id === "create-channel" ||
             id === "invite-user" ||
             id === "invite" ||
             id === "settings"
           )
             setDialog(id);
           if (id === "leave") {
-            if (window.confirm("退出该社区？所有者需先转让所有权。"))
-              void leaveCommunity(communityId);
+            void (async () => {
+              const ok = await askConfirm({
+                title: "退出社区",
+                message:
+                  "退出后你将不再是该社区成员，需要重新加入才能查看社区内容（社区所有者需先转让所有权）。",
+                confirmLabel: "退出社区",
+                danger: true,
+              });
+              if (ok) await leaveCommunity(communityId);
+            })();
           }
         }}
         anchor={
@@ -195,6 +239,7 @@ export function CommunityTools(): ReactElement | null {
       />
       {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "roles" ? <RolesDialog open onClose={() => setDialog(null)} /> : null}
+      {dialog === "create-channel" ? <ChannelDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite-user" ? <InviteUserDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite" ? <InviteDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "settings" ? <SettingsDialog open onClose={() => setDialog(null)} /> : null}
@@ -237,9 +282,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
             复制
           </Button>
         </div>
-        <span style={dialogHint}>
-          邀请码在创建社区时生成、固定不变，不会过期；
-        </span>
+        <span style={dialogHint}>邀请码在创建社区时生成、固定不变，不会过期；</span>
       </div>
     </Modal>
   );
@@ -342,9 +385,12 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
   /** 删除社区（仅 owner 可见按钮）；删除后整个社区及其内容不复存在 */
   async function removeCommunity(): Promise<void> {
     if (!community) return;
-    const confirmed = window.confirm(
-      `删除社区「${community.name}」？其中所有频道与消息将被永久删除，且无法恢复。`,
-    );
+    const confirmed = await askConfirm({
+      title: `删除社区「${community.name}」`,
+      message: "社区下所有频道与消息将被永久删除，且无法恢复。",
+      confirmLabel: "永久删除",
+      danger: true,
+    });
     if (!confirmed) return;
     setBusy(true);
     const ok = await deleteCommunity(community.id);
@@ -510,7 +556,13 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   }
 
   async function transfer(user: User): Promise<void> {
-    if (!window.confirm(`把社区所有权转让给 @${user.handle}？转让后你将失去所有者权限。`)) return;
+    const ok = await askConfirm({
+      title: `转让社区所有权给 @${user.handle}`,
+      message: "转让后你将失去所有者权限，且只有新所有者能再转让回来。",
+      confirmLabel: "确认转让",
+      danger: true,
+    });
+    if (!ok) return;
     await transferOwner(user.id);
   }
 
@@ -528,30 +580,41 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   }
 
   async function kick(user: User): Promise<void> {
-    if (!window.confirm(`把 ${user.handle} 移出社区？`)) return;
-    const ok = await kickMember(user.id);
-    if (ok) setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
+    const ok = await askConfirm({
+      title: `移除 @${user.handle}`,
+      message: "把 TA 移出社区。之后 TA 仍可通过邀请码或邀请重新加入。",
+      confirmLabel: "移除成员",
+      danger: true,
+    });
+    if (!ok) return;
+    const done = await kickMember(user.id);
+    if (done) setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
   }
 
   async function ban(user: User): Promise<void> {
-    if (
-      !window.confirm(
-        `封禁 @${user.handle}？封禁会同时将其移出社区，且之后无法通过邀请码/邀请再加入（可在下方解封）。`,
-      )
-    ) {
-      return;
-    }
-    const ok = await banUser(user.id);
-    if (ok) {
+    const ok = await askConfirm({
+      title: `封禁 @${user.handle}`,
+      message: "封禁会同时将其移出社区，且之后无法通过邀请码/邀请再加入（可在下方解封）。",
+      confirmLabel: "封禁成员",
+      danger: true,
+    });
+    if (!ok) return;
+    const done = await banUser(user.id);
+    if (done) {
       setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
       void listBannedUsers().then(setBans);
     }
   }
 
   async function unban(item: CommunityBanItem): Promise<void> {
-    if (!window.confirm(`解封 @${item.user.handle}？解封后 TA 可重新加入社区。`)) return;
-    const ok = await unbanUser(item.userId);
-    if (ok) setBans((prev) => prev.filter((b) => b.userId !== item.userId));
+    const ok = await askConfirm({
+      title: `解封 @${item.user.handle}`,
+      message: "解封后 TA 可以重新加入社区，原有的成员身份不会自动恢复。",
+      confirmLabel: "解除封禁",
+    });
+    if (!ok) return;
+    const done = await unbanUser(item.userId);
+    if (done) setBans((prev) => prev.filter((b) => b.userId !== item.userId));
   }
 
   return (
@@ -633,21 +696,43 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                   </div>
                 </div>
                 {canTransfer ? (
-                  <Button size="sm" variant="ghost" onClick={() => void transfer(m.user)}>
-                    转让
-                  </Button>
+                  <HoverCard
+                    openDelayMs={300}
+                    content={
+                      <ActionTip
+                        title="转让所有权"
+                        hint={`把社区所有权交给 @${m.user.handle}。转让后你将失去所有者权限，且仅新所有者能再转让。`}
+                      />
+                    }
+                    anchor={
+                      <Button size="sm" variant="ghost" onClick={() => void transfer(m.user)}>
+                        转让
+                      </Button>
+                    }
+                  />
                 ) : null}
                 {rowCanManage ? (
                   <span style={{ display: "flex", gap: 2 }}>
                     {canQuickAdmin && !m.roleIds.some((id) => adminRoleIds.has(id)) ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void makeAdmin(m)}
-                        aria-label={`设为管理员 ${m.user.handle}`}
-                      >
-                        设为管理员
-                      </Button>
+                      <HoverCard
+                        openDelayMs={300}
+                        content={
+                          <ActionTip
+                            title="设为管理员"
+                            hint={`给 @${m.user.handle} 分配${DEFAULT_ADMIN_ROLE_NAME}角色，TA 将立即获得管理社区、频道与成员的权限。`}
+                          />
+                        }
+                        anchor={
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void makeAdmin(m)}
+                            aria-label={`设为管理员 ${m.user.handle}`}
+                          >
+                            设为管理员
+                          </Button>
+                        }
+                      />
                     ) : null}
                     {rowCanRoles ? (
                       <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
@@ -655,26 +740,47 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                       </Button>
                     ) : null}
                     {rowCanKick ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<IconTrashOutline16 />}
-                        onClick={() => void kick(m.user)}
-                        aria-label="移除成员"
-                      >
-                        移除
-                      </Button>
+                      <HoverCard
+                        openDelayMs={300}
+                        content={
+                          <ActionTip
+                            title="移除成员"
+                            hint={`把 @${m.user.handle} 移出社区。之后 TA 仍可通过邀请码或邀请重新加入。`}
+                          />
+                        }
+                        anchor={
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            icon={<IconTrashOutline16 />}
+                            onClick={() => void kick(m.user)}
+                            aria-label="移除成员"
+                          >
+                            移除
+                          </Button>
+                        }
+                      />
                     ) : null}
                     {rowCanBan ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void ban(m.user)}
-                        aria-label="封禁成员"
-                        title="封禁（同时移出成员并禁止再次加入）"
-                      >
-                        封禁
-                      </Button>
+                      <HoverCard
+                        openDelayMs={300}
+                        content={
+                          <ActionTip
+                            title="封禁成员"
+                            hint={`把 @${m.user.handle} 移出社区，并且不允许 TA 再加入（可在下方「已封禁用户」中解封）。`}
+                          />
+                        }
+                        anchor={
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void ban(m.user)}
+                            aria-label="封禁成员"
+                          >
+                            封禁
+                          </Button>
+                        }
+                      />
                     ) : null}
                   </span>
                 ) : null}
@@ -709,14 +815,25 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 </div>
                 <div style={{ ...smallText, fontSize: 14 }}>封禁于 {timeLabel(b.createdAt)}</div>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void unban(b)}
-                aria-label={`解封 ${b.user.handle}`}
-              >
-                解封
-              </Button>
+              <HoverCard
+                openDelayMs={300}
+                content={
+                  <ActionTip
+                    title="解除封禁"
+                    hint={`解除对 @${b.user.handle} 的封禁，之后 TA 可以通过邀请码或邀请重新加入。`}
+                  />
+                }
+                anchor={
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void unban(b)}
+                    aria-label={`解封 ${b.user.handle}`}
+                  >
+                    解封
+                  </Button>
+                }
+              />
             </div>
           ))}
         </div>
@@ -837,28 +954,6 @@ function MemberRolesDialog({
 }
 
 // ---------------- 频道：创建 / 编辑 / 删除 ----------------
-
-/** 频道列表底部“新建频道”入口（MANAGE_CHANNEL） */
-export function CreateChannelButton(): ReactElement | null {
-  const [open, setOpen] = useState(false);
-  if (!isModerator()) return null;
-  return (
-    <>
-      <div style={{ padding: "6px 8px" }}>
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<IconPlusOutline16 />}
-          onClick={() => setOpen(true)}
-          style={{ width: "100%" }}
-        >
-          新建频道
-        </Button>
-      </div>
-      {open ? <ChannelDialog open onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
 
 function ChannelDialog({
   open,
@@ -1022,7 +1117,13 @@ export function ChannelRowMenu({
   const isForum = channel.kind === "forum";
 
   async function remove(): Promise<void> {
-    if (!window.confirm(`删除频道 #${channel.name}？其中的消息将一并删除。`)) return;
+    const confirmed = await askConfirm({
+      title: `删除频道 #${channel.name}`,
+      message: "频道内的消息会一并永久删除，且无法恢复。",
+      confirmLabel: "删除频道",
+      danger: true,
+    });
+    if (!confirmed) return;
     const ok = await deleteChannelById(channel.id);
     if (ok) setMenuOpen(false);
   }
@@ -1122,7 +1223,13 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
   const everyone = roles.find((r) => r.isEveryone) ?? null;
 
   async function remove(role: CommunityRole): Promise<void> {
-    if (!window.confirm(`删除角色「${role.name}」？持有该角色的成员将立即失去其权限。`)) return;
+    const confirmed = await askConfirm({
+      title: `删除角色「${role.name}」`,
+      message: "持有该角色的成员将立即失去其权限，且无法恢复。",
+      confirmLabel: "删除角色",
+      danger: true,
+    });
+    if (!confirmed) return;
     await deleteRole(role.id);
   }
 
@@ -1179,24 +1286,46 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
                 {permissionSummary(role.permissions)}
               </div>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={i === 0 || !canManageRolePosition(role.position)}
-              onClick={() => void move(role, "up")}
-              aria-label={`${role.name} 上移`}
-            >
-              上移
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={i === custom.length - 1 || !canManageRolePosition(role.position)}
-              onClick={() => void move(role, "down")}
-              aria-label={`${role.name} 下移`}
-            >
-              下移
-            </Button>
+            <HoverCard
+              openDelayMs={300}
+              content={
+                <ActionTip
+                  title="上移层级"
+                  hint="把该角色的层级提高一位。层级越高，在权限覆盖与成员身份判定中越优先。"
+                />
+              }
+              anchor={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={i === 0 || !canManageRolePosition(role.position)}
+                  onClick={() => void move(role, "up")}
+                  aria-label={`${role.name} 上移`}
+                >
+                  上移
+                </Button>
+              }
+            />
+            <HoverCard
+              openDelayMs={300}
+              content={
+                <ActionTip
+                  title="下移层级"
+                  hint="把该角色的层级降低一位。层级越低，越容易被更高层级的角色覆盖。"
+                />
+              }
+              anchor={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={i === custom.length - 1 || !canManageRolePosition(role.position)}
+                  onClick={() => void move(role, "down")}
+                  aria-label={`${role.name} 下移`}
+                >
+                  下移
+                </Button>
+              }
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -1205,13 +1334,24 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
             >
               编辑
             </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!canManageRolePosition(role.position)}
-              icon={<IconTrashOutline16 />}
-              onClick={() => void remove(role)}
-              aria-label={`删除角色 ${role.name}`}
+            <HoverCard
+              openDelayMs={300}
+              content={
+                <ActionTip
+                  title="删除角色"
+                  hint={`删除「${role.name}」，持有该角色的成员会立即失去它带来的权限，且无法恢复。`}
+                />
+              }
+              anchor={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!canManageRolePosition(role.position)}
+                  icon={<IconTrashOutline16 />}
+                  onClick={() => void remove(role)}
+                  aria-label={`删除角色 ${role.name}`}
+                />
+              }
             />
           </div>
         ))}

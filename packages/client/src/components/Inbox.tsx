@@ -8,6 +8,7 @@ import type { InboxItem } from "@dsh-talk/types/api";
 import type { CSSProperties, ReactElement } from "react";
 import {
   acceptInvite,
+  askConfirm,
   closeInbox,
   declineInvite,
   markAllNotificationsRead,
@@ -125,8 +126,13 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
                 size="sm"
                 variant="ghost"
                 disabled={busy}
-                onClick={() => {
-                  if (window.confirm("拒绝这条社区邀请？")) void declineInvite(invite.id);
+                onClick={async () => {
+                  const ok = await askConfirm({
+                    title: "拒绝社区邀请",
+                    message: "拒绝后这条邀请失效，需要对方重新邀请才能加入。",
+                    confirmLabel: "拒绝邀请",
+                  });
+                  if (ok) void declineInvite(invite.id);
                 }}
               >
                 拒绝

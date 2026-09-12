@@ -8,6 +8,7 @@ import type { ThreadVisibility, User } from "@dsh-talk/types/entities";
 import { type ReactElement, useEffect, useState } from "react";
 import {
   addThreadMember,
+  askConfirm,
   canManageThreads,
   closeThread,
   createThreadInChannel,
@@ -449,7 +450,22 @@ export function ThreadMembersModal({
 
   async function remove(userId: string, isSelf: boolean): Promise<void> {
     if (busyId !== null) return;
-    if (!window.confirm(isSelf ? "退出该私密讨论组？" : "把该成员移出讨论组？")) return;
+    const okConfirm = await askConfirm(
+      isSelf
+        ? {
+            title: "退出讨论组",
+            message: "退出后将不再收到该讨论组的消息，需要重新加入才能进入。",
+            confirmLabel: "退出讨论组",
+            danger: true,
+          }
+        : {
+            title: "移出讨论组",
+            message: "把该成员移出后，TA 需要重新加入才能再看到讨论组消息。",
+            confirmLabel: "移出",
+            danger: true,
+          },
+    );
+    if (!okConfirm) return;
     setBusyId(userId);
     const ok = await removeThreadMember(thread.id, userId);
     setBusyId(null);

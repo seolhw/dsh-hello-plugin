@@ -9,6 +9,7 @@ import { Button, Toast } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 import { AuthScreen } from "./components/AuthScreen";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { HomeScreen } from "./components/HomeScreen";
 import { pageRoot, palette } from "./components/styles";
 import {
@@ -151,6 +152,7 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
       {talk.toast.length > 0 ? (
         <Toast text={talk.toast} anchor={pageEl} onDone={() => dismissToast()} />
       ) : null}
+      <ConfirmDialog />
     </div>
   );
 }

@@ -17,7 +17,7 @@ import {
 import type { ChannelOnlineMember } from "@dsh-talk/types/api";
 import { Permission } from "@dsh-talk/types/entities";
 import type { ChangeEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelReply,
   channelPermissions,
@@ -41,6 +41,7 @@ import {
   emptyMsg,
   formatBytes,
   liveDot,
+  messagesContent,
   messagesWrap,
   pendingChip,
   replyParts,
@@ -66,6 +67,7 @@ export function ChatPane({
   const channel = channelId ? (community?.channels.find((c) => c.id === channelId) ?? null) : null;
   const messageCount = talk.view.messages.length;
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const channelRef = useRef<string | null>(null);
   const pinnedRef = useRef(true);
   const lastCountRef = useRef(0);
@@ -144,8 +146,9 @@ export function ChatPane({
     pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
-  // 切房间（主频道/讨论组）→ 置底；消息增多且贴底 → 跟随
-  useEffect(() => {
+  // 切房间（主频道/讨论组）→ 置底；消息增多且贴底 → 跟随。
+  // 用 layout effect 保证进入房间首帧就停在最新消息处，不出现「先顶部再跳到底部」。
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const switched = channelRef.current !== roomKey;
@@ -160,6 +163,19 @@ export function ChatPane({
     lastCountRef.current = messageCount;
     if (grew && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [roomKey, messageCount]);
+
+  // 内容高度变化（图片懒加载、字体/排版回流）时，只要仍贴底就继续贴底
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 话题频道在「话题板 ↔ 聊天」间切换会重建内容节点，需随房间重新观测
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [roomKey]);
 
   // 切房间：清空输入框，收起 @ 补全弹层与回复提示
   // biome-ignore lint/correctness/useExhaustiveDependencies: 需要在切换房间时重置弹层与输入
@@ -510,59 +526,65 @@ export function ChatPane({
         ) : (
           <>
             <div ref={scrollRef} onScroll={onScroll} style={messagesWrap}>
-              {talk.view.messagesLoading ? (
-                <div style={{ ...emptyMsg }}>加载消息…</div>
-              ) : talk.view.messages.length === 0 ? (
-                <div style={{ ...emptyMsg }}>
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 44,
-                      height: 44,
-                      borderRadius: 14,
-                      fontSize: 19,
-                      fontWeight: 700,
-                      color: palette.accent,
-                      background: palette.inputBg,
-                      border: `1px solid ${palette.border}`,
-                    }}
-                  >
-                    #
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>
-                    {channel?.kind === "announcement" ? "暂无公告" : "还没有消息"}
-                  </span>
-                  <span style={{ fontSize: 12 }}>
-                    {channel?.kind === "announcement"
-                      ? canPost
-                        ? "在这里发布面向全员的公告。"
-                        : "你没有在此频道发言的权限。"
-                      : canPost
-                        ? "来说第一句吧。"
-                        : "你没有在此频道发言的权限。"}
-                  </span>
-                </div>
-              ) : (
-                <>
-                  {canLoadMore ? (
-                    <div style={creatorRow}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void loadOlderMessages()}
-                        disabled={talk.view.loadingOlder}
-                      >
-                        {talk.view.loadingOlder ? "加载中…" : "加载更早消息"}
-                      </Button>
-                    </div>
-                  ) : null}
-                  {talk.view.messages.map((item) => (
-                    <MessageRow key={item.id} item={item} onCreateThread={openThreadFromMessage} />
-                  ))}
-                </>
-              )}
+              <div ref={contentRef} style={messagesContent}>
+                {talk.view.messagesLoading ? (
+                  <div style={{ ...emptyMsg }}>加载消息…</div>
+                ) : talk.view.messages.length === 0 ? (
+                  <div style={{ ...emptyMsg }}>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 44,
+                        height: 44,
+                        borderRadius: 14,
+                        fontSize: 19,
+                        fontWeight: 700,
+                        color: palette.accent,
+                        background: palette.inputBg,
+                        border: `1px solid ${palette.border}`,
+                      }}
+                    >
+                      #
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>
+                      {channel?.kind === "announcement" ? "暂无公告" : "还没有消息"}
+                    </span>
+                    <span style={{ fontSize: 12 }}>
+                      {channel?.kind === "announcement"
+                        ? canPost
+                          ? "在这里发布面向全员的公告。"
+                          : "你没有在此频道发言的权限。"
+                        : canPost
+                          ? "来说第一句吧。"
+                          : "你没有在此频道发言的权限。"}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    {canLoadMore ? (
+                      <div style={creatorRow}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void loadOlderMessages()}
+                          disabled={talk.view.loadingOlder}
+                        >
+                          {talk.view.loadingOlder ? "加载中…" : "加载更早消息"}
+                        </Button>
+                      </div>
+                    ) : null}
+                    {talk.view.messages.map((item) => (
+                      <MessageRow
+                        key={item.id}
+                        item={item}
+                        onCreateThread={openThreadFromMessage}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
             </div>
 
             <div style={composerWrap}>

@@ -128,6 +128,14 @@ export const messagesWrap: CSSProperties = {
   flexDirection: "column",
 };
 
+/** 消息内容包裹层：供 ResizeObserver 观测内容高度变化（贴底跟随） */
+export const messagesContent: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  width: "100%",
+  minHeight: 0,
+};
+
 export const msgRow: CSSProperties = {
   display: "flex",
   gap: 10,

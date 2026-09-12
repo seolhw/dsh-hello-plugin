@@ -46,6 +46,28 @@ function ErrorView(): ReactElement {
   );
 }
 
+// 宿主契约：视图根声明 data-conversation-composer-overlay 后，宿主把 viewArea 约束为定高
+// （flex:1 1 0; min-height:0; overflow:hidden），滚动交给视图内部（官方「轨迹」视图同做法）。
+// 该模式下宿主的 composer 会浮在视图底部，与社区页自带的输入框叠加，故一并隐藏。
+// 宿主类名是构建期哈希，只能用其 data-* 契约属性定位。
+const PAGE_HOST_CSS = `
+[data-conversation-scroll]:has([data-dsht-page-root]) > [data-composer-seat] {
+  display: none;
+}
+`;
+
+let hostCssInjected = false;
+
+/** 注入一次宿主覆盖样式（幂等） */
+function ensureHostCss(): void {
+  if (hostCssInjected) return;
+  const style = document.createElement("style");
+  style.setAttribute("data-dsht-page-css", "");
+  style.textContent = PAGE_HOST_CSS;
+  document.head.appendChild(style);
+  hostCssInjected = true;
+}
+
 /** 「社区」页签页：随会话 view 挂载/卸载而激活/释放实时连接 */
 export function TalkPage(props: { sessionId?: string }): ReactElement {
   const talk = useTalkState();
@@ -60,6 +82,11 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
   useEffect(() => {
     activateTalk();
     return () => deactivateTalk();
+  }, []);
+
+  // 宿主覆盖样式：社区页自己管滚动与输入框，挂载时注入一次
+  useEffect(() => {
+    ensureHostCss();
   }, []);
 
   // 就绪后周期性地轮询站内信未读数（铃铛角标），有新邀请时尽快亮起
@@ -94,7 +121,7 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
   }
 
   return (
-    <div style={pageRoot} data-dsht-page-root>
+    <div style={pageRoot} data-dsht-page-root data-conversation-composer-overlay="">
       {body}
       {talk.toast.length > 0 ? <Toast text={talk.toast} onDone={() => dismissToast()} /> : null}
     </div>

@@ -40,8 +40,7 @@ function runDetached(request: Request | undefined, task: Promise<unknown>): void
 // ---------- Resend ----------
 
 // Resend 发件地址。建议换成你在 Resend 已验证的域名邮箱；
-// 未验证域名下 onboarding@resend.dev 只能发往你的注册邮箱（做本地联调用）。
-const EMAIL_FROM = "dsh-talk <onboarding@resend.dev>";
+const EMAIL_FROM = "dsh-talk <onboarding@huiwang.fun>";
 
 function resendKey(env: Env): string | null {
   return env.RESEND_API_KEY?.trim() || null;

@@ -199,7 +199,6 @@ export function ProfileModal({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>账号信息</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <label htmlFor="talk-profile-username" style={fieldLabel}>
               用户名

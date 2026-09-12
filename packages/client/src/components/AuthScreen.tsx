@@ -278,7 +278,7 @@ function ForgotPasswordCard({
             <>
               <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
                 验证码已发送至 <strong style={{ color: palette.text }}>{email}</strong>，5
-                分钟内有效；若该邮箱未注册则不会收到邮件。
+                分钟内有效；若未收到，请检查垃圾邮件；若该邮箱未注册则不会收到邮件。
               </div>
               <Field label="验证码" htmlFor="talk-reset-otp">
                 <Input
@@ -441,7 +441,7 @@ export function AuthScreen(): ReactElement {
 
         <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.5 }}>
           验证码已发送至 <strong style={{ color: palette.text }}>{pendingEmail}</strong>，
-          请查收邮件。5 分钟内有效。
+          请查收邮件。5 分钟内有效；若未收到，请检查垃圾邮件。
         </div>
 
         <form

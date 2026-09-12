@@ -55,6 +55,7 @@ import type {
   ListMessagesQuery,
   ListMessagesResponse,
   ListNotificationsResponse,
+  ListPinsResponse,
   ListRolesResponse,
   ListThreadCandidatesResponse,
   ListThreadMembersResponse,
@@ -62,6 +63,7 @@ import type {
   MarkAllNotificationsReadResponse,
   MarkNotificationReadResponse,
   OverwriteTargetType,
+  PinMessageResponse,
   RemoveMemberResponse,
   RemoveThreadMemberResponse,
   ReorderRolesRequest,
@@ -86,6 +88,7 @@ import type {
   ToggleMessageReactionResponse,
   TransferOwnerRequest,
   TransferOwnerResponse,
+  UnpinMessageResponse,
   UpdateChannelRequest,
   UpdateChannelResponse,
   UpdateCommunityRequest,
@@ -737,6 +740,37 @@ export class ServerClient {
       "POST",
       `/api/messages/${messageId}/reactions`,
       body,
+      true,
+    );
+  }
+
+  /** POST /api/messages/:id/pin —— 置顶消息（社区 MANAGE_MESSAGES） */
+  pinMessage(messageId: string): Promise<PinMessageResponse> {
+    return this.call<PinMessageResponse>(
+      "POST",
+      `/api/messages/${messageId}/pin`,
+      undefined,
+      true,
+    );
+  }
+
+  /** DELETE /api/messages/:id/pin —— 取消置顶 */
+  unpinMessage(messageId: string): Promise<UnpinMessageResponse> {
+    return this.call<UnpinMessageResponse>(
+      "DELETE",
+      `/api/messages/${messageId}/pin`,
+      undefined,
+      true,
+    );
+  }
+
+  /** GET /api/channels/:id/pins —— 该房间的置顶消息（threadId 非空时取讨论组内的） */
+  listPinned(channelId: string, threadId: string | null = null): Promise<ListPinsResponse> {
+    const query = toQuery({ threadId: threadId ?? "" });
+    return this.call<ListPinsResponse>(
+      "GET",
+      `/api/channels/${channelId}/pins${query}`,
+      undefined,
       true,
     );
   }

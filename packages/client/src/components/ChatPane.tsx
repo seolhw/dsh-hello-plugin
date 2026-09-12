@@ -15,20 +15,33 @@ import {
   IconUserOutline16,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import { Permission } from "@dsh-talk/types/entities";
-import type { ChangeEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
+import type {
+  ChangeEvent,
+  ClipboardEvent,
+  DragEvent,
+  KeyboardEvent,
+  ReactElement,
+  UIEvent,
+} from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelReply,
   canManageThreads,
+  canPinMessages,
   channelPermissions,
   clearMessageFocus,
   closeThread,
   loadOlderMessages,
+  loadPinnedMessages,
   type MemberLite,
   type MessageItem,
   notify,
+  notifyTyping,
+  revealMessage,
   sendMessage,
+  setMessagePinned,
   setThreadArchived,
+  type TypingMember,
   useTalkState,
 } from "../store";
 import { EmojiPopover } from "./EmojiPicker";
@@ -48,11 +61,139 @@ import {
   textArea,
 } from "./homeStyles";
 import { MemberPanel } from "./MemberPanel";
-import { MessageRow, ReplyGlyph } from "./MessageRow";
+import { MessageRow, PinGlyph, ReplyGlyph } from "./MessageRow";
 import { SearchMessagesModal } from "./SearchModals";
 import { ShareSnapshotModal } from "./ShareModals";
-import { Avatar, palette, shadow, smallText } from "./styles";
+import { Avatar, palette, shadow, smallText, timeLabel } from "./styles";
+import { TalkModal } from "./TalkModal";
 import { ThreadMembersModal, ThreadSettingsModal } from "./ThreadModals";
+
+/** 「张三 正在输入…」/「张三、李四 正在输入…」/「张三 等 3 人正在输入…」 */
+function typingLabel(members: TypingMember[]): string {
+  const names = members.map((m) => m.displayName ?? m.handle);
+  if (names.length === 1) return `${names[0]} 正在输入…`;
+  if (names.length === 2) return `${names[0]}、${names[1]} 正在输入…`;
+  return `${names[0]} 等 ${names.length} 人正在输入…`;
+}
+
+/**
+ * 置顶消息面板：列出当前房间（主频道或讨论组）的置顶消息，点击定位到原消息；
+ * 持有 MANAGE_MESSAGES 时可就地取消置顶。
+ */
+function PinnedMessagesModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}): ReactElement {
+  const talk = useTalkState();
+  const [items, setItems] = useState<MessageItem[] | null>(null);
+
+  // 每次打开重拉（置顶可能已被别人改动）
+  useEffect(() => {
+    if (!open) return;
+    setItems(null);
+    let alive = true;
+    void loadPinnedMessages().then((list) => {
+      if (alive) setItems(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
+  async function jump(item: MessageItem): Promise<void> {
+    onClose();
+    const ok = await revealMessage(item.channelId, item.id, item.threadId);
+    if (!ok) notify("该置顶消息较旧，未能定位");
+  }
+
+  return (
+    <TalkModal
+      open={open}
+      onClose={onClose}
+      title="置顶消息"
+      closeLabel="关闭"
+      description={talk.view.threadId ? "本讨论组的置顶消息" : "本频道的置顶消息"}
+    >
+      {items === null ? (
+        <div style={{ ...smallText, fontSize: 14, padding: "10px 2px" }}>加载中…</div>
+      ) : items.length === 0 ? (
+        <div style={{ ...smallText, fontSize: 14, padding: "10px 2px" }}>
+          还没有置顶消息。把鼠标移到消息上，点置顶图标即可固定在这里。
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                border: `1px solid ${palette.border}`,
+                background: palette.inputBg,
+                borderRadius: 10,
+                padding: "8px 10px",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => void jump(item)}
+                title="跳转到这条消息"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  color: palette.text,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>
+                    {item.author.displayName ?? item.author.handle}
+                  </span>
+                  <span style={{ ...smallText, fontSize: 14 }}>
+                    {timeLabel(item.pinnedAt ?? item.createdAt)}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: 14,
+                    color: palette.muted,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {item.content.trim().length > 0 ? item.content : "（无正文）"}
+                </div>
+              </button>
+              {canPinMessages() ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<PinGlyph />}
+                  onClick={() => {
+                    void setMessagePinned(item, false).then(() =>
+                      setItems((prev) => (prev ?? []).filter((x) => x.id !== item.id)),
+                    );
+                  }}
+                  aria-label="取消置顶"
+                  title="取消置顶"
+                />
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </TalkModal>
+  );
+}
 
 export function ChatPane({
   onCreateThread,
@@ -90,6 +231,10 @@ export function ChatPane({
   const [threadMembersOpen, setThreadMembersOpen] = useState(false);
   // 讨论组设置弹窗（改名 / 可见性 / 密码）
   const [threadSettingsOpen, setThreadSettingsOpen] = useState(false);
+  // 置顶消息面板
+  const [pinnedOpen, setPinnedOpen] = useState(false);
+  // 拖拽文件到输入区时的高亮态
+  const [dragging, setDragging] = useState(false);
 
   const threadId = talk.view.threadId;
   const roomKey = threadId ?? channelId;
@@ -208,9 +353,8 @@ export function ChatPane({
 
   if (!channelId) return null;
 
-  function pickFiles(event: ChangeEvent<HTMLInputElement>): void {
-    const picked = event.target.files ? Array.from(event.target.files) : [];
-    event.target.value = "";
+  /** 追加待发送附件（选择器 / 粘贴 / 拖拽共用；超出上限时保留靠前的） */
+  function addFiles(picked: File[]): void {
     if (picked.length === 0) return;
     setPendingFiles((prev) => {
       const room = MAX_ATTACH - prev.length;
@@ -221,6 +365,34 @@ export function ChatPane({
       if (picked.length > room) notify(`一条消息最多 ${MAX_ATTACH} 个附件，已保留前 ${room} 个`);
       return [...prev, ...picked].slice(0, MAX_ATTACH);
     });
+  }
+
+  function pickFiles(event: ChangeEvent<HTMLInputElement>): void {
+    const picked = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = "";
+    addFiles(picked);
+  }
+
+  /** 粘贴：剪贴板里带文件（截图等）时直接作为待发送附件 */
+  function onComposerPaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    event.preventDefault();
+    addFiles(files);
+  }
+
+  /** 拖拽文件到输入区：仅接管文件类型，文本拖拽保持浏览器默认行为 */
+  function onComposerDragOver(event: DragEvent<HTMLDivElement>): void {
+    if (!canPost || !Array.from(event.dataTransfer.types).includes("Files")) return;
+    event.preventDefault();
+    setDragging(true);
+  }
+
+  function onComposerDrop(event: DragEvent<HTMLDivElement>): void {
+    if (!canPost) return;
+    event.preventDefault();
+    setDragging(false);
+    addFiles(Array.from(event.dataTransfer.files ?? []));
   }
 
   function removePending(index: number): void {
@@ -262,6 +434,7 @@ export function ChatPane({
 
   function handleComposerChange(value: string): void {
     setComposerText(value);
+    if (value.trim().length > 0) notifyTyping();
     const caret = composerRef.current?.selectionStart ?? value.length;
     const hit = mentionAtCaret(value, caret);
     if (hit) {
@@ -494,6 +667,16 @@ export function ChatPane({
               title="搜索社区内的消息"
             />
           ) : null}
+          {!isForumBoard ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<PinGlyph />}
+              onClick={() => setPinnedOpen(true)}
+              aria-label="置顶消息"
+              title="查看置顶消息"
+            />
+          ) : null}
           <span
             style={{
               marginLeft: "auto",
@@ -602,9 +785,24 @@ export function ChatPane({
               </div>
             </div>
 
-            <div style={composerWrap}>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: 拖拽落区只是增强，键盘/无鼠标用户走「添加附件」按钮 */}
+            <div
+              style={
+                dragging
+                  ? { ...composerWrap, outline: `2px dashed ${palette.accent}`, borderRadius: 10 }
+                  : composerWrap
+              }
+              onDragOver={onComposerDragOver}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onComposerDrop}
+            >
               {canPost ? (
                 <>
+                  {talk.view.typing.length > 0 ? (
+                    <div style={{ ...smallText, fontSize: 14, padding: "0 4px 2px" }}>
+                      {typingLabel(talk.view.typing)}
+                    </div>
+                  ) : null}
                   {/* 输入整体外框：左侧操作区与输入框合并在一起 */}
                   <div style={composerBox}>
                     {/* 分享 DSH 会话：仅主频道（讨论组/话题内不分享） */}
@@ -803,6 +1001,7 @@ export function ChatPane({
                         value={composerText}
                         onChange={(e) => handleComposerChange(e.target.value)}
                         onKeyDown={handleComposerKeyDown}
+                        onPaste={onComposerPaste}
                         placeholder={
                           isThread && currentThread
                             ? `在「${currentThread.name}」里发消息…`
@@ -874,6 +1073,7 @@ export function ChatPane({
         </>
       ) : null}
       <SearchMessagesModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <PinnedMessagesModal open={pinnedOpen} onClose={() => setPinnedOpen(false)} />
     </>
   );
 }

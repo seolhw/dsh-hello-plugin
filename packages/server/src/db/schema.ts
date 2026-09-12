@@ -250,6 +250,7 @@ export const messages = sqliteTable(
     shareCard: text("share_card"), // JSON: MessageShareCardRef | null
     replyToId: text("reply_to_id"), // FK 弱引用，避免循环删除复杂
     threadId: text("thread_id").references(() => threads.id, { onDelete: "cascade" }), // 属于哪条讨论组（null=主频道直接消息）
+    pinnedAt: integer("pinned_at", { mode: "number" }), // 置顶时间（null=未置顶）
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }),
   },

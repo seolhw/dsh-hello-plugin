@@ -7,6 +7,8 @@
 //   - 改/删消息：作者本人，或持有社区 MANAGE_MESSAGES 位
 //   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）；超时后作者只能编辑，不能撤回
 //   - 表情回应：能看到该频道（+ 能进入该讨论组）即可切换；同一人同一 emoji 再调一次 = 取消
+//   - 置顶：/api/messages/:id/pin（POST 置顶 / DELETE 取消，社区 MANAGE_MESSAGES 位）；
+//     /api/channels/:id/pins 按房间（主频道或 ?threadId= 讨论组）列出置顶消息
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片引用 /api/shares 登记的分享
 //   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
 // ================================================================
@@ -16,6 +18,7 @@ import type {
   CreateMessageRequest,
   GetChannelOnlineResponse,
   ListMessagesQuery,
+  ListPinsResponse,
   SearchMessageResult,
   ToggleMessageReactionRequest,
   ToggleMessageReactionResponse,
@@ -37,15 +40,16 @@ import type {
   EvtMessageReactions,
   EvtMessageUpdated,
 } from "@dsh-talk/types/ws";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, like, lt, lte, ne, sql } from "drizzle-orm";
 import { compact, uniq } from "es-toolkit/array";
 import { clamp } from "es-toolkit/math";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { MAX_ATTACHMENT_NAME, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from "../constants";
 import {
   type ChannelRow,
   channelReadStates,
   channels,
+  communityMembers,
   type MessageRow,
   messageReactions,
   messages,
@@ -86,6 +90,7 @@ function rowToMessage(row: MessageRow, reactions: MessageReaction[] = []): Messa
     replyToId: row.replyToId,
     threadId: row.threadId,
     reactions,
+    pinnedAt: row.pinnedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -269,6 +274,15 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     const resolvedIds = compact(body.mentionHandles.map((h) => resolved.get(h.trim())));
     mentions.push(...uniq(resolvedIds));
   }
+  // @everyone：展开成社区全体成员（自己除外），与逐个 @handle 的结果合并去重
+  if (body.mentionEveryone) {
+    const members = await db
+      .select({ userId: communityMembers.userId })
+      .from(communityMembers)
+      .where(eq(communityMembers.communityId, channel.communityId));
+    mentions.push(...members.map((m) => m.userId).filter((id) => id !== userId));
+  }
+  const mentionIds = uniq(mentions);
 
   // replyTo：必须与被回复消息在同一个房间（主频道对主频道 / 同一讨论组内）
   if (body.replyToId) {
@@ -310,7 +324,7 @@ channelMessagesApi.post("/:id/messages", async (c) => {
     authorId: userId,
     content,
     attachments: JSON.stringify(attachments),
-    mentions: JSON.stringify(mentions),
+    mentions: JSON.stringify(mentionIds),
     shareCard: shareCard ? JSON.stringify(shareCard) : null,
     replyToId: body.replyToId ?? null,
     threadId: thread?.id ?? null,
@@ -345,6 +359,40 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   return c.json(item, 201);
 });
 
+// --- GET /:id/pins —— 该房间的置顶消息（?threadId= 取讨论组内的，缺省为主频道） ---
+channelMessagesApi.get("/:id/pins", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const channelId = c.req.param("id");
+  const channel = await loadChannelRow(db, channelId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
+
+  const rawThread = (c.req.query("threadId") ?? "").trim();
+  const conds = [eq(messages.channelId, channelId), isNotNull(messages.pinnedAt)];
+  if (rawThread.length > 0) {
+    const thread = await loadThreadInChannel(db, channel, rawThread, userId);
+    conds.push(eq(messages.threadId, thread.id));
+  } else {
+    conds.push(isNull(messages.threadId));
+  }
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(...conds))
+    .orderBy(desc(messages.pinnedAt))
+    .limit(50);
+  const reactionsByMessage = await loadReactionsByMessage(
+    db,
+    rows.map((row) => row.id),
+    userId,
+  );
+  const items: Array<Message & { author: User }> = [];
+  for (const row of rows) {
+    items.push(await messageItem(db, c.env.DB, row, reactionsByMessage.get(row.id) ?? []));
+  }
+  return c.json({ items } satisfies ListPinsResponse);
+});
+
 // --- GET /:id/read-state —— 未读状态 ---
 channelMessagesApi.get("/:id/read-state", async (c) => {
   const db = dbOf(c);
@@ -366,13 +414,27 @@ channelMessagesApi.get("/:id/read-state", async (c) => {
     .where(and(eq(messages.channelId, channelId), isNull(messages.threadId)));
   const lastMessageAt = lastMessageRow[0]?.value ?? null;
 
+  // 未读 @ 计数按 messages.mentions 现算（channel_read_states.unread_mentions 是遗留列，不再作为来源）
+  const mentionRow = await db
+    .select({ value: sql<number>`COUNT(*)` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        isNull(messages.threadId),
+        ne(messages.authorId, userId),
+        gt(messages.createdAt, row?.lastReadAt ?? 0),
+        like(messages.mentions, `%"${userId}"%`),
+      ),
+    );
+
   const state: ChannelReadState = row
     ? {
         userId,
         channelId,
         lastReadMessageId: row.lastReadMessageId,
         lastReadAt: row.lastReadAt,
-        unreadMentions: row.unreadMentions,
+        unreadMentions: Number(mentionRow[0]?.value ?? 0),
       }
     : { userId, channelId, lastReadMessageId: null, lastReadAt: null, unreadMentions: 0 };
   return c.json({ ...state, lastMessageAt });
@@ -577,6 +639,68 @@ messagesApi.delete("/:id", async (c) => {
   };
   await broadcastToChannel(c.env, roomId, evt);
   return emptyOk(c);
+});
+
+/**
+ * 写入 / 清除置顶并广播。置顶是消息的元数据变更，复用 evt.message.updated
+ * （客户端按消息 id 整条替换，顺带拿到新的 pinnedAt）。
+ */
+async function applyPinned(
+  c: Context<{ Bindings: Env; Variables: HonoAppVariables }>,
+  row: MessageRow,
+  pinnedAt: number | null,
+): Promise<Message & { author: User }> {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  await db.update(messages).set({ pinnedAt }).where(eq(messages.id, row.id));
+  const updated = await mustRow(
+    db.select().from(messages).where(eq(messages.id, row.id)).limit(1),
+    "message",
+  );
+  const item = await messageItem(
+    db,
+    c.env.DB,
+    updated,
+    await loadMessageReactions(db, updated.id, userId),
+  );
+  const roomId = updated.threadId ?? updated.channelId;
+  const evt: EvtMessageUpdated = {
+    type: "evt.message.updated",
+    ts: Date.now(),
+    payload: { channelId: roomId, message: item },
+  };
+  await broadcastToChannel(c.env, roomId, evt);
+  return item;
+}
+
+// --- POST /:id/pin —— 置顶消息（社区 MANAGE_MESSAGES 位） ---
+messagesApi.post("/:id/pin", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadMessageRow(db, c.req.param("id"));
+  await requireCommunityPermission(
+    db,
+    row.communityId,
+    userId,
+    Permission.MANAGE_MESSAGES,
+    "无权置顶消息",
+  );
+  return c.json(await applyPinned(c, row, Date.now()));
+});
+
+// --- DELETE /:id/pin —— 取消置顶 ---
+messagesApi.delete("/:id/pin", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadMessageRow(db, c.req.param("id"));
+  await requireCommunityPermission(
+    db,
+    row.communityId,
+    userId,
+    Permission.MANAGE_MESSAGES,
+    "无权取消置顶",
+  );
+  return c.json(await applyPinned(c, row, null));
 });
 
 // --- POST /:id/reactions —— 切换表情回应（已回应过则取消）；返回最新聚合并广播 ---

@@ -102,6 +102,30 @@ export type EvtPresenceUpdate = ServerEvt<
   }
 >;
 
+// ======= 输入中（typing，房间私有热状态，不落库） =======
+
+/**
+ * C→S：我正在本房间输入。无需应答（不带 id），客户端自行节流（建议 ≥3s 一次）。
+ * 服务端只把该帧转成 evt.typing 扇出给**同房间的其他连接**，不持久化。
+ */
+export type ReqTyping = ClientReq<"typing", { clientTime: TimestampMs }>;
+
+/** S→C：本房间某成员正在输入（expiresAt 之后前端应自行清除） */
+export type EvtTyping = ServerEvt<
+  "evt.typing",
+  {
+    channelId: ID;
+    member: {
+      userId: ID;
+      handle: string;
+      displayName: string | null;
+      avatarUrl: string | null;
+    };
+    /** 该输入态到期时间（unix ms）：到点仍未收到新帧即视为停止输入 */
+    expiresAt: TimestampMs;
+  }
+>;
+
 // ======= 服务端主动推送：频道消息事件 =======
 
 /** S→C：新消息（REST 写库成功后经 RPC 广播到这里扇出） */
@@ -166,7 +190,7 @@ export type EvtCommunityAccessChanged = ServerEvt<
 
 // ======= 联合类型：方便在 switch 里穷举 =======
 
-export type ClientFrame = ReqPing | ReqSetPresence;
+export type ClientFrame = ReqPing | ReqSetPresence | ReqTyping;
 
 export type ServerFrame =
   | RespPong
@@ -174,6 +198,7 @@ export type ServerFrame =
   | ServerRespError
   | EvtHello
   | EvtPresenceUpdate
+  | EvtTyping
   | EvtMessageNew
   | EvtMessageUpdated
   | EvtMessageDeleted

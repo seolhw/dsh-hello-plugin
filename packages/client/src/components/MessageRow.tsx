@@ -18,6 +18,7 @@ import { useState } from "react";
 import {
   askConfirm,
   canEditMessage,
+  canPinMessages,
   canRetractMessage,
   channelPermissions,
   deleteMessage,
@@ -25,6 +26,7 @@ import {
   notify,
   replyToMessage,
   revealMessage,
+  setMessagePinned,
   toggleReaction,
   updateMessage,
   useTalkState,
@@ -51,6 +53,26 @@ export function ReplyGlyph(): ReactElement {
     >
       <path d="M9 14L4 9l5-5" />
       <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5V19" />
+    </svg>
+  );
+}
+
+/** 置顶小图标（宿主 primitives 没有 pin 图标，与 ReplyGlyph 一样画一个） */
+export function PinGlyph({ size = 14 }: { size?: number }): ReactElement {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 17v5" />
+      <path d="M9 3h6l-1 6 3.5 3.5H6.5L10 9 9 3z" />
     </svg>
   );
 }
@@ -314,6 +336,21 @@ export function MessageRow({
           </span>
           <span style={{ fontSize: 14 }}>{mine ? "" : `@${item.author.handle}`}</span>
           <span style={{ ...smallText, fontSize: 14 }}>{timeLabel(item.createdAt)}</span>
+          {item.pinnedAt !== null ? (
+            <span
+              style={{
+                fontSize: 14,
+                color: palette.accent,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+              }}
+              title="这条消息已被置顶"
+            >
+              <PinGlyph size={12} />
+              已置顶
+            </span>
+          ) : null}
           {mentionedMe ? <span style={{ fontSize: 14, color: palette.accent }}>@了你</span> : null}
           {item.updatedAt ? <span style={{ ...smallText, fontSize: 14 }}>(已编辑)</span> : null}
         </div>
@@ -381,6 +418,16 @@ export function MessageRow({
                 onClick={() => onCreateThread(item)}
                 aria-label="创建讨论组"
                 title="以此为话题创建讨论组"
+              />
+            ) : null}
+            {canPinMessages() ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<PinGlyph />}
+                onClick={() => void setMessagePinned(item, item.pinnedAt === null)}
+                aria-label={item.pinnedAt === null ? "置顶" : "取消置顶"}
+                title={item.pinnedAt === null ? "置顶这条消息" : "取消置顶"}
               />
             ) : null}
             {allowEdit ? (

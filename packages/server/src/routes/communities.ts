@@ -42,7 +42,7 @@ import {
   type PermissionFlags,
   type User,
 } from "@dsh-talk/types/entities";
-import { and, count, desc, eq, gte, inArray, like, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNull, like, ne, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { COMMUNITY_CREATE_DAILY_LIMIT, MAX_COMMUNITIES_PER_USER } from "../constants";
 import {
@@ -232,11 +232,25 @@ communitiesApi.get("/mine", async (c) => {
           sql`EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = ${channels.id} AND m.thread_id IS NULL AND m.author_id != ${userId} AND m.created_at > COALESCE((SELECT rs.last_read_at FROM channel_read_states rs WHERE rs.channel_id = ${channels.id} AND rs.user_id = ${userId}), 0))`,
         ),
       );
+    // 未读 @ 计数：按 messages.mentions 现算，与讨论组未读同一口径
+    // （channel_read_states.unread_mentions 是遗留计数列，不再作为来源）
     const unreadMentionsRow = await db
-      .select({ value: sql<number>`COALESCE(SUM(${channelReadStates.unreadMentions}), 0)` })
-      .from(channelReadStates)
-      .innerJoin(channels, eq(channelReadStates.channelId, channels.id))
-      .where(and(eq(channelReadStates.userId, userId), eq(channels.communityId, communityRow.id)));
+      .select({ value: sql<number>`COUNT(*)` })
+      .from(messages)
+      .innerJoin(channels, eq(messages.channelId, channels.id))
+      .leftJoin(
+        channelReadStates,
+        and(eq(channelReadStates.channelId, channels.id), eq(channelReadStates.userId, userId)),
+      )
+      .where(
+        and(
+          eq(channels.communityId, communityRow.id),
+          isNull(messages.threadId),
+          ne(messages.authorId, userId),
+          gt(messages.createdAt, sql`COALESCE(${channelReadStates.lastReadAt}, 0)`),
+          like(messages.mentions, `%"${userId}"%`),
+        ),
+      );
     result.push({
       ...mapCommunity(communityRow),
       permissions: access.permissions,

@@ -337,6 +337,8 @@ export interface Message {
   threadId: ID | null;
   /** 表情回应（按 emoji 聚合，来自 message_reactions 表） */
   reactions: MessageReaction[];
+  /** 被置顶的时间（null = 未置顶）；置顶按房间（频道或讨论组）维度展示 */
+  pinnedAt: TimestampMs | null;
   createdAt: TimestampMs;
   updatedAt: TimestampMs | null;
 }

@@ -87,6 +87,16 @@ export interface MemberLite {
   roleIds: ID[];
 }
 
+/** 房间内其他人的「正在输入」状态（来自 evt.typing 推送，到期自动清除） */
+export interface TypingMember {
+  userId: ID;
+  handle: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  /** 到期时间（unix ms）：到点仍未收到新帧即视为已停止输入 */
+  expiresAt: number;
+}
+
 export interface ViewState {
   communityId: ID | null;
   community: CommunityDetail | null;
@@ -108,6 +118,8 @@ export interface ViewState {
   communityOnlineMembers: ChannelOnlineMember[];
   /** 当前正在引用的消息（回复目标；位于 composer 上方提示条） */
   replyingTo: MessageItem | null;
+  /** 房间内其他人的输入态（composer 上方「xxx 正在输入…」） */
+  typing: TypingMember[];
   /** 跳转高亮目标：消息加载后滚动定位并短暂高亮，随后清除 */
   focusMessageId: string | null;
   /** 当前社区成员缓存（@ 提及自动补全用；进入社区时拉一次） */
@@ -180,6 +192,7 @@ const INITIAL_VIEW: ViewState = {
   communityOnlineCount: 0,
   communityOnlineMembers: [],
   replyingTo: null,
+  typing: [],
   focusMessageId: null,
   members: [],
   membersLoading: false,
@@ -1798,6 +1811,62 @@ function roomIdOf(): string | null {
   return threadId ?? channelId;
 }
 
+// ---------------- 输入中（typing，房间私有热状态） ----------------
+
+/** 本房间其他人的输入态（key = userId）；随 evt.typing 刷新、到期自动清除 */
+const typingByUser = new Map<ID, TypingMember>();
+let typingSweeper: number | null = null;
+/** 我上一次上报输入的时间（节流：同一房间最多 3s 一次） */
+let lastTypingSentAt = 0;
+
+function syncTypingView(): void {
+  patchView({ typing: [...typingByUser.values()] });
+}
+
+/** 记录/刷新某人的输入态；首次出现时启动到期清扫定时器 */
+function applyTyping(member: TypingMember): void {
+  typingByUser.set(member.userId, member);
+  syncTypingView();
+  if (typingSweeper !== null) return;
+  typingSweeper = window.setInterval(() => {
+    const now = Date.now();
+    let changed = false;
+    for (const [userId, item] of [...typingByUser.entries()]) {
+      if (item.expiresAt <= now) {
+        typingByUser.delete(userId);
+        changed = true;
+      }
+    }
+    if (changed) syncTypingView();
+    if (typingByUser.size === 0 && typingSweeper !== null) {
+      window.clearInterval(typingSweeper);
+      typingSweeper = null;
+    }
+  }, 1000);
+}
+
+/** 切换房间时清掉输入态（上一个房间的人不该出现在新房间里） */
+function resetTyping(): void {
+  if (typingSweeper !== null) {
+    window.clearInterval(typingSweeper);
+    typingSweeper = null;
+  }
+  if (typingByUser.size === 0 && state.view.typing.length === 0) return;
+  typingByUser.clear();
+  syncTypingView();
+}
+
+/**
+ * 我在当前房间输入：节流上报给服务端（≥3s 一次），由服务端扇出给同房间其他人。
+ * 未连接时静默丢弃（断线期间不补发）。
+ */
+export function notifyTyping(): void {
+  const now = Date.now();
+  if (now - lastTypingSentAt < 3000) return;
+  if (!socket?.send({ type: "typing", payload: { clientTime: now } })) return;
+  lastTypingSentAt = now;
+}
+
 /** 连接某个房间（主频道或讨论组；各自一个 DO 实例 = 一条 WS） */
 function connectChannel(roomId: string): void {
   closeRealtime();
@@ -1834,6 +1903,15 @@ function handleServerFrame(frame: ServerFrame): void {
     patchView({ live: true });
     socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
     pushPresence();
+    // 重连补拉：把断线期间漏掉的消息增量拉回来（首屏刚用 REST 拉过，通常为空）
+    void catchUpMessages();
+    return;
+  }
+  // 本房间其他人的输入态（DO 只扇出给别人，无需过滤自己）
+  if (frame.type === "evt.typing") {
+    if (frame.payload.channelId === roomId && frame.payload.member.userId !== state.me?.id) {
+      applyTyping({ ...frame.payload.member, expiresAt: frame.payload.expiresAt });
+    }
     return;
   }
   // 本房间在线状态变化（DO 扇出）：即时并入社区在线快照，免等 REST 轮询
@@ -1894,6 +1972,35 @@ function removeMessage(messageId: string): void {
   patchView({ messages: state.view.messages.filter((m) => m.id !== messageId) });
 }
 
+/**
+ * 重连后补齐断线期间漏掉的消息：以本地最新一条为游标向后（asc）翻页，
+ * 最多 5 页（500 条）；断线时间过长时剩下的靠手动翻页/重进频道。
+ */
+async function catchUpMessages(): Promise<void> {
+  const server = serverOf();
+  const channelId = state.view.channelId;
+  const newest = state.view.messages[state.view.messages.length - 1];
+  if (!server || !channelId || !newest) return;
+  const threadId = state.view.threadId;
+  try {
+    let cursor = String(newest.createdAt);
+    for (let page = 0; page < 5; page += 1) {
+      const res = await server.listMessages(channelId, {
+        cursor,
+        limit: 100,
+        direction: "asc",
+        ...(threadId === null ? {} : { threadId }),
+      });
+      if (res.items.length === 0) return;
+      for (const item of res.items) upsertMessage(item as MessageItem, true);
+      if (res.nextCursor === null) return;
+      cursor = res.nextCursor;
+    }
+  } catch {
+    // 补拉失败不阻塞实时（用户仍可手动翻页）
+  }
+}
+
 /** 整份替换某条消息的表情回应（服务端聚合结果，收敛幂等） */
 function patchReactions(messageId: string, reactions: MessageReaction[]): void {
   const list = state.view.messages;
@@ -1910,6 +2017,7 @@ export async function selectChannel(channelId: string): Promise<void> {
   const server = serverOf();
   if (!server) return;
   closeRealtime();
+  resetTyping();
   patchView({
     channelId,
     threadId: null,
@@ -1964,6 +2072,7 @@ export async function openThread(thread: { id: string; channelId: string }): Pro
   if (state.view.channelId !== thread.channelId) await selectChannel(thread.channelId);
   const threadId = thread.id;
   closeRealtime();
+  resetTyping();
   patchView({
     threadId,
     messages: [],
@@ -2064,15 +2173,19 @@ function buildMessageBody(
   content: string;
   attachments?: MessageAttachmentPut[];
   mentionHandles?: string[];
+  mentionEveryone?: boolean;
 } {
   const body: {
     content: string;
     attachments?: MessageAttachmentPut[];
     mentionHandles?: string[];
+    mentionEveryone?: boolean;
   } = { content };
   if (attachments.length > 0) body.attachments = attachments;
   const handles = uniq(mentionHandlesOf(content));
   if (handles.length > 0) body.mentionHandles = handles;
+  // @everyone：正文里出现即按全员提及上报（服务端展开成社区成员列表）
+  if (/(?<![\p{L}\p{N}_])@everyone(?![\p{L}\p{N}_])/u.test(content)) body.mentionEveryone = true;
   return body;
 }
 
@@ -2179,6 +2292,41 @@ export async function toggleReaction(item: MessageItem, emoji: string): Promise<
     patchReactions(result.messageId, result.reactions);
   } catch (error) {
     notify(errorText(error));
+  }
+}
+
+/** 我能否置顶/取消置顶（与改删他人消息同一权限位：社区 MANAGE_MESSAGES） */
+export function canPinMessages(): boolean {
+  return canManageMessages();
+}
+
+/**
+ * 置顶 / 取消置顶某条消息。服务端会广播 evt.message.updated（同一份数据），
+ * 这里先用响应整条替换本地消息，实时模式下也不会闪。
+ */
+export async function setMessagePinned(item: MessageItem, pinned: boolean): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  try {
+    const updated = pinned ? await server.pinMessage(item.id) : await server.unpinMessage(item.id);
+    upsertMessage(updated as MessageItem, true);
+    notify(pinned ? "已置顶" : "已取消置顶");
+  } catch (error) {
+    notify(errorText(error));
+  }
+}
+
+/** 拉当前房间的置顶消息（打开置顶面板时调用；按置顶时间倒序） */
+export async function loadPinnedMessages(): Promise<MessageItem[]> {
+  const server = serverOf();
+  const channelId = state.view.channelId;
+  if (!server || !channelId) return [];
+  try {
+    const res = await server.listPinned(channelId, state.view.threadId);
+    return res.items as MessageItem[];
+  } catch (error) {
+    notify(errorText(error));
+    return [];
   }
 }
 

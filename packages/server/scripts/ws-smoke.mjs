@@ -356,6 +356,70 @@ const threadsAfterOther = await call("GET", `/api/channels/${channelId}/threads`
 const otherThread = threadsAfterOther.json.active.find((t) => t.id === thread.json.id);
 assert(otherThread?.unreadCount === 1, "讨论组内他人发言计入未读");
 
+// typing：B 连上同一房间后，A 发 typing 帧 -> B 收 evt.typing（房间私有热态，不落库）
+const wsB = await connectWs(tokenB, channelId);
+try {
+  await waitFrame(wsB, (f) => f.type === "evt.hello");
+  const typingP = waitFrame(wsB, (f) => f.type === "evt.typing");
+  ws.send(JSON.stringify({ type: "typing", payload: { clientTime: Date.now() } }));
+  const typingEvt = await typingP;
+  assert(typingEvt.payload.channelId === channelId, "同房间他人收到 evt.typing");
+  assert(typingEvt.payload.member.handle.startsWith("chalice"), "evt.typing 带发送者身份");
+  assert(typingEvt.payload.expiresAt > Date.now(), "evt.typing 带到期时间");
+} finally {
+  wsB.close();
+}
+
+// @everyone：后端展开成全体成员（自己除外）-> 收到广播且 mentionMe=true，提及未读角标亮起
+const meId = hello.payload.user.id;
+const everyoneP = waitFrame(
+  ws,
+  (f) => f.type === "evt.message.new" && (f.payload.message.mentions ?? []).length >= 1,
+);
+const everyoneMsg = await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "@everyone 全员通知", mentionEveryone: true },
+  tokenB,
+);
+assert(everyoneMsg.status === 201, "B 发 @everyone 消息成功");
+assert(
+  everyoneMsg.json.mentions.includes(meId) && everyoneMsg.json.mentions.length === 1,
+  "@everyone 展开成全体成员（本社区仅 A+B，扣掉发送者只剩 A）",
+);
+const everyoneEvt = await everyoneP;
+assert(everyoneEvt.payload.mentionMe === true, "@everyone 广播里 mentionMe=true");
+const mineAfterEveryone = await myCommunity();
+assert((mineAfterEveryone?.unreadMentions ?? 0) >= 1, "@everyone 让 A 的频道提及未读 > 0");
+await call(
+  "POST",
+  `/api/channels/${channelId}/read-state`,
+  { lastReadMessageId: everyoneMsg.json.id },
+  tokenA,
+);
+assert((await myCommunity())?.unreadMentions === 0, "A 读完 @everyone 提及未读清零");
+
+// 置顶：普通成员无权置顶；owner 置顶后出现在房间置顶列表，取消后消失
+const pinDenied = await call("POST", `/api/messages/${probe.json.id}/pin`, undefined, tokenB);
+assert(pinDenied.status === 403, "普通成员置顶被拒（403）");
+const pinP = waitFrame(
+  ws,
+  (f) => f.type === "evt.message.updated" && f.payload.message?.pinnedAt !== null,
+);
+const pinned = await call("POST", `/api/messages/${probe.json.id}/pin`, undefined, tokenA);
+assert(pinned.status === 200 && pinned.json.pinnedAt > 0, "owner 置顶成功（返回 pinnedAt）");
+const pinEvt = await pinP;
+assert(pinEvt.payload.message.id === probe.json.id, "置顶广播 evt.message.updated");
+const pins = await call("GET", `/api/channels/${channelId}/pins`, undefined, tokenA);
+assert(
+  pins.json.items.length === 1 && pins.json.items[0].id === probe.json.id,
+  "置顶列表含该消息",
+);
+const unpinned = await call("DELETE", `/api/messages/${probe.json.id}/pin`, undefined, tokenA);
+assert(unpinned.status === 200 && unpinned.json.pinnedAt === null, "取消置顶成功");
+const pinsAfter = await call("GET", `/api/channels/${channelId}/pins`, undefined, tokenA);
+assert(pinsAfter.json.items.length === 0, "取消后置顶列表为空");
+
 // 广播里的 url 用 Worker 侧 origin（本地 dev 会被 routes 改写成自定义域），改回本地直读
 const getRes = await fetch(`${BASE}/api/r2/objects/${upl.json.r2Key}`);
 assert(getRes.status === 200, "附件 GET 200");

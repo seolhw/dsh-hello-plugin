@@ -58,6 +58,9 @@ const PRESENCE_DDL = `
   )
 `;
 
+/** 输入态有效期：客户端至少每 3s 重发一次，服务端按此 TTL 让接收端自行过期 */
+const TYPING_TTL_MS = 6000;
+
 export class ChannelActor extends DurableObject<Env> {
   /** 本实例负责的频道 id（握手时由 Worker 的 X-Channel-Id 头注入；RPC/广播不依赖它） */
   private channelId = "";
@@ -222,6 +225,10 @@ export class ChannelActor extends DurableObject<Env> {
         this.respondOk(ws, id, { kind: session.presence });
         return;
       }
+      case "typing":
+        // 输入态是房间私有热态：不落库、不应答，只扇出给同房间的其他人
+        this.fanoutTyping(session);
+        return;
       default:
         this.respondError(ws, id, "BAD_REQUEST", `unsupported frame type: ${frame.type}`);
     }
@@ -398,6 +405,32 @@ export class ChannelActor extends DurableObject<Env> {
     } as unknown as ServerFrame;
     for (const ws of [...this.sessions.keys()]) {
       if (ws.readyState !== WebSocket.OPEN) continue;
+      this.send(ws, frame);
+    }
+  }
+
+  /**
+   * 把「正在输入」扇出给本房间的其他人（按 userId 排除发送者本身及其多端连接）。
+   * 输入态是房间私有热状态：只在本实例内扇出，不落库、不跨房间聚合。
+   */
+  private fanoutTyping(session: Session): void {
+    const now = Date.now();
+    const frame = {
+      type: "evt.typing",
+      ts: now,
+      payload: {
+        channelId: this.channelId,
+        member: {
+          userId: session.userId,
+          handle: session.handle,
+          displayName: session.displayName,
+          avatarUrl: session.avatarUrl,
+        },
+        expiresAt: now + TYPING_TTL_MS,
+      },
+    } as unknown as ServerFrame;
+    for (const [ws, other] of [...this.sessions.entries()]) {
+      if (other.userId === session.userId || ws.readyState !== WebSocket.OPEN) continue;
       this.send(ws, frame);
     }
   }

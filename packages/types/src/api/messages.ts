@@ -34,6 +34,8 @@ export interface CreateMessageRequest {
   attachments?: MessageAttachmentPut[];
   /** @handle 列表（前端传 handle，后端解析成 userId 存入 mentions） */
   mentionHandles?: string[];
+  /** 正文是否 @所有人（@everyone）：后端展开成全体成员，用于提及未读与高亮 */
+  mentionEveryone?: boolean;
   /** 回复的父消息 */
   replyToId?: ID | null;
   /** 发到某条讨论组（thread）里；空 = 发在主频道 */
@@ -52,6 +54,20 @@ export type UpdateMessageResponse = Message & { author: User };
 
 /** DELETE /api/messages/:id —— 删消息（作者 or admin） */
 export type DeleteMessageResponse = EmptyResponse;
+
+// ------- 置顶（pin） -------
+// 置顶按「房间」维度生效：主频道直接消息与讨论组内消息各成一份列表。
+
+/** POST /api/messages/:id/pin —— 置顶（需社区 MANAGE_MESSAGES 位） */
+export type PinMessageResponse = Message & { author: User };
+
+/** DELETE /api/messages/:id/pin —— 取消置顶（同上权限） */
+export type UnpinMessageResponse = Message & { author: User };
+
+/** GET /api/channels/:id/pins —— 该房间的置顶消息（?threadId= 取该讨论组的），按置顶时间倒序 */
+export interface ListPinsResponse {
+  items: Array<Message & { author: User }>;
+}
 
 // ------- 表情回应（reaction） -------
 

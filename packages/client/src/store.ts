@@ -107,8 +107,10 @@ export interface TalkState {
   error: string;
   toast: string;
   view: ViewState;
-  /** 注册成功后待验证的邮箱；非空时 AuthScreen 切换到验证码界面 */
+  /** 待验证的邮箱；非空时 AuthScreen 切换到验证码界面 */
   pendingEmail: string | null;
+  /** 进入验证码界面的原因：注册后验证 / 未验证账号登录被拦截 */
+  pendingEmailReason: "register" | "login" | null;
   /** 站内信收件箱 */
   inboxOpen: boolean;
   notifications: InboxItem[];
@@ -151,6 +153,7 @@ const INITIAL: TalkState = {
   toast: "",
   view: INITIAL_VIEW,
   pendingEmail: null,
+  pendingEmailReason: null,
   inboxOpen: false,
   notifications: [],
   inboxLoading: false,
@@ -265,18 +268,45 @@ export function deactivateTalk(): void {
 
 type LoginMode = "email" | "username";
 
+/**
+ * 是否为「邮箱尚未验证」被 Better Auth 拒绝（requireEmailVerification 生效时
+ * sign-in 返回 403 + code EMAIL_NOT_VERIFIED，见 lib/auth.ts）。
+ * 以 code 为主、403 + 文案为兜底，避免不同版本响应体差异导致漏判。
+ */
+function isEmailNotVerified(error: unknown): boolean {
+  if (!(error instanceof ServerApiError)) return false;
+  if (error.code === "EMAIL_NOT_VERIFIED") return true;
+  return error.status === 403 && /not verified|verify your email/i.test(error.message);
+}
+
 /** 邮箱/用户名登录（Better Auth），成功后写 host token/handle */
 export async function login(mode: LoginMode, account: string, password: string): Promise<void> {
   const settings = state.settings;
   if (!settings) throw new Error("尚未就绪");
   const server = makeServer(settings);
-  const result =
-    mode === "email"
-      ? await server.signInEmail({ email: account, password })
-      : await server.signInUsername({ username: account, password });
-  const { user, token } = result;
-  if (!token || !user) throw new Error("服务端未返回会话 token");
-  await applySession({ user, token });
+  try {
+    const result =
+      mode === "email"
+        ? await server.signInEmail({ email: account, password })
+        : await server.signInUsername({ username: account, password });
+    const { user, token } = result;
+    if (!token || !user) throw new Error("服务端未返回会话 token");
+    await applySession({ user, token });
+  } catch (error) {
+    // 未验证邮箱的账号不允许登录：不发会话，切到验证码界面并补发验证码
+    // （sign-in 已校验过密码，此处向该邮箱重发验证码是安全的）
+    if (!isEmailNotVerified(error)) throw error;
+    if (mode !== "email") {
+      throw new Error("该账号的邮箱尚未验证，请改用邮箱登录完成验证");
+    }
+    const email = account.trim();
+    setState({ pendingEmail: email, pendingEmailReason: "login", error: "" });
+    try {
+      await server.sendVerificationOtp({ email, type: "email-verification" });
+    } catch {
+      // 发送失败不阻塞界面：验证码界面提供「重新发送」
+    }
+  }
 }
 
 /** 邮箱注册：用户名由服务端从邮箱 @ 前缀自动派生，客户端不再提交。昵称可选。 */
@@ -292,7 +322,7 @@ export async function register(input: {
   // 注册成功（requireEmailVerification=true 不会自动登录），服务端已发送 6 位验证码；
   // 这里只切换 UI 到验证码界面，由 verifyOtp 完成后续登录。
   await makeServer(settings).signUpEmail(body);
-  setState({ pendingEmail: input.email.trim(), error: "" });
+  setState({ pendingEmail: input.email.trim(), pendingEmailReason: "register", error: "" });
 }
 
 /** 校验邮箱验证码；验证成功且 autoSignInAfterVerification 开启时自动登录 */
@@ -307,7 +337,7 @@ export async function verifyOtp(otp: string): Promise<void> {
     return;
   }
   // 未自动登录：回登录页，让用户手动登录
-  setState({ pendingEmail: null });
+  setState({ pendingEmail: null, pendingEmailReason: null });
   notify("邮箱验证成功，请登录");
 }
 
@@ -322,7 +352,7 @@ export async function resendVerificationOtp(): Promise<void> {
 
 /** 从验证码界面返回登录页 */
 export function cancelVerification(): void {
-  setState({ pendingEmail: null });
+  setState({ pendingEmail: null, pendingEmailReason: null });
 }
 
 /**
@@ -551,6 +581,7 @@ export async function logout(): Promise<void> {
     view: { ...INITIAL_VIEW },
     settings: settings === null ? null : { ...settings, token: "" },
     pendingEmail: null,
+    pendingEmailReason: null,
   });
   resetInbox();
 }
@@ -563,14 +594,26 @@ export async function refresh(): Promise<void> {
     const settings = await hostConfigGet();
     if (settings.token.length === 0) {
       resetInbox();
-      setState({ phase: "anon", busy: false, settings, pendingEmail: null });
+      setState({
+        phase: "anon",
+        busy: false,
+        settings,
+        pendingEmail: null,
+        pendingEmailReason: null,
+      });
       return;
     }
     const server = makeServer(settings);
     const session = await server.getSession();
     if (!session?.session || !session.user) {
       resetInbox();
-      setState({ phase: "anon", busy: false, settings, pendingEmail: null });
+      setState({
+        phase: "anon",
+        busy: false,
+        settings,
+        pendingEmail: null,
+        pendingEmailReason: null,
+      });
       return;
     }
     const me = toUser(session.user);
@@ -604,6 +647,7 @@ export async function refresh(): Promise<void> {
         communities: [],
         settings: state.settings,
         pendingEmail: null,
+        pendingEmailReason: null,
       });
       return;
     }

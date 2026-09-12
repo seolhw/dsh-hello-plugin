@@ -379,6 +379,8 @@ export function AuthScreen(): ReactElement {
   const [forgot, setForgot] = useState(false);
 
   const pendingEmail = talk.pendingEmail;
+  // 未验证账号登录被拦截时也会进入验证码界面，文案需与注册后验证区分
+  const verifyFromLogin = talk.pendingEmailReason === "login";
 
   useEffect(() => {
     if (pendingEmail) {
@@ -437,11 +439,24 @@ export function AuthScreen(): ReactElement {
     const otpReady = otp.trim().length === 6;
     return (
       <div style={card}>
-        <BrandHeader title="验证邮箱" subtitle="输入验证码完成注册" />
+        <BrandHeader
+          title="验证邮箱"
+          subtitle={verifyFromLogin ? "该账号尚未验证，验证后即可登录" : "输入验证码完成注册"}
+        />
 
         <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.5 }}>
-          验证码已发送至 <strong style={{ color: palette.text }}>{pendingEmail}</strong>，
-          请查收邮件。5 分钟内有效；若未收到，请检查垃圾邮件。
+          {verifyFromLogin ? (
+            <>
+              该邮箱尚未验证，暂时无法登录。验证码已重新发送至{" "}
+              <strong style={{ color: palette.text }}>{pendingEmail}</strong>
+              ，完成验证后将自动登录。5 分钟内有效；若未收到，请检查垃圾邮件。
+            </>
+          ) : (
+            <>
+              验证码已发送至 <strong style={{ color: palette.text }}>{pendingEmail}</strong>，
+              请查收邮件。5 分钟内有效；若未收到，请检查垃圾邮件。
+            </>
+          )}
         </div>
 
         <form

@@ -31,14 +31,14 @@ function Centered({ children }: { children: ReactElement }): ReactElement {
 }
 
 function LoadingView(): ReactElement {
-  return <div style={{ color: palette.muted, fontSize: 13 }}>正在连接 dsh-talk Server…</div>;
+  return <div style={{ color: palette.muted, fontSize: 14 }}>正在连接 dsh-talk Server…</div>;
 }
 
 function ErrorView(): ReactElement {
   const { error } = useTalkState();
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-      <div style={{ color: palette.danger, fontSize: 13 }}>连接失败：{error}</div>
+      <div style={{ color: palette.danger, fontSize: 14 }}>连接失败：{error}</div>
       <Button variant="outline" size="sm" onClick={() => void refresh()}>
         重试
       </Button>

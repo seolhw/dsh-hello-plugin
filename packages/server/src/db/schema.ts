@@ -260,6 +260,24 @@ export const messages = sqliteTable(
   ],
 );
 
+// ---------- 消息表情回应（同一人同一 emoji 只一行；再次点击即删除） ----------
+export const messageReactions = sqliteTable(
+  "message_reactions",
+  {
+    messageId: $id("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    userId: $id("user_id"), // 弱引用 better-auth user.id
+    emoji: text("emoji").notNull(),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.messageId, t.userId, t.emoji] }),
+    index("idx_message_reactions_message").on(t.messageId),
+    index("idx_message_reactions_user").on(t.userId),
+  ],
+);
+
 // ---------- 分享（agent-session DSH 会话） ----------
 export const shares = sqliteTable(
   "shares",
@@ -370,6 +388,8 @@ export type ThreadReadStateRow = typeof threadReadStates.$inferSelect;
 export type NewThreadReadState = typeof threadReadStates.$inferInsert;
 export type MessageRow = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+export type MessageReactionRow = typeof messageReactions.$inferSelect;
+export type NewMessageReaction = typeof messageReactions.$inferInsert;
 export type ShareRow = typeof shares.$inferSelect;
 export type NewShare = typeof shares.$inferInsert;
 export type ChannelReadStateRow = typeof channelReadStates.$inferSelect;

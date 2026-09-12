@@ -8,7 +8,7 @@
 
 import type { ThreadSummary } from "@dsh-talk/types/api";
 import { Permission, type Thread } from "@dsh-talk/types/entities";
-import { and, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, ne, type SQL, sql } from "drizzle-orm";
 import { uniq } from "es-toolkit/array";
 import { THREAD_AUTO_ARCHIVE_MS } from "../constants";
 import { messages, type ThreadRow, threadMembers, threadReadStates, threads } from "../db/schema";
@@ -123,7 +123,14 @@ async function enrichWithUnread(
           mentions: sql<number>`COALESCE(SUM(CASE WHEN instr(${messages.mentions}, ${`"${userId}"`}) > 0 THEN 1 ELSE 0 END), 0)`,
         })
         .from(messages)
-        .where(and(eq(messages.threadId, row.id), gt(messages.createdAt, lastReadAt)));
+        .where(
+          and(
+            eq(messages.threadId, row.id),
+            gt(messages.createdAt, lastReadAt),
+            // 自己发的消息不算未读（同频道规则；否则发完就在列表里给自己亮角标）
+            ne(messages.authorId, userId),
+          ),
+        );
       unreadCount = Number(agg[0]?.unread ?? 0);
       unreadMentions = Number(agg[0]?.mentions ?? 0);
     }

@@ -147,7 +147,7 @@ export function ThreadCreateModal({
               私密
             </button>
           </div>
-          <span style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
+          <span style={{ ...smallText, fontSize: 14, lineHeight: 1.6 }}>
             {visibility === "public"
               ? "社区成员自由进出。"
               : passcode.trim().length > 0
@@ -166,15 +166,15 @@ export function ThreadCreateModal({
               onChange={(e) => setPasscode(e.target.value)}
               placeholder="留空表示仅邀请加入"
             />
-            <span style={{ ...smallText, fontSize: 11.5 }}>
+            <span style={{ ...smallText, fontSize: 14 }}>
               留空 = 只能由组内成员拉入；填写后，社区成员可凭该密码自行进入。
             </span>
           </div>
         ) : null}
         {starterNote ? (
-          <div style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>{starterNote}</div>
+          <div style={{ ...smallText, fontSize: 14, lineHeight: 1.6 }}>{starterNote}</div>
         ) : null}
-        <div style={{ ...smallText, fontSize: 12, lineHeight: 1.6 }}>
+        <div style={{ ...smallText, fontSize: 14, lineHeight: 1.6 }}>
           24
           小时内没人发言会自动归档（从频道列表收起，可在「已归档」里恢复）；再有人发言会自动回到活跃区。
         </div>
@@ -381,7 +381,7 @@ export function ThreadSettingsModal({
             ) : null}
           </div>
         ) : (
-          <div style={{ ...smallText, fontSize: 12 }}>
+          <div style={{ ...smallText, fontSize: 14 }}>
             公开讨论组：社区成员可自由进出；转为公开会一并清除进入密码。
           </div>
         )}
@@ -489,10 +489,10 @@ export function ThreadMembersModal({
                     <div style={listCardName}>
                       {m.user.displayName ?? m.user.handle}
                       {isSelf ? (
-                        <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
+                        <span style={{ color: palette.muted, fontSize: 14 }}>（我）</span>
                       ) : null}
                     </div>
-                    <div style={{ ...smallText, fontSize: 11 }}>
+                    <div style={{ ...smallText, fontSize: 14 }}>
                       @{m.user.handle} · {isCreator ? "发起人" : "成员"}
                     </div>
                   </div>
@@ -546,7 +546,7 @@ export function ThreadMembersModal({
                 <Avatar label={u.handle} src={u.avatarUrl} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={listCardName}>{u.displayName ?? u.handle}</div>
-                  <div style={{ ...smallText, fontSize: 11 }}>@{u.handle}</div>
+                  <div style={{ ...smallText, fontSize: 14 }}>@{u.handle}</div>
                 </div>
                 <Button
                   size="sm"

@@ -31,7 +31,7 @@ const infoRow: CSSProperties = {
 };
 
 const infoValue: CSSProperties = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   color: palette.text,
   minWidth: 0,
@@ -161,7 +161,7 @@ export function ProfileModal({
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>个人资料</span>
+          <span style={{ fontSize: 14, fontWeight: 650, color: palette.text }}>个人资料</span>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <span style={fieldLabel}>头像</span>
             <AvatarPicker
@@ -198,7 +198,7 @@ export function ProfileModal({
                 {nicknameBusy ? "保存中…" : "保存"}
               </Button>
             </div>
-            <span style={{ ...smallText, fontSize: 11.5 }}>昵称会显示在消息与成员列表里。</span>
+            <span style={{ ...smallText, fontSize: 14 }}>昵称会显示在消息与成员列表里。</span>
           </div>
         </div>
 
@@ -229,18 +229,18 @@ export function ProfileModal({
                 {usernameBusy ? "保存中…" : "保存"}
               </Button>
             </div>
-            <span style={{ ...smallText, fontSize: 11.5 }}>
+            <span style={{ ...smallText, fontSize: 14 }}>
               仅限大小写字母和数字，4-16 个字符，每周只能修改一次。
             </span>
           </div>
           <div style={infoRow}>
-            <span style={{ ...smallText, fontSize: 12, flex: "0 0 auto" }}>邮箱</span>
+            <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>邮箱</span>
             <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
               <span style={infoValue}>{talk.meEmail ?? "—"}</span>
               <span
                 style={{
                   flex: "0 0 auto",
-                  fontSize: 11,
+                  fontSize: 14,
                   fontWeight: 600,
                   color: palette.success,
                 }}
@@ -252,7 +252,7 @@ export function ProfileModal({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 650, color: palette.text }}>修改密码</span>
+          <span style={{ fontSize: 14, fontWeight: 650, color: palette.text }}>修改密码</span>
           <Input
             type="password"
             autoComplete="current-password"

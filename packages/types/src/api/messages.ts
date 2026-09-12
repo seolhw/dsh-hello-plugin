@@ -1,4 +1,11 @@
-import type { ChannelKind, ChannelReadState, ID, Message, User } from "../entities";
+import type {
+  ChannelKind,
+  ChannelReadState,
+  ID,
+  Message,
+  MessageReaction,
+  User,
+} from "../entities";
 import type { CursorPaginated, CursorPaginationQuery, EmptyResponse } from "./common";
 import type { MessageAttachmentPut } from "./r2";
 
@@ -44,6 +51,19 @@ export type UpdateMessageResponse = Message & { author: User };
 
 /** DELETE /api/messages/:id —— 删消息（作者 or admin） */
 export type DeleteMessageResponse = EmptyResponse;
+
+// ------- 表情回应（reaction） -------
+
+/** POST /api/messages/:id/reactions —— 切换表情回应（已回应过则取消） */
+export interface ToggleMessageReactionRequest {
+  emoji: string;
+}
+
+/** 返回该消息最新的整份回应聚合，客户端直接替换本地状态 */
+export interface ToggleMessageReactionResponse {
+  messageId: ID;
+  reactions: MessageReaction[];
+}
 
 // ------- 未读 -----------------------------------------------------------
 

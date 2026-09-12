@@ -127,14 +127,14 @@ export function ShareSnapshotModal({
             }}
           >
             {sessionGroups.length === 0 ? (
-              <div style={{ ...smallText, fontSize: 12 }}>没有可分享的本机会话。</div>
+              <div style={{ ...smallText, fontSize: 14 }}>没有可分享的本机会话。</div>
             ) : (
               sessionGroups.map((group) => (
                 <div key={group.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <span
                     title={group.key.length > 0 ? group.key : undefined}
                     style={{
-                      fontSize: 11,
+                      fontSize: 14,
                       fontWeight: 650,
                       color: palette.caption,
                       letterSpacing: "0.04em",
@@ -199,7 +199,7 @@ const shareCardStyle: CSSProperties = {
 
 const shareCardBadge: CSSProperties = {
   flex: "0 0 auto",
-  fontSize: 10.5,
+  fontSize: 14,
   fontWeight: 650,
   color: palette.accent,
   background: palette.elevated,
@@ -229,7 +229,7 @@ export function ShareCardView({
         <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
           <span
             style={{
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: 600,
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -242,7 +242,7 @@ export function ShareCardView({
             <span
               style={{
                 ...smallText,
-                fontSize: 11.5,
+                fontSize: 14,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
@@ -252,7 +252,7 @@ export function ShareCardView({
             </span>
           ) : null}
         </span>
-        <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>查看</span>
+        <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>查看</span>
       </button>
       <ShareCardModal open={open} onClose={() => setOpen(false)} card={card} />
     </>
@@ -330,11 +330,11 @@ function ShareCardModal({
           <span style={shareCardBadge}>DSH 会话</span>
           <span style={{ fontSize: 14, fontWeight: 650 }}>{card.title}</span>
         </div>
-        {card.summary ? <div style={{ ...smallText, fontSize: 12.5 }}>{card.summary}</div> : null}
+        {card.summary ? <div style={{ ...smallText, fontSize: 14 }}>{card.summary}</div> : null}
         {loading ? (
-          <div style={{ ...smallText, fontSize: 12 }}>加载分享信息…</div>
+          <div style={{ ...smallText, fontSize: 14 }}>加载分享信息…</div>
         ) : detail ? (
-          <div style={{ ...smallText, fontSize: 12, lineHeight: 1.9 }}>
+          <div style={{ ...smallText, fontSize: 14, lineHeight: 1.9 }}>
             <div>分享者：@{detail.author.handle}</div>
             <div>时间：{timeLabel(detail.createdAt)}</div>
             <div>大小：{formatBytes(detail.sizeBytes)}</div>
@@ -342,7 +342,7 @@ function ShareCardModal({
             <div>下载次数：{detail.downloadCount}</div>
           </div>
         ) : null}
-        <div style={{ ...smallText, fontSize: 12 }}>
+        <div style={{ ...smallText, fontSize: 14 }}>
           克隆会在你的 DSH 里新建一个会话并切过去，不影响原会话。
         </div>
       </div>

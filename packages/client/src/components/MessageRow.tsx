@@ -1,5 +1,6 @@
 // ================================================================
-// 消息行：作者/时间/正文（@ 高亮）/附件/分享卡片 + hover 操作条（回复/讨论组/编辑/撤回）。
+// 消息行：作者/时间/正文（@ 高亮）/附件/分享卡片 + 表情回应 + hover 操作条
+// （加表情回应/回复/讨论组/编辑/撤回）。
 // ================================================================
 
 import {
@@ -23,9 +24,11 @@ import {
   notify,
   replyToMessage,
   revealMessage,
+  toggleReaction,
   updateMessage,
   useTalkState,
 } from "../store";
+import { EmojiPopover } from "./EmojiPicker";
 import { formatBytes, msgChip, msgRow, replyParts, textAreaEdit } from "./homeStyles";
 import { ShareCardView } from "./ShareModals";
 import { Avatar, palette, smallText, timeLabel } from "./styles";
@@ -93,7 +96,7 @@ const fileChip: CSSProperties = {
   border: `1px solid ${palette.border}`,
   background: palette.inputBg,
   color: palette.text,
-  fontSize: 12,
+  fontSize: 14,
   textDecoration: "none",
   maxWidth: 260,
 };
@@ -147,10 +150,51 @@ export function AttachmentList({
           >
             {a.name}
           </span>
-          <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+          <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>
             {formatBytes(a.size)}
           </span>
         </a>
+      ))}
+    </div>
+  );
+}
+
+// ---------------- 表情回应（reaction） ----------------
+
+/** 回应小胶囊：我投过的用品牌色描边高亮 */
+function reactionChipStyle(mine: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "1px 7px",
+    borderRadius: 999,
+    fontSize: 14,
+    fontWeight: 600,
+    cursor: "pointer",
+    border: `1px solid ${mine ? palette.accent : palette.border}`,
+    background: mine ? palette.hoverAccent : palette.inputBg,
+    color: mine ? palette.accent : palette.secondary,
+  };
+}
+
+/** 消息底部的一排回应：表情 + 计数，点击切换自己的回应 */
+function ReactionRow({ item }: { item: MessageItem }): ReactElement | null {
+  const reactions = item.reactions ?? [];
+  if (reactions.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+      {reactions.map((reaction) => (
+        <button
+          key={reaction.emoji}
+          type="button"
+          onClick={() => void toggleReaction(item, reaction.emoji)}
+          title={reaction.me ? `取消回应 ${reaction.emoji}` : `回应 ${reaction.emoji}`}
+          style={reactionChipStyle(reaction.me)}
+        >
+          <span style={{ fontSize: 14, lineHeight: 1.2 }}>{reaction.emoji}</span>
+          <span>{reaction.count}</span>
+        </button>
       ))}
     </div>
   );
@@ -167,6 +211,7 @@ export function MessageRow({
 }): ReactElement {
   const talk = useTalkState();
   const [editing, setEditing] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
   const [draftText, setDraftText] = useState(item.content);
   const mine = talk.me !== null && item.authorId === talk.me.id;
   const mentionedMe = (item.mentions ?? []).includes(talk.me?.id ?? "");
@@ -247,7 +292,7 @@ export function MessageRow({
               margin: "0 0 2px",
               cursor: "pointer",
               color: palette.caption,
-              fontSize: 11.5,
+              fontSize: 14,
               textAlign: "left",
               overflow: "hidden",
             }}
@@ -282,13 +327,13 @@ export function MessageRow({
           </button>
         ) : null}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
             {item.author.displayName ?? item.author.handle}
           </span>
-          <span style={{ fontSize: 11 }}>{mine ? "" : `@${item.author.handle}`}</span>
-          <span style={{ ...smallText, fontSize: 11 }}>{timeLabel(item.createdAt)}</span>
-          {mentionedMe ? <span style={{ fontSize: 11, color: palette.accent }}>@了你</span> : null}
-          {item.updatedAt ? <span style={{ ...smallText, fontSize: 10 }}>(已编辑)</span> : null}
+          <span style={{ fontSize: 14 }}>{mine ? "" : `@${item.author.handle}`}</span>
+          <span style={{ ...smallText, fontSize: 14 }}>{timeLabel(item.createdAt)}</span>
+          {mentionedMe ? <span style={{ fontSize: 14, color: palette.accent }}>@了你</span> : null}
+          {item.updatedAt ? <span style={{ ...smallText, fontSize: 14 }}>(已编辑)</span> : null}
         </div>
         {editing ? (
           <textarea
@@ -302,7 +347,7 @@ export function MessageRow({
             style={{
               whiteSpace: "pre-wrap",
               wordBreak: "break-word",
-              fontSize: 13.5,
+              fontSize: 14,
               lineHeight: 1.55,
             }}
           >
@@ -311,8 +356,12 @@ export function MessageRow({
         )}
         <AttachmentList attachments={item.attachments ?? []} />
         {item.shareCard ? <ShareCardView card={item.shareCard} /> : null}
+        <ReactionRow item={item} />
       </div>
-      <span className={`dsht-msg-actions${editing ? " is-open" : ""}`} style={msgChip}>
+      <span
+        className={`dsht-msg-actions${editing || reactionOpen ? " is-open" : ""}`}
+        style={msgChip}
+      >
         {editing ? (
           <>
             <Button
@@ -332,6 +381,15 @@ export function MessageRow({
           </>
         ) : (
           <>
+            <EmojiPopover
+              open={reactionOpen}
+              onOpenChange={setReactionOpen}
+              onPick={(emoji) => void toggleReaction(item, emoji)}
+              size="sm"
+              align="right"
+              label="添加表情回应"
+              title="添加表情回应"
+            />
             {canReplyHere ? (
               <Button
                 size="sm"

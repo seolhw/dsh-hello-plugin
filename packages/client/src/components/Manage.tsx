@@ -126,7 +126,7 @@ const permissionSummary = (bits: PermissionFlags): string => {
 
 /** 弹窗说明文字 */
 const dialogHint: CSSProperties = {
-  fontSize: 11.5,
+  fontSize: 14,
   color: palette.caption,
   lineHeight: 1.6,
 };
@@ -557,10 +557,10 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                   <div style={listCardName}>
                     {m.user.displayName ?? m.user.handle}
                     {targetIsOwner ? (
-                      <span style={{ color: palette.muted, fontSize: 11 }}>（所有者）</span>
+                      <span style={{ color: palette.muted, fontSize: 14 }}>（所有者）</span>
                     ) : null}
                     {self ? (
-                      <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
+                      <span style={{ color: palette.muted, fontSize: 14 }}>（我）</span>
                     ) : null}
                   </div>
                   <div
@@ -573,14 +573,14 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                     }}
                   >
                     {held.length === 0 ? (
-                      <span style={{ ...smallText, fontSize: 11 }}>仅 @everyone</span>
+                      <span style={{ ...smallText, fontSize: 14 }}>仅 @everyone</span>
                     ) : (
                       held.map((r) => (
                         <span
                           key={r.id}
                           style={{
-                            fontSize: 11,
-                            lineHeight: "16px",
+                            fontSize: 14,
+                            lineHeight: "18px",
                             color: roleColorOf(r),
                             border: `1px solid ${palette.border}`,
                             borderRadius: 999,
@@ -638,7 +638,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
           <div
             style={{
-              fontSize: 11,
+              fontSize: 14,
               fontWeight: 650,
               color: palette.caption,
               letterSpacing: "0.06em",
@@ -655,10 +655,10 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 <div style={listCardName}>
                   @{b.user.handle}
                   {b.reason ? (
-                    <span style={{ color: palette.caption, fontSize: 11 }}> · {b.reason}</span>
+                    <span style={{ color: palette.caption, fontSize: 14 }}> · {b.reason}</span>
                   ) : null}
                 </div>
-                <div style={{ ...smallText, fontSize: 11 }}>封禁于 {timeLabel(b.createdAt)}</div>
+                <div style={{ ...smallText, fontSize: 14 }}>封禁于 {timeLabel(b.createdAt)}</div>
               </div>
               <Button
                 size="sm"
@@ -770,11 +770,11 @@ function MemberRolesDialog({
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={listCardName}>{r.name}</div>
-                  <div style={{ ...smallText, fontSize: 11 }}>
+                  <div style={{ ...smallText, fontSize: 14 }}>
                     {permissionSummary(r.permissions)}
                   </div>
                 </div>
-                <span style={{ ...smallText, fontSize: 11 }}>{on ? "已分配" : "未分配"}</span>
+                <span style={{ ...smallText, fontSize: 14 }}>{on ? "已分配" : "未分配"}</span>
               </button>
             );
           })}
@@ -1126,7 +1126,7 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={listCardName}>{role.name}</div>
-              <div style={{ ...smallText, fontSize: 11 }}>
+              <div style={{ ...smallText, fontSize: 14 }}>
                 {permissionSummary(role.permissions)}
               </div>
             </div>
@@ -1181,7 +1181,7 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={listCardName}>@everyone</div>
-              <div style={{ ...smallText, fontSize: 11 }}>
+              <div style={{ ...smallText, fontSize: 14 }}>
                 {permissionSummary(everyone.permissions)}
               </div>
             </div>
@@ -1335,9 +1335,9 @@ function RoleEditorDialog({
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={listCardName}>{field.label}</div>
-                    <div style={{ ...smallText, fontSize: 11 }}>{field.hint}</div>
+                    <div style={{ ...smallText, fontSize: 14 }}>{field.hint}</div>
                   </div>
-                  <span style={{ ...smallText, fontSize: 11 }}>
+                  <span style={{ ...smallText, fontSize: 14 }}>
                     {blocked ? "无权授予" : on ? "允许" : "未授予"}
                   </span>
                 </button>
@@ -1504,7 +1504,7 @@ function ChannelOverwriteDialog({
                       ...pillStyle(active),
                       flex: "0 0 auto",
                       padding: "5px 10px",
-                      fontSize: 12,
+                      fontSize: 14,
                       border: hasOverwrite
                         ? `1px solid ${palette.accent}`
                         : `1px solid transparent`,
@@ -1524,7 +1524,7 @@ function ChannelOverwriteDialog({
                 <div key={field.label} style={listCard}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={listCardName}>{field.label}</div>
-                    <div style={{ ...smallText, fontSize: 11 }}>{field.hint}</div>
+                    <div style={{ ...smallText, fontSize: 14 }}>{field.hint}</div>
                   </div>
                   <div
                     style={{
@@ -1545,7 +1545,7 @@ function ChannelOverwriteDialog({
                           ...pillStyle(choice === item.value),
                           flex: "0 0 auto",
                           padding: "4px 10px",
-                          fontSize: 12,
+                          fontSize: 14,
                         }}
                       >
                         {item.label}

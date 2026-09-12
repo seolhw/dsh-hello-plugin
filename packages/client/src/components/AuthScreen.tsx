@@ -34,7 +34,7 @@ const card: CSSProperties = {
   gap: 16,
 };
 
-const fieldHint: CSSProperties = { fontSize: 11, color: palette.caption };
+const fieldHint: CSSProperties = { fontSize: 14, color: palette.caption };
 
 const errorBanner: CSSProperties = {
   display: "flex",
@@ -46,7 +46,7 @@ const errorBanner: CSSProperties = {
   border: `1px solid ${palette.border}`,
   borderLeft: `3px solid ${palette.danger}`,
   color: palette.danger,
-  fontSize: 12.5,
+  fontSize: 14,
   lineHeight: 1.4,
 };
 
@@ -55,7 +55,7 @@ const linkButton: CSSProperties = {
   background: "transparent",
   padding: 0,
   color: palette.accent,
-  fontSize: 12,
+  fontSize: 14,
   cursor: "pointer",
 };
 
@@ -76,8 +76,8 @@ function BrandHeader({ title, subtitle }: { title: string; subtitle: string }): 
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
       <BrandLogo size={42} title="dsh-talk 社区" />
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div style={{ fontSize: 17, fontWeight: 650, lineHeight: 1.2 }}>{title}</div>
-        <div style={{ ...fieldHint, fontSize: 12.5 }}>{subtitle}</div>
+        <div style={{ fontSize: 16, fontWeight: 650, lineHeight: 1.2 }}>{title}</div>
+        <div style={{ ...fieldHint, fontSize: 14 }}>{subtitle}</div>
       </div>
     </div>
   );
@@ -112,7 +112,7 @@ function PasswordToggle({
         background: "transparent",
         padding: 0,
         color: palette.accent,
-        fontSize: 11,
+        fontSize: 14,
         cursor: "pointer",
         display: "inline-flex",
         alignItems: "center",
@@ -148,7 +148,7 @@ function Segmented<T extends string>({
               border: "none",
               borderRadius: 8,
               padding: "7px 12px",
-              fontSize: 13,
+              fontSize: 14,
               fontWeight: active ? 600 : 450,
               color: active ? palette.text : palette.muted,
               background: active ? palette.elevated : "transparent",
@@ -244,7 +244,7 @@ function ForgotPasswordCard({
 
       {stage === "done" ? (
         <>
-          <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
             密码已重置成功，请使用新密码重新登录。
           </div>
           <Button variant="primary" size="md" style={{ width: "100%" }} onClick={onDone}>
@@ -258,7 +258,7 @@ function ForgotPasswordCard({
         >
           {stage === "request" ? (
             <>
-              <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+              <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
                 输入注册邮箱，我们会向它发送一封 6 位验证码邮件。
               </div>
               <Field label="邮箱" htmlFor="talk-reset-email">
@@ -276,7 +276,7 @@ function ForgotPasswordCard({
             </>
           ) : (
             <>
-              <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.6 }}>
+              <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
                 验证码已发送至 <strong style={{ color: palette.text }}>{email}</strong>，5
                 分钟内有效；若未收到，请检查垃圾邮件；若该邮箱未注册则不会收到邮件。
               </div>
@@ -444,7 +444,7 @@ export function AuthScreen(): ReactElement {
           subtitle={verifyFromLogin ? "该账号尚未验证，验证后即可登录" : "输入验证码完成注册"}
         />
 
-        <div style={{ fontSize: 13, color: palette.secondary, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.5 }}>
           {verifyFromLogin ? (
             <>
               该邮箱尚未验证，暂时无法登录。验证码已重新发送至{" "}

@@ -84,6 +84,7 @@ export * from "./threads";
  *   POST   /api/channels/:id/messages          CreateMessageRequest     → CreateMessageResponse
  *   PATCH  /api/messages/:id                   UpdateMessageRequest     → UpdateMessageResponse
  *   DELETE /api/messages/:id                   —                        → DeleteMessageResponse
+ *   POST   /api/messages/:id/reactions         ToggleMessageReactionRequest → ToggleMessageReactionResponse
  *   GET    /api/messages/search                query:SearchMessagesQuery → SearchMessagesResponse
  *
  *  讨论组（thread；消息复用上面同一套，传 ?threadId= / body.threadId）

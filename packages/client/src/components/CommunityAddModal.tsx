@@ -38,7 +38,7 @@ const discoverRow: CSSProperties = {
 };
 
 const discoverName: CSSProperties = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -46,7 +46,7 @@ const discoverName: CSSProperties = {
 };
 
 const discoverDesc: CSSProperties = {
-  fontSize: 11.5,
+  fontSize: 14,
   color: palette.caption,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -302,7 +302,7 @@ export function CommunityAddModal({
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={discoverName}>
                           {item.name}
-                          <span style={{ color: palette.caption, fontSize: 11 }}>
+                          <span style={{ color: palette.caption, fontSize: 14 }}>
                             {" "}
                             · {item.memberCount} 成员
                           </span>

@@ -87,7 +87,7 @@ function ForumTopicRow({
               alignItems: "center",
               gap: 6,
               minWidth: 0,
-              fontSize: 13.5,
+              fontSize: 14,
               fontWeight: 650,
               color: archivedView ? palette.muted : palette.text,
             }}
@@ -108,20 +108,20 @@ function ForumTopicRow({
               <span
                 style={{
                   flex: "0 0 auto",
-                  fontSize: 10,
+                  fontSize: 14,
                   fontWeight: 600,
                   color: palette.muted,
                   border: `1px solid ${palette.border}`,
                   borderRadius: 999,
                   padding: "0 6px",
-                  lineHeight: "16px",
+                  lineHeight: "18px",
                 }}
               >
                 已归档
               </span>
             ) : null}
           </span>
-          <span style={{ ...smallText, fontSize: 11.5, color: palette.caption }}>
+          <span style={{ ...smallText, fontSize: 14, color: palette.caption }}>
             {author} 发起
             {thread.starterSnippet ? (
               <>
@@ -137,13 +137,13 @@ function ForumTopicRow({
           <span
             style={{
               flex: "0 0 auto",
-              minWidth: 17,
-              height: 17,
+              minWidth: 18,
+              height: 18,
               padding: "0 5px",
               borderRadius: 999,
-              fontSize: 11,
+              fontSize: 14,
               fontWeight: 700,
-              lineHeight: "17px",
+              lineHeight: "18px",
               textAlign: "center",
               color: "#fff",
               background: mention > 0 ? palette.accent : palette.badge,
@@ -200,14 +200,14 @@ export function ForumTopicBoard({
               color: palette.accent,
               background: palette.inputBg,
               border: `1px solid ${palette.border}`,
-              fontSize: 19,
+              fontSize: 16,
               fontWeight: 700,
             }}
           >
             #
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>这里还没有话题</span>
-          <span style={{ fontSize: 12, lineHeight: 1.6 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: palette.text }}>这里还没有话题</span>
+          <span style={{ fontSize: 14, lineHeight: 1.6 }}>
             话题频道的聊天都放进一条条话题里：发一个新话题，
             <br />
             大家点进去围绕它交流；24 小时无人回复会自动归档。
@@ -223,7 +223,7 @@ export function ForumTopicBoard({
               创建第一个话题
             </Button>
           ) : null}
-          {!canPost ? <span style={{ fontSize: 12 }}>你没有在此频道发布话题的权限。</span> : null}
+          {!canPost ? <span style={{ fontSize: 14 }}>你没有在此频道发布话题的权限。</span> : null}
         </div>
       </div>
     );
@@ -240,7 +240,7 @@ export function ForumTopicBoard({
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "10px 16px 14px" }}>
       <div style={metaBar}>
-        <span style={{ ...smallText, fontSize: 11.5, color: palette.caption }}>
+        <span style={{ ...smallText, fontSize: 14, color: palette.caption }}>
           {active.length + archived.length} 条话题 · 点进话题查看与回复
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -277,7 +277,7 @@ export function ForumTopicBoard({
               border: "none",
               background: "transparent",
               padding: "4px 2px",
-              fontSize: 11.5,
+              fontSize: 14,
               fontWeight: 600,
               color: palette.caption,
               cursor: "pointer",

@@ -6,6 +6,7 @@
 //   - 发消息：需频道的 SEND_MESSAGES 位（公告频道的只读由 @everyone overwrite 实现）
 //   - 改/删消息：作者本人，或持有社区 MANAGE_MESSAGES 位
 //   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）；超时后作者只能编辑，不能撤回
+//   - 表情回应：能看到该频道（+ 能进入该讨论组）即可切换；同一人同一 emoji 再调一次 = 取消
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片引用 /api/shares 登记的分享
 //   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
 // ================================================================
@@ -16,6 +17,8 @@ import type {
   GetChannelOnlineResponse,
   ListMessagesQuery,
   SearchMessageResult,
+  ToggleMessageReactionRequest,
+  ToggleMessageReactionResponse,
   UpdateMessageRequest,
   UpdateReadStateRequest,
 } from "@dsh-talk/types/api";
@@ -24,10 +27,16 @@ import {
   MESSAGE_RETRACT_MS,
   type Message,
   type MessageAttachment,
+  type MessageReaction,
   Permission,
   type User,
 } from "@dsh-talk/types/entities";
-import type { EvtMessageDeleted, EvtMessageNew, EvtMessageUpdated } from "@dsh-talk/types/ws";
+import type {
+  EvtMessageDeleted,
+  EvtMessageNew,
+  EvtMessageReactions,
+  EvtMessageUpdated,
+} from "@dsh-talk/types/ws";
 import { and, asc, desc, eq, gt, inArray, isNull, like, lt, sql } from "drizzle-orm";
 import { compact, uniq } from "es-toolkit/array";
 import { clamp } from "es-toolkit/math";
@@ -38,6 +47,7 @@ import {
   channelReadStates,
   channels,
   type MessageRow,
+  messageReactions,
   messages,
   shares,
   type ThreadRow,
@@ -50,14 +60,20 @@ import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { requireChannelPermission, requireCommunityPermission } from "../lib/permissions";
+import {
+  hasMyReaction,
+  loadMessageReactions,
+  loadReactionsByMessage,
+  MAX_REACTION_EMOJI_LENGTH,
+} from "../lib/reactions";
 import { broadcastToChannel } from "../lib/realtime";
 import { emptyOk, jsonBody, mustRow, parseJson, publicOrigin } from "../lib/response";
 import { canEnterThread } from "../lib/threads";
 import { fetchUsersByIds, requireUserById, resolveUserIdsByHandles } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
-/** 频道消息行 -> Message 实体（JSON 字段解码） */
-function rowToMessage(row: MessageRow): Message {
+/** 频道消息行 -> Message 实体（JSON 字段解码；reactions 由调用方聚合后传入） */
+function rowToMessage(row: MessageRow, reactions: MessageReaction[] = []): Message {
   return {
     id: row.id,
     channelId: row.channelId,
@@ -69,6 +85,7 @@ function rowToMessage(row: MessageRow): Message {
     shareCard: parseJson(row.shareCard),
     replyToId: row.replyToId,
     threadId: row.threadId,
+    reactions,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -79,8 +96,9 @@ async function messageItem(
   db: ReturnType<typeof dbOf>,
   d1: D1Database,
   row: MessageRow,
+  reactions: MessageReaction[] = [],
 ): Promise<Message & { author: User; replyTo?: (Message & { author: User }) | null }> {
-  const base = rowToMessage(row);
+  const base = rowToMessage(row, reactions);
   const author = await requireUserById(d1, row.authorId);
   let replyTo: (Message & { author: User }) | null = null;
   if (row.replyToId) {
@@ -162,7 +180,14 @@ channelMessagesApi.get("/:id/messages", async (c) => {
   const last = page[page.length - 1];
   const items: Array<Message & { author: User; replyTo?: (Message & { author: User }) | null }> =
     [];
-  for (const row of page) items.push(await messageItem(db, d1, row));
+  const reactionsByMessage = await loadReactionsByMessage(
+    db,
+    page.map((row) => row.id),
+    userId,
+  );
+  for (const row of page) {
+    items.push(await messageItem(db, d1, row, reactionsByMessage.get(row.id) ?? []));
+  }
 
   return c.json({
     items,
@@ -503,7 +528,12 @@ messagesApi.patch("/:id", async (c) => {
     db.select().from(messages).where(eq(messages.id, row.id)).limit(1),
     "message",
   );
-  const item = await messageItem(db, c.env.DB, updated);
+  const item = await messageItem(
+    db,
+    c.env.DB,
+    updated,
+    await loadMessageReactions(db, updated.id, userId),
+  );
   const roomId = row.threadId ?? row.channelId;
   const evt: EvtMessageUpdated = {
     type: "evt.message.updated",
@@ -547,6 +577,58 @@ messagesApi.delete("/:id", async (c) => {
   };
   await broadcastToChannel(c.env, roomId, evt);
   return emptyOk(c);
+});
+
+// --- POST /:id/reactions —— 切换表情回应（已回应过则取消）；返回最新聚合并广播 ---
+messagesApi.post("/:id/reactions", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadMessageRow(db, c.req.param("id"));
+  const channel = await loadChannelRow(db, row.channelId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
+  // 讨论组内的消息：还要能进入该讨论组（私密组需被邀请或持密码）
+  if (row.threadId) {
+    const thread = (
+      await db.select().from(threads).where(eq(threads.id, row.threadId)).limit(1)
+    )[0];
+    if (!thread || !(await canEnterThread(db, thread, userId))) {
+      throw HttpApiError.forbidden("这是私密讨论组，需要被邀请或用密码进入");
+    }
+  }
+
+  const body = await jsonBody<ToggleMessageReactionRequest>(c);
+  const emoji = (body.emoji ?? "").trim();
+  if (emoji.length === 0) throw HttpApiError.badRequest("emoji 不能为空");
+  if (emoji.length > MAX_REACTION_EMOJI_LENGTH) {
+    throw HttpApiError.badRequest(`emoji 超过 ${MAX_REACTION_EMOJI_LENGTH} 字符上限`);
+  }
+
+  if (await hasMyReaction(db, row.id, userId, emoji)) {
+    await db
+      .delete(messageReactions)
+      .where(
+        and(
+          eq(messageReactions.messageId, row.id),
+          eq(messageReactions.userId, userId),
+          eq(messageReactions.emoji, emoji),
+        ),
+      );
+  } else {
+    await db
+      .insert(messageReactions)
+      .values({ messageId: row.id, userId, emoji, createdAt: Date.now() })
+      .onConflictDoNothing();
+  }
+
+  const reactions = await loadMessageReactions(db, row.id, userId);
+  const roomId = row.threadId ?? row.channelId;
+  const evt: EvtMessageReactions = {
+    type: "evt.message.reactions",
+    ts: Date.now(),
+    payload: { channelId: roomId, messageId: row.id, reactions },
+  };
+  await broadcastToChannel(c.env, roomId, evt);
+  return c.json({ messageId: row.id, reactions } satisfies ToggleMessageReactionResponse);
 });
 
 // --- GET /search —— 社区内消息全文搜索（成员可用；倒序 + cursor 分页） ---

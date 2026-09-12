@@ -33,6 +33,7 @@ import {
   setThreadArchived,
   useTalkState,
 } from "../store";
+import { EmojiPopover } from "./EmojiPicker";
 import { ForumTopicBoard } from "./ForumTopicBoard";
 import {
   chatCol,
@@ -81,6 +82,7 @@ export function ChatPane({
   // 输入框 / @ 提及自动补全 / 消息搜索
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerText, setComposerText] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [mentionActive, setMentionActive] = useState(false);
   const [mentionQuery, setMentionQuery] = useState("");
@@ -177,10 +179,11 @@ export function ChatPane({
     return () => observer.disconnect();
   }, [roomKey]);
 
-  // 切房间：清空输入框，收起 @ 补全弹层与回复提示
+  // 切房间：清空输入框，收起 @ 补全弹层、表情面板与回复提示
   // biome-ignore lint/correctness/useExhaustiveDependencies: 需要在切换房间时重置弹层与输入
   useEffect(() => {
     setComposerText("");
+    setEmojiOpen(false);
     setMentionActive(false);
     setMentionQuery("");
     setMentionIndex(0);
@@ -274,6 +277,21 @@ export function ChatPane({
     }
   }
 
+  /** 把表情插入输入框光标处（有选区时替换选区），并把光标移到表情之后 */
+  function insertEmoji(emoji: string): void {
+    const el = composerRef.current;
+    const start = el?.selectionStart ?? composerText.length;
+    const end = el?.selectionEnd ?? start;
+    setComposerText(`${composerText.slice(0, start)}${emoji}${composerText.slice(end)}`);
+    if (el) {
+      const caret = start + emoji.length;
+      window.requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(caret, caret);
+      });
+    }
+  }
+
   function handleComposerKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
     const choosing = mentionActive && mentionCandidates.length > 0;
     if (choosing && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -306,6 +324,7 @@ export function ChatPane({
     if (ok) {
       setComposerText("");
       setPendingFiles([]);
+      setEmojiOpen(false);
       setMentionActive(false);
       mentionStartRef.current = -1;
       composerRef.current?.focus();
@@ -363,7 +382,7 @@ export function ChatPane({
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
-                fontSize: 15,
+                fontSize: 16,
                 fontWeight: 700,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -375,7 +394,7 @@ export function ChatPane({
                 : (channel?.name ?? "")}
             </div>
             {isThread ? (
-              <div style={{ ...smallText, fontSize: 11, color: palette.caption }}>
+              <div style={{ ...smallText, fontSize: 14, color: palette.caption }}>
                 {isForumChannel ? "话题" : "讨论组"}
                 {currentThread?.status === "archived" ? "（已归档）" : ""} · 位于 #
                 {channel?.name ?? ""}
@@ -455,16 +474,6 @@ export function ChatPane({
               />
             )
           ) : null}
-          {!isThread && !isForumBoard ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<IconShareOutline16 />}
-              onClick={() => setShareOpen(true)}
-              aria-label="分享"
-              title="把本机 DSH 会话分享到社区"
-            />
-          ) : null}
           {!isThread ? (
             <Button
               size="sm"
@@ -514,7 +523,7 @@ export function ChatPane({
                   boxShadow: talk.view.live ? `0 0 5px ${palette.success}` : undefined,
                 }}
               />
-              <span style={{ fontSize: 11, color: palette.secondary }}>
+              <span style={{ fontSize: 14, color: palette.secondary }}>
                 {talk.view.live ? "实时" : "重连中…"}
               </span>
             </span>
@@ -539,7 +548,7 @@ export function ChatPane({
                         width: 44,
                         height: 44,
                         borderRadius: 14,
-                        fontSize: 19,
+                        fontSize: 16,
                         fontWeight: 700,
                         color: palette.accent,
                         background: palette.inputBg,
@@ -548,10 +557,10 @@ export function ChatPane({
                     >
                       #
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: palette.text }}>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: palette.text }}>
                       {channel?.kind === "announcement" ? "暂无公告" : "还没有消息"}
                     </span>
-                    <span style={{ fontSize: 12 }}>
+                    <span style={{ fontSize: 14 }}>
                       {channel?.kind === "announcement"
                         ? canPost
                           ? "在这里发布面向全员的公告。"
@@ -590,6 +599,28 @@ export function ChatPane({
             <div style={composerWrap}>
               {canPost ? (
                 <>
+                  {/* 分享 DSH 会话：仅主频道（讨论组/话题内不分享） */}
+                  {!isThread ? (
+                    <Button
+                      size="md"
+                      variant="ghost"
+                      icon={<IconShareOutline16 />}
+                      onClick={() => setShareOpen(true)}
+                      disabled={talk.view.sending}
+                      aria-label="分享"
+                      title="把本机 DSH 会话分享到社区"
+                    />
+                  ) : null}
+                  <EmojiPopover
+                    open={emojiOpen}
+                    onOpenChange={(next) => {
+                      setEmojiOpen(next);
+                      // 表情面板与 @ 补全弹层都贴在输入框上方，同时展开会互相遮挡
+                      if (next) setMentionActive(false);
+                    }}
+                    onPick={insertEmoji}
+                    disabled={talk.view.sending}
+                  />
                   <Button
                     size="md"
                     variant="ghost"
@@ -627,7 +658,7 @@ export function ChatPane({
                           style={{
                             flex: 1,
                             minWidth: 0,
-                            fontSize: 11.5,
+                            fontSize: 14,
                             color: palette.secondary,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -670,7 +701,7 @@ export function ChatPane({
                             >
                               {f.name}
                             </span>
-                            <span style={{ ...smallText, fontSize: 11, flex: "0 0 auto" }}>
+                            <span style={{ ...smallText, fontSize: 14, flex: "0 0 auto" }}>
                               {formatBytes(f.size)}
                             </span>
                             <Button
@@ -699,7 +730,7 @@ export function ChatPane({
                         {talk.view.membersLoading ? (
                           <div
                             style={{
-                              fontSize: 12,
+                              fontSize: 14,
                               color: palette.muted,
                               padding: "8px 10px",
                               textAlign: "center",
@@ -710,7 +741,7 @@ export function ChatPane({
                         ) : mentionCandidates.length === 0 ? (
                           <div
                             style={{
-                              fontSize: 12,
+                              fontSize: 14,
                               color: palette.muted,
                               padding: "8px 10px",
                               textAlign: "center",
@@ -743,7 +774,7 @@ export function ChatPane({
                               <Avatar label={member.handle} src={member.avatarUrl} size={18} />
                               <span
                                 style={{
-                                  fontSize: 13,
+                                  fontSize: 14,
                                   fontWeight: 600,
                                   color: palette.text,
                                   flex: "0 0 auto",
@@ -751,7 +782,7 @@ export function ChatPane({
                               >
                                 {member.displayName ?? member.handle}
                               </span>
-                              <span style={{ fontSize: 12, color: palette.caption }}>
+                              <span style={{ fontSize: 14, color: palette.caption }}>
                                 @{member.handle}
                               </span>
                             </button>
@@ -797,7 +828,7 @@ export function ChatPane({
                 <span
                   style={{
                     ...smallText,
-                    fontSize: 12,
+                    fontSize: 14,
                     flex: 1,
                     textAlign: "center",
                     padding: "10px 0",

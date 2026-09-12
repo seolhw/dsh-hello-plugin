@@ -66,7 +66,7 @@ export const slimScrollbar: CSSProperties = {
   scrollbarColor: "var(--dsh-scrollbar-thumb, var(--dsw-alias-scrollbar-bg-l2)) transparent",
 };
 
-export const smallText: CSSProperties = { fontSize: 12, color: palette.muted };
+export const smallText: CSSProperties = { fontSize: 14, color: palette.muted };
 
 /** 分段选择组容器（对齐 AuthScreen 的 Segmented 控件）：圆角外壳 + 内部激活键 */
 export const pillGroup: CSSProperties = {
@@ -84,7 +84,7 @@ const pillKey: CSSProperties = {
   border: "none",
   borderRadius: 8,
   padding: "7px 12px",
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 450,
   color: palette.muted,
   background: "transparent",
@@ -113,7 +113,7 @@ export const fieldBlock: CSSProperties = {
 
 /** 字段小标签 */
 export const fieldLabel: CSSProperties = {
-  fontSize: 12,
+  fontSize: 14,
   color: palette.muted,
   fontWeight: 500,
 };
@@ -131,7 +131,7 @@ export const listCard: CSSProperties = {
 
 /** 列表卡片的主标题行（单行省略） */
 export const listCardName: CSSProperties = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 600,
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -201,6 +201,11 @@ export function dicebearAvatarUrl(kind: AvatarKind, seed: string): string {
   return `${DICEBEAR_API}/voxel-bot/svg?${search}`;
 }
 
+/** 头像内文字随尺寸缩放，但只落在 14 / 16 两档（项目字号标准：最小 14，大号 16） */
+function avatarLabelSize(size: number): number {
+  return size * 0.42 < 15 ? 14 : 16;
+}
+
 /** 头像圆块：有 url 时显示图片；无 url / 加载失败时回退到 DiceBear 默认占位图 */
 export function Avatar({
   label,
@@ -242,7 +247,7 @@ export function Avatar({
           color ??
           "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
         color: "#fff",
-        fontSize: Math.round(size * 0.42),
+        fontSize: avatarLabelSize(size),
         fontWeight: 600,
         userSelect: "none",
       }}
@@ -323,7 +328,7 @@ export function AvatarPicker({
             </Button>
           ) : null}
         </div>
-        <span style={{ ...smallText, fontSize: 11 }}>支持 JPG / PNG / WebP，建议方形图片</span>
+        <span style={{ ...smallText, fontSize: 14 }}>支持 JPG / PNG / WebP，建议方形图片</span>
       </div>
       <input
         ref={inputRef}

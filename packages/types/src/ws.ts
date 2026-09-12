@@ -24,7 +24,7 @@
 // ===============================================================
 
 import type { ApiError } from "./api/common";
-import type { ID, Message, TimestampMs, User } from "./entities";
+import type { ID, Message, MessageReaction, TimestampMs, User } from "./entities";
 
 // ======= 通用信封 =======
 
@@ -119,6 +119,16 @@ export type EvtMessageDeleted = ServerEvt<
   }
 >;
 
+/** S→C：某条消息的表情回应发生变化（整份替换该消息的 reactions，收敛幂等） */
+export type EvtMessageReactions = ServerEvt<
+  "evt.message.reactions",
+  {
+    channelId: ID;
+    messageId: ID;
+    reactions: MessageReaction[];
+  }
+>;
+
 // ======= 服务端主动推送：权限变更 =======
 
 /**
@@ -150,4 +160,5 @@ export type ServerFrame =
   | EvtMessageNew
   | EvtMessageUpdated
   | EvtMessageDeleted
+  | EvtMessageReactions
   | EvtCommunityAccessChanged;

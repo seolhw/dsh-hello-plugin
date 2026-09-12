@@ -82,15 +82,15 @@ export const railBubble: CSSProperties = {
   position: "absolute",
   top: -2,
   right: -2,
-  minWidth: 15,
-  height: 15,
+  minWidth: 18,
+  height: 18,
   padding: "0 3px",
   borderRadius: 999,
   background: palette.badge,
   color: "#fff",
-  fontSize: 9,
+  fontSize: 14,
   fontWeight: 700,
-  lineHeight: "15px",
+  lineHeight: "18px",
   textAlign: "center",
 };
 
@@ -216,7 +216,7 @@ export const textArea: CSSProperties = {
   color: palette.text,
   padding: "8px 10px",
   font: "inherit",
-  fontSize: 13,
+  fontSize: 14,
   outline: "none",
 };
 
@@ -230,7 +230,7 @@ export const textAreaEdit: CSSProperties = {
   color: palette.text,
   padding: "6px 8px",
   font: "inherit",
-  fontSize: 13,
+  fontSize: 14,
 };
 
 export const pendingChip: CSSProperties = {
@@ -241,7 +241,7 @@ export const pendingChip: CSSProperties = {
   borderRadius: 8,
   border: `1px solid ${palette.border}`,
   background: palette.inputBg,
-  fontSize: 12,
+  fontSize: 14,
   color: palette.text,
   maxWidth: 260,
 };
@@ -262,7 +262,7 @@ export const emptyCard: CSSProperties = {
 };
 
 export const sectionTitle: CSSProperties = {
-  fontSize: 11,
+  fontSize: 14,
   fontWeight: 650,
   color: palette.caption,
   letterSpacing: "0.06em",
@@ -273,13 +273,13 @@ export const sectionTitle: CSSProperties = {
 /** 私密讨论组角标（图标库无锁图标，用 emoji + 文字标注） */
 export const privacyBadge: CSSProperties = {
   flex: "0 0 auto",
-  fontSize: 10,
+  fontSize: 14,
   fontWeight: 600,
   color: palette.muted,
   border: `1px solid ${palette.border}`,
   borderRadius: 999,
   padding: "0 6px",
-  lineHeight: "16px",
+  lineHeight: "18px",
   whiteSpace: "nowrap",
 };
 

@@ -6,7 +6,7 @@
 import { HoverCard, IconPlusOutline16 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { Community } from "@dsh-talk/types/entities";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
-import { openCommunity, useTalkState } from "../store";
+import { backToCommunities, openCommunity, useTalkState } from "../store";
 import {
   PRIVACY_LABELS,
   rail,
@@ -31,9 +31,9 @@ const tipWrap: CSSProperties = {
   maxWidth: 260,
 };
 
-const tipTitle: CSSProperties = { fontSize: 13, fontWeight: 600, color: palette.text };
+const tipTitle: CSSProperties = { fontSize: 14, fontWeight: 600, color: palette.text };
 
-const tipHint: CSSProperties = { fontSize: 11.5, lineHeight: 1.5, color: palette.caption };
+const tipHint: CSSProperties = { fontSize: 14, lineHeight: 1.5, color: palette.caption };
 
 /** 窄列图标的 hover 说明卡：标题 + 可选副标题 */
 function RailTip({ title, hint }: { title: string; hint?: string }): ReactElement {
@@ -41,6 +41,38 @@ function RailTip({ title, hint }: { title: string; hint?: string }): ReactElemen
     <div style={tipWrap}>
       <span style={tipTitle}>{title}</span>
       {hint ? <span style={tipHint}>{hint}</span> : null}
+    </div>
+  );
+}
+
+/** 项目仓库地址（logo hover 卡里的唯一外链） */
+const PROJECT_REPO = "https://github.com/seolhw/dsh-talk";
+
+/** 左上角 logo hover 小窗：项目介绍 + 仓库地址（可点开新标签） */
+function ProjectCard(): ReactElement {
+  return (
+    <div style={{ ...tipWrap, maxWidth: 280, gap: 4 }}>
+      <span style={tipTitle}>dsh-talk</span>
+      <span style={tipHint}>
+        把「社区」装进 DSH：在 DeepSeek Harness 里和同好聊天、提问求助、发通知， 社区内容与你的
+        Agent 工作区不再割裂。
+      </span>
+      <a
+        href={PROJECT_REPO}
+        target="_blank"
+        rel="noreferrer"
+        style={{
+          fontSize: 14,
+          color: palette.accent,
+          textDecoration: "none",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {PROJECT_REPO}
+      </a>
+      <span style={tipHint}>点击回到首页（未进入社区时的默认页）</span>
     </div>
   );
 }
@@ -88,7 +120,7 @@ function CommunityMetaCard({ community }: { community: Community }): ReactElemen
         <div
           style={{
             marginTop: 6,
-            fontSize: 12,
+            fontSize: 14,
             lineHeight: 1.6,
             color: palette.secondary,
             whiteSpace: "pre-wrap",
@@ -164,8 +196,10 @@ export function CommunitiesRail({
   return (
     <div style={rail}>
       {withTip(
-        <BrandLogo size={34} title="dsh-talk 社区" />,
-        <RailTip title="dsh-talk" hint="把本机 DSH 会话分享到社区里交流" />,
+        <button type="button" style={railAction} onClick={backToCommunities} aria-label="回到首页">
+          <BrandLogo size={34} />
+        </button>,
+        <ProjectCard />,
       )}
       <div
         style={{

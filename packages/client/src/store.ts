@@ -36,6 +36,7 @@ import {
   type ID,
   MESSAGE_RETRACT_MS,
   type Message,
+  type MessageReaction,
   type OverwriteTargetType,
   Permission,
   type PermissionFlags,
@@ -1661,6 +1662,10 @@ function handleServerFrame(frame: ServerFrame): void {
       if (frame.payload.channelId !== roomId) return;
       removeMessage(frame.payload.messageId);
       return;
+    case "evt.message.reactions":
+      if (frame.payload.channelId !== roomId) return;
+      patchReactions(frame.payload.messageId, frame.payload.reactions);
+      return;
     default:
       return;
   }
@@ -1683,6 +1688,17 @@ function upsertMessage(item: MessageItem, appended: boolean): void {
 
 function removeMessage(messageId: string): void {
   patchView({ messages: state.view.messages.filter((m) => m.id !== messageId) });
+}
+
+/** 整份替换某条消息的表情回应（服务端聚合结果，收敛幂等） */
+function patchReactions(messageId: string, reactions: MessageReaction[]): void {
+  const list = state.view.messages;
+  const index = list.findIndex((m) => m.id === messageId);
+  const current = index >= 0 ? list[index] : undefined;
+  if (!current) return;
+  const next = [...list];
+  next[index] = { ...current, reactions };
+  patchView({ messages: next });
 }
 
 /** 切换到某个频道：拉历史 → 上报已读 → 连实时 */
@@ -1938,6 +1954,21 @@ export async function deleteMessage(messageId: string): Promise<void> {
   } catch (error) {
     notify(errorText(error));
     throw error;
+  }
+}
+
+/**
+ * 切换某条消息上的表情回应（点过一次再点 = 取消）。
+ * 成功后立刻用返回值替换本地聚合，不等 WS（WS 也会推同一份，幂等）。
+ */
+export async function toggleReaction(item: MessageItem, emoji: string): Promise<void> {
+  const server = serverOf();
+  if (!server) return;
+  try {
+    const result = await server.toggleMessageReaction(item.id, emoji);
+    patchReactions(result.messageId, result.reactions);
+  } catch (error) {
+    notify(errorText(error));
   }
 }
 

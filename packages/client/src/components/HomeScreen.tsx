@@ -49,7 +49,7 @@ export function HomeScreen(): ReactElement {
             <BrandLogo size={52} />
             <div
               style={{
-                fontSize: 15,
+                fontSize: 16,
                 fontWeight: 700,
                 lineHeight: 1.3,
                 marginTop: 2,
@@ -57,7 +57,7 @@ export function HomeScreen(): ReactElement {
             >
               欢迎使用 dsh-talk 社区
             </div>
-            <span style={{ ...smallText, fontSize: 12.5, lineHeight: 1.7 }}>
+            <span style={{ ...smallText, fontSize: 14, lineHeight: 1.7 }}>
               从左侧选择一个社区开始聊天，
               <br />
               点左栏「＋」发现公开社区、用邀请码加入，或创建一个新社区。

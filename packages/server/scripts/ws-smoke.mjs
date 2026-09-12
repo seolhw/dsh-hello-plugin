@@ -238,6 +238,109 @@ const bad = await call(
 );
 assert(bad.status === 400, "引用不存在附件被拒（400）");
 
+// 表情回应：B 投一个 → A 收 evt.message.reactions；A 再投/取消，计数与 me 都要对
+const reactP = waitFrame(ws, (f) => f.type === "evt.message.reactions");
+const reacted = await call(
+  "POST",
+  `/api/messages/${withAtt.json.id}/reactions`,
+  { emoji: "👍" },
+  tokenB,
+);
+assert(reacted.status === 200, "B 添加表情回应成功");
+assert(
+  reacted.json.reactions.length === 1 &&
+    reacted.json.reactions[0].count === 1 &&
+    reacted.json.reactions[0].me === true,
+  "回应聚合 count=1 / me=true",
+);
+const reactEvt = await reactP;
+assert(
+  reactEvt.payload.messageId === withAtt.json.id && reactEvt.payload.reactions[0]?.emoji === "👍",
+  "收到 evt.message.reactions（含 emoji）",
+);
+const reacted2 = await call(
+  "POST",
+  `/api/messages/${withAtt.json.id}/reactions`,
+  { emoji: "👍" },
+  tokenA,
+);
+assert(
+  reacted2.json.reactions[0].count === 2 && reacted2.json.reactions[0].me === true,
+  "两人回应同一 emoji -> count=2",
+);
+const reacted3 = await call(
+  "POST",
+  `/api/messages/${withAtt.json.id}/reactions`,
+  { emoji: "👍" },
+  tokenA,
+);
+assert(
+  reacted3.json.reactions[0].count === 1 && reacted3.json.reactions[0].me === false,
+  "再投一次 = 取消（count 回落 1）",
+);
+const listWithReactions = await call(
+  "GET",
+  `/api/channels/${channelId}/messages?limit=50`,
+  undefined,
+  tokenA,
+);
+const reactedRow = listWithReactions.json.items.find((m) => m.id === withAtt.json.id);
+assert(reactedRow?.reactions?.[0]?.count === 1, "历史消息列表带回应聚合");
+
+// 未读角标：别人发的消息算未读，自己发的消息永远不算（否则发完就给自己亮角标）
+const myCommunity = async () =>
+  (await call("GET", "/api/communities/mine", undefined, tokenA)).json.find(
+    (c) => c.id === comm.json.id,
+  );
+const probe = await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "unread probe" },
+  tokenB,
+);
+assert((await myCommunity())?.unreadChannels >= 1, "B 发言后 A 出现未读频道角标");
+await call(
+  "POST",
+  `/api/channels/${channelId}/read-state`,
+  { lastReadMessageId: probe.json.id },
+  tokenA,
+);
+assert((await myCommunity())?.unreadChannels === 0, "A 读完未读清零");
+await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "这条是我自己发的" },
+  tokenA,
+);
+assert((await myCommunity())?.unreadChannels === 0, "A 自己发的消息不算未读");
+
+// 讨论组未读同理：自己发的不算，别人发的算
+const thread = await call(
+  "POST",
+  `/api/channels/${channelId}/threads`,
+  { name: "未读冒烟" },
+  tokenA,
+);
+assert(thread.status === 201 || thread.status === 200, "A 建讨论组");
+await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "话题里我自己的消息", threadId: thread.json.id },
+  tokenA,
+);
+const threadsAfterSelf = await call("GET", `/api/channels/${channelId}/threads`, undefined, tokenA);
+const selfThread = threadsAfterSelf.json.active.find((t) => t.id === thread.json.id);
+assert(selfThread?.unreadCount === 0, "讨论组内自己发的消息不算未读");
+await call(
+  "POST",
+  `/api/channels/${channelId}/messages`,
+  { content: "话题里别人的消息", threadId: thread.json.id },
+  tokenB,
+);
+const threadsAfterOther = await call("GET", `/api/channels/${channelId}/threads`, undefined, tokenA);
+const otherThread = threadsAfterOther.json.active.find((t) => t.id === thread.json.id);
+assert(otherThread?.unreadCount === 1, "讨论组内他人发言计入未读");
+
 // 广播里的 url 用 Worker 侧 origin（本地 dev 会被 routes 改写成自定义域），改回本地直读
 const getRes = await fetch(`${BASE}/api/r2/objects/${upl.json.r2Key}`);
 assert(getRes.status === 200, "附件 GET 200");

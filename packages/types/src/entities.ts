@@ -329,8 +329,19 @@ export interface Message {
   replyToId: ID | null;
   /** 所属讨论组（thread）id；null = 直接发在主频道 */
   threadId: ID | null;
+  /** 表情回应（按 emoji 聚合，来自 message_reactions 表） */
+  reactions: MessageReaction[];
   createdAt: TimestampMs;
   updatedAt: TimestampMs | null;
+}
+
+/** 一条消息上的某个表情回应（按 emoji 聚合；同一人同一 emoji 只计一次） */
+export interface MessageReaction {
+  emoji: string;
+  /** 回应人数 */
+  count: number;
+  /** 我是否也回应过这个 emoji */
+  me: boolean;
 }
 
 // ====================== 讨论组（thread） ======================

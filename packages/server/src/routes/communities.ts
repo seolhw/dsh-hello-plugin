@@ -214,14 +214,15 @@ communitiesApi.get("/mine", async (c) => {
     )[0];
     if (!communityRow) continue;
     const access = await resolveCommunityPermissions(db, communityRow.id, userId);
-    // 该社区有未读消息的频道数（未读 = 频道最后一条消息晚于该用户 read_state.last_read_at）
+    // 该社区有未读消息的频道数
+    // 未读 = 频道最后一条消息晚于该用户 read_state.last_read_at，且不是自己发的
     const unreadRow = await db
       .select({ value: count() })
       .from(channels)
       .where(
         and(
           eq(channels.communityId, communityRow.id),
-          sql`EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = ${channels.id} AND m.thread_id IS NULL AND m.created_at > COALESCE((SELECT rs.last_read_at FROM channel_read_states rs WHERE rs.channel_id = ${channels.id} AND rs.user_id = ${userId}), 0))`,
+          sql`EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = ${channels.id} AND m.thread_id IS NULL AND m.author_id != ${userId} AND m.created_at > COALESCE((SELECT rs.last_read_at FROM channel_read_states rs WHERE rs.channel_id = ${channels.id} AND rs.user_id = ${userId}), 0))`,
         ),
       );
     const unreadMentionsRow = await db

@@ -82,6 +82,8 @@ import type {
   SignInUsernameRequest,
   SignUpEmailRequest,
   ThreadSummary,
+  ToggleMessageReactionRequest,
+  ToggleMessageReactionResponse,
   TransferOwnerRequest,
   TransferOwnerResponse,
   UpdateChannelRequest,
@@ -724,6 +726,17 @@ export class ServerClient {
       "DELETE",
       `/api/messages/${messageId}`,
       undefined,
+      true,
+    );
+  }
+
+  /** POST /api/messages/:id/reactions —— 切换表情回应（已回应过则取消），返回最新聚合 */
+  toggleMessageReaction(messageId: string, emoji: string): Promise<ToggleMessageReactionResponse> {
+    const body: ToggleMessageReactionRequest = { emoji };
+    return this.call<ToggleMessageReactionResponse>(
+      "POST",
+      `/api/messages/${messageId}/reactions`,
+      body,
       true,
     );
   }

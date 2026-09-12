@@ -63,7 +63,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
         <div
           style={{
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: 650,
             color: palette.text,
             overflow: "hidden",
@@ -75,7 +75,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
         </div>
         <div
           style={{
-            fontSize: 12,
+            fontSize: 14,
             color: palette.secondary,
             lineHeight: 1.5,
             whiteSpace: "pre-wrap",
@@ -85,7 +85,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
           {item.body}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ ...smallText, fontSize: 11 }}>{timeLabel(item.createdAt)}</span>
+          <span style={{ ...smallText, fontSize: 14 }}>{timeLabel(item.createdAt)}</span>
           {!item.isRead ? (
             <span
               style={{
@@ -110,7 +110,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
       >
         {item.kind === "invite" ? (
           invite === null ? (
-            <span style={{ ...smallText, fontSize: 11, color: palette.muted }}>邀请已失效</span>
+            <span style={{ ...smallText, fontSize: 14, color: palette.muted }}>邀请已失效</span>
           ) : invite.status === "pending" ? (
             <>
               <Button
@@ -133,7 +133,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
               </Button>
             </>
           ) : (
-            <span style={{ fontSize: 11.5, color: palette.muted }}>
+            <span style={{ fontSize: 14, color: palette.muted }}>
               {STATUS_LABEL[invite.status] ?? invite.status}
             </span>
           )

@@ -165,14 +165,14 @@ export function SearchMessagesModal({
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ color: palette.muted }}>#</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: palette.text }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: palette.text }}>
                     {hit.channel.name}
                   </span>
-                  <span style={{ ...smallText, fontSize: 11 }}>{timeLabel(hit.createdAt)}</span>
+                  <span style={{ ...smallText, fontSize: 14 }}>{timeLabel(hit.createdAt)}</span>
                   <span
                     style={{
                       marginLeft: "auto",
-                      fontSize: 12,
+                      fontSize: 14,
                       color: palette.caption,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
@@ -185,7 +185,7 @@ export function SearchMessagesModal({
                 <div
                   style={{
                     marginTop: 3,
-                    fontSize: 13,
+                    fontSize: 14,
                     lineHeight: 1.5,
                     color: palette.secondary,
                     overflow: "hidden",
@@ -280,13 +280,13 @@ export function OnlineMembersModal({
               <Avatar label={m.handle} src={m.avatarUrl} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={listCardName}>{m.displayName ?? m.handle}</div>
-                <div style={{ ...smallText, fontSize: 11 }}>@{m.handle}</div>
+                <div style={{ ...smallText, fontSize: 14 }}>@{m.handle}</div>
               </div>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span
                   style={{ ...liveDot, background: presenceColor[m.presence], flex: "0 0 auto" }}
                 />
-                <span style={{ fontSize: 11.5, color: palette.secondary }}>
+                <span style={{ fontSize: 14, color: palette.secondary }}>
                   {presenceLabel[m.presence]}
                 </span>
               </span>

@@ -14,8 +14,11 @@ import { CommunityAddModal } from "./CommunityAddModal";
 import { chatCol, emptyCard, messageRowCss } from "./homeStyles";
 import { InboxDialog } from "./Inbox";
 import { ProfileModal } from "./ProfileModal";
-import { BrandLogo, smallText } from "./styles";
+import { BrandLogo, palette, smallText } from "./styles";
 import { ThreadCreateModal } from "./ThreadModals";
+
+/** 项目仓库地址（logo hover 卡里的唯一外链） */
+const PROJECT_REPO = "https://github.com/seolhw/dsh-talk";
 
 // ---------------- 主出口（整页三栏，无独立浮层外壳） ----------------
 
@@ -55,7 +58,7 @@ export function HomeScreen(): ReactElement {
                 marginTop: 2,
               }}
             >
-              欢迎使用 DSH-Talk 社区
+              欢迎使用 DSH-Talk 开源社区
             </div>
             <span style={{ ...smallText, fontSize: 14, lineHeight: 1.7 }}>
               从左侧选择一个社区开始聊天，
@@ -64,6 +67,21 @@ export function HomeScreen(): ReactElement {
               <br />
               请不要输入如 密码、银行卡、APIKEY 等敏感信息。
             </span>
+            <a
+              href={PROJECT_REPO}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                fontSize: 14,
+                color: palette.accent,
+                textDecoration: "none",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              开源地址
+            </a>
           </div>
         </div>
       )}

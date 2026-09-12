@@ -119,6 +119,21 @@ export type EvtMessageDeleted = ServerEvt<
   }
 >;
 
+// ======= 服务端主动推送：权限变更 =======
+
+/**
+ * S→C：我所在社区的权限配置发生变化（角色/成员角色/频道覆盖/踢人/封禁等）。
+ * 收到后 client 应重拉社区详情刷新 UI。
+ * 同时 DO 会重校验在线连接：已失去该房间 VIEW_CHANNEL 的连接被以
+ * code 1008（policy violation）主动关闭，reason = "access revoked"。
+ */
+export type EvtCommunityAccessChanged = ServerEvt<
+  "evt.community.access.changed",
+  {
+    communityId: ID;
+  }
+>;
+
 // ======= 未读（走 REST，见 messages.ts 的 read-state 端点） =======
 // 说明：未读/已读状态需要跨频道的聚合（社区侧边栏 × 频道），
 // 放业务 D1 才是正确归属；频道 DO 不做持久化副本，因此这里没有相关帧。
@@ -134,4 +149,5 @@ export type ServerFrame =
   | EvtHello
   | EvtMessageNew
   | EvtMessageUpdated
-  | EvtMessageDeleted;
+  | EvtMessageDeleted
+  | EvtCommunityAccessChanged;

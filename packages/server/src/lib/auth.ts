@@ -26,10 +26,10 @@ import {
 } from "./email";
 import { HttpApiError } from "./errors";
 import {
-  uniqueUsernameForEmail,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
   USERNAME_PATTERN,
+  uniqueUsernameForEmail,
 } from "./users";
 
 // better-auth 选项类型（不显式 import，避免与实例泛型不一致）

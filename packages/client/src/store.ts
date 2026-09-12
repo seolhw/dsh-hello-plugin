@@ -821,8 +821,8 @@ export async function openCommunity(communityId: string): Promise<void> {
   try {
     const detail = await server.getCommunity(communityId);
     patchView({ community: detail, communityLoading: false });
-    // 若当前用户在该社区有任意权限（即成员且未被完全屏蔽），进入第一个频道并预取成员列表
-    if (detail.myPermissions !== 0) {
+    // 成员则进入第一个频道并预取成员列表；公开访客（非成员）只看社区资料
+    if (detail.isMember) {
       void refreshCommunityMembers(communityId);
       const first = detail.channels[0];
       if (first) void selectChannel(first.id);
@@ -952,6 +952,19 @@ export async function reloadCommunityDetail(): Promise<void> {
   try {
     const detail = await server.getCommunity(communityId);
     patchView({ community: detail, communityLoading: false });
+    // 权限变更后当前频道/讨论组可能已不可见：清空视图并断开实时
+    const channelId = state.view.channelId;
+    if (channelId !== null && !detail.channels.some((c) => c.id === channelId)) {
+      closeRealtime();
+      patchView({
+        channelId: null,
+        threadId: null,
+        messages: [],
+        nextCursor: null,
+        live: false,
+        onlineCount: 0,
+      });
+    }
   } catch (error) {
     notify(errorText(error));
   }
@@ -1085,7 +1098,7 @@ export async function createRole(body: CreateRoleRequest): Promise<boolean> {
   }
 }
 
-/** 修改角色（名/色/权限位/层级；@everyone 不可改名） */
+/** 修改角色（名/色/权限位；@everyone 不可改名。层级请用 reorderRoles） */
 export async function updateRole(roleId: string, body: UpdateRoleRequest): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
@@ -1093,6 +1106,21 @@ export async function updateRole(roleId: string, body: UpdateRoleRequest): Promi
   try {
     await server.updateRole(communityId, roleId, body);
     notify("角色已更新");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 整体重排角色层级（orderedIds 从高到低，必须含全部自定义角色） */
+export async function reorderRoles(orderedIds: ID[]): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.reorderRoles(communityId, { roleIds: orderedIds });
     await reloadCommunityDetail();
     return true;
   } catch (error) {
@@ -1579,10 +1607,15 @@ function connectChannel(roomId: string): void {
   const settings = state.settings;
   socket = new TalkSocket(wsUrl(roomId), {
     onFrame: (frame) => handleServerFrame(frame),
-    onClose: () => {
+    onClose: (code) => {
       socket = null;
       if (!state.open || roomIdOf() !== roomId) return;
       patchView({ live: false });
+      // 1008 = 服务端因权限变更主动断开（access revoked）：重拉社区详情，不自动重连
+      if (code === 1008) {
+        void reloadCommunityDetail();
+        return;
+      }
       if (settings?.autoReconnect && reconnectTimer === null) {
         reconnectTimer = window.setTimeout(() => {
           reconnectTimer = null;
@@ -1597,13 +1630,21 @@ function connectChannel(roomId: string): void {
   socket.connect();
 }
 
-/** 服务端帧分发：hello（心跳开启）/ 消息事件（仅当属于当前房间） */
+/** 服务端帧分发：hello（心跳开启）/ 权限变更 / 消息事件（仅当属于当前房间） */
 function handleServerFrame(frame: ServerFrame): void {
   const roomId = roomIdOf();
   if (frame.type === "evt.hello") {
     patchView({ live: true, onlineCount: frame.payload.onlineCount });
     socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
     pushPresence();
+    return;
+  }
+  // 社区权限配置变更：重拉社区详情与社区列表（频道可见性、按钮门槛、侧栏权限随之更新）
+  if (frame.type === "evt.community.access.changed") {
+    if (frame.payload.communityId === state.view.communityId) {
+      void reloadCommunityDetail();
+      void refreshCommunities();
+    }
     return;
   }
   if (roomId === null) return;
@@ -2051,14 +2092,81 @@ export function myRoleIds(): ID[] {
   return state.view.community?.myRoleIds ?? [];
 }
 
-/** 我是否是当前社区成员（有任意权限位即视为成员；公开访客为 0） */
+/** 我是否是当前社区成员（服务端字段，与权限位无关：@everyone 全 0 时仍为 true） */
 export function isMember(): boolean {
-  return myPermissions() !== 0;
+  return state.view.community?.isMember ?? false;
 }
 
-/** 我是否持有社区级 MANAGE_CHANNEL 权限 */
+/** 我是否持有某社区级权限位（owner 的 myPermissions 恒为全量，无需特判） */
+export function canCommunity(bit: PermissionFlags): boolean {
+  return (myPermissions() & bit) !== 0;
+}
+
+/** 我是否持有社区级 MANAGE_CHANNEL 权限（频道、社区信息、频道覆盖） */
 export function isModerator(): boolean {
-  return (myPermissions() & Permission.MANAGE_CHANNEL) !== 0;
+  return canCommunity(Permission.MANAGE_CHANNEL);
+}
+
+/** 我是否能管理角色与成员角色 */
+export function canManageRoles(): boolean {
+  return canCommunity(Permission.MANAGE_ROLES);
+}
+
+/** 我持有的最高角色层级（@everyone 不计；无自定义角色 = 0） */
+export function myHighestRolePosition(): number {
+  const held = new Set(state.view.community?.myRoleIds ?? []);
+  let max = 0;
+  for (const role of state.view.community?.roles ?? []) {
+    if (role.isEveryone || !held.has(role.id)) continue;
+    if (role.position > max) max = role.position;
+  }
+  return max;
+}
+
+/** 一组角色 id 的最高层级（用于判断某成员是否层级低于我） */
+export function highestPositionOf(roleIds: readonly ID[]): number {
+  const held = new Set(roleIds);
+  let max = 0;
+  for (const role of state.view.community?.roles ?? []) {
+    if (role.isEveryone || !held.has(role.id)) continue;
+    if (role.position > max) max = role.position;
+  }
+  return max;
+}
+
+/** 我能否操作该层级的角色/成员（owner 恒可；否则要求层级严格高于对方） */
+export function canManageRolePosition(position: number): boolean {
+  return isOwner() || position < myHighestRolePosition();
+}
+
+/** 我是否能管理讨论组（改名/归档/删除/加人） */
+export function canManageThreads(): boolean {
+  return canCommunity(Permission.MANAGE_THREADS);
+}
+
+/** 我是否能改社区资料/隐私/短标识 */
+export function canManageCommunity(): boolean {
+  return canCommunity(Permission.MANAGE_COMMUNITY);
+}
+
+/** 我是否能管理他人消息 */
+export function canManageMessages(): boolean {
+  return canCommunity(Permission.MANAGE_MESSAGES);
+}
+
+/** 我是否能邀请成员 */
+export function canInviteMembers(): boolean {
+  return canCommunity(Permission.INVITE_MEMBERS);
+}
+
+/** 我是否能移除成员 */
+export function canKickMembers(): boolean {
+  return canCommunity(Permission.KICK_MEMBERS);
+}
+
+/** 我是否能封禁成员 */
+export function canBanMembers(): boolean {
+  return canCommunity(Permission.BAN_MEMBERS);
 }
 
 /** 我是否是当前社区的所有者（owner 绕过所有权限判定） */
@@ -2078,18 +2186,18 @@ export function can(channelId: ID, bit: PermissionFlags): boolean {
   return (channelPermissions(channelId) & bit) !== 0;
 }
 
-/** 能否编辑：作者本人（随时）或持有社区 MANAGE_CHANNEL */
+/** 能否编辑：作者本人（随时）或持有社区 MANAGE_MESSAGES */
 export function canEditMessage(item: MessageItem): boolean {
   if (state.me === null) return false;
   if (item.authorId === state.me.id) return true;
-  return isModerator();
+  return canManageMessages();
 }
 
-/** 能否撤回/删除：作者仅在发送 2 分钟内；持有 MANAGE_CHANNEL 随时可删 */
+/** 能否撤回/删除：作者仅在发送 2 分钟内；持有 MANAGE_MESSAGES 随时可删 */
 export function canRetractMessage(item: MessageItem): boolean {
   if (state.me === null) return false;
   if (item.authorId === state.me.id) return Date.now() - item.createdAt <= MESSAGE_RETRACT_MS;
-  return isModerator();
+  return canManageMessages();
 }
 
 // ---------------- 回复 / 定位高亮 ----------------

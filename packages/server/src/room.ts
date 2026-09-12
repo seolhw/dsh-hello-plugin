@@ -19,7 +19,7 @@
 // ================================================================
 
 import { DurableObject } from "cloudflare:workers";
-import { Permission, type ID } from "@dsh-talk/types/entities";
+import { type ID, Permission } from "@dsh-talk/types/entities";
 import type { ServerFrame } from "@dsh-talk/types/ws";
 import { and, eq } from "drizzle-orm";
 import { createDbForWorker, type Db } from "./db";
@@ -102,7 +102,7 @@ export class ChannelActor extends DurableObject<Env> {
 
     // 鉴权唯一入口：房间存在 + 调用方在该房间持有 VIEW_CHANNEL（D1 权限为准）。
     // roomId 既可能是主频道，也可能是讨论组（thread）——两者都按父频道的权限位判定。
-    // 讨论组隐私：public 社区成员可连；private 仅发起人 / 成员名单 / 持有 MANAGE_CHANNEL 者。
+    // 讨论组隐私：public 社区成员可连；private 仅发起人 / 成员名单 / 持有 MANAGE_THREADS 者。
     const db = createDbForWorker(this.env.DB);
     if (!(await this.canConnect(db, this.channelId, userId))) {
       return Response.json(
@@ -157,7 +157,7 @@ export class ChannelActor extends DurableObject<Env> {
 
   /**
    * 能否连接该房间：主频道要求父频道 VIEW_CHANNEL；
-   * 讨论组在此基础上再叠加讨论组自身的可见性（public / 发起人 / 成员 / MANAGE_CHANNEL）。
+   * 讨论组在此基础上再叠加讨论组自身的可见性（public / 发起人 / 成员 / MANAGE_THREADS）。
    */
   private async canConnect(db: Db, roomId: string, userId: string): Promise<boolean> {
     const channelRow = (
@@ -185,7 +185,7 @@ export class ChannelActor extends DurableObject<Env> {
         .limit(1);
       if (member.length > 0) return true;
       const access = await resolveCommunityPermissions(db, threadRow.communityId, userId);
-      return access.isOwner || (access.permissions & Permission.MANAGE_CHANNEL) !== 0;
+      return access.isOwner || (access.permissions & Permission.MANAGE_THREADS) !== 0;
     }
     return false;
   }
@@ -262,6 +262,40 @@ export class ChannelActor extends DurableObject<Env> {
       } else {
         this.send(ws, frame);
       }
+    }
+  }
+
+  /**
+   * 社区权限配置变更：重校验本房间每条在线连接，失去可见性者主动断开（1008），
+   * 其余推送 evt.community.access.changed 让前端重拉社区详情。
+   * 每个用户只解析一次权限（同一人多端）。
+   */
+  async accessChanged(payload: { communityId: string; roomId?: string }): Promise<void> {
+    const roomId = payload.roomId ?? this.channelId;
+    if (!roomId) return;
+    const db = createDbForWorker(this.env.DB);
+    const frame: ServerFrame = {
+      type: "evt.community.access.changed",
+      ts: Date.now(),
+      payload: { communityId: payload.communityId },
+    };
+
+    const allowedByUser = new Map<string, boolean>();
+    for (const [ws, session] of [...this.sessions.entries()]) {
+      let allowed = allowedByUser.get(session.userId);
+      if (allowed === undefined) {
+        allowed = await this.canConnect(db, roomId, session.userId);
+        allowedByUser.set(session.userId, allowed);
+      }
+      if (!allowed) {
+        try {
+          ws.close(1008, "access revoked");
+        } catch {
+          // 连接已坏，交给 close/error 事件收尾
+        }
+        continue;
+      }
+      if (ws.readyState === WebSocket.OPEN) this.send(ws, frame);
     }
   }
 

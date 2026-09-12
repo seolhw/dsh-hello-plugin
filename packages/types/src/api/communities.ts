@@ -67,13 +67,15 @@ export type GetCommunityResponse = Community & {
   threads: ThreadSummary[];
   /** 我在该社区的基础权限；非成员 = 0；私有未加入 = 403 */
   myPermissions: PermissionFlags;
+  /** 我是否是该社区成员（与权限位无关：@everyone 全 0 时仍为 true） */
+  isMember: boolean;
   /** 我持有的角色 id（@everyone 不计入） */
   myRoleIds: ID[];
   /** 社区全部角色（成员可见；公开访客为 []） */
   roles: CommunityRole[];
 };
 
-/** PATCH /api/communities/:id —— 改社区（MANAGE_CHANNEL） */
+/** PATCH /api/communities/:id —— 改社区资料（MANAGE_COMMUNITY；slug/隐私同权） */
 export interface UpdateCommunityRequest {
   name?: string;
   description?: string | null;
@@ -144,33 +146,41 @@ export type DeleteChannelResponse = { ok: true };
 /** GET /api/communities/:id/roles —— 社区全部角色（成员可见） */
 export type ListRolesResponse = { items: CommunityRole[] };
 
-/** POST /api/communities/:id/roles —— 新建角色（MANAGE_CHANNEL） */
+/** POST /api/communities/:id/roles —— 新建角色（MANAGE_ROLES；新角色落在自己层级之下） */
 export interface CreateRoleRequest {
   name: string;
   color?: number | null;
   permissions?: PermissionFlags;
-  position?: number;
 }
 export type CreateRoleResponse = CommunityRole;
 
-/** PATCH /api/communities/:id/roles/:roleId —— 改角色（MANAGE_CHANNEL；@everyone 不可改名） */
+/** PATCH /api/communities/:id/roles/:roleId —— 改角色（MANAGE_ROLES；只能改层级低于自己的角色） */
 export interface UpdateRoleRequest {
   name?: string;
   color?: number | null;
   permissions?: PermissionFlags;
-  position?: number;
 }
 export type UpdateRoleResponse = CommunityRole;
 
-/** DELETE /api/communities/:id/roles/:roleId —— 删角色（MANAGE_CHANNEL；@everyone 不可删） */
+/** DELETE /api/communities/:id/roles/:roleId —— 删角色（MANAGE_ROLES；@everyone 不可删） */
 export type DeleteRoleResponse = { ok: true };
+
+/**
+ * PUT /api/communities/:id/roles/order —— 整体重排角色层级（MANAGE_ROLES）。
+ * roleIds 必须恰好是本社区全部自定义角色，按**从高到低**排列；
+ * 非 owner 只能重排层级严格低于自己的部分（更高角色保持原位）。
+ */
+export interface ReorderRolesRequest {
+  roleIds: ID[];
+}
+export type ReorderRolesResponse = { items: CommunityRole[] };
 
 // ------- 频道权限覆盖（overwrite） ------------------------------------------
 
-/** GET /api/channels/:id/overwrites —— 该频道的覆盖列表（MANAGE_CHANNEL） */
+/** GET /api/channels/:id/overwrites —— 该频道的覆盖列表（社区级 MANAGE_CHANNEL） */
 export type ListChannelOverwritesResponse = { items: ChannelOverwrite[] };
 
-/** PUT /api/channels/:id/overwrites/:targetType/:targetId —— 写入/覆盖（MANAGE_CHANNEL） */
+/** PUT /api/channels/:id/overwrites/:targetType/:targetId —— 写入/覆盖（社区级 MANAGE_CHANNEL） */
 export interface SetChannelOverwriteRequest {
   /** 允许的权限位 */
   allow: PermissionFlags;
@@ -179,7 +189,7 @@ export interface SetChannelOverwriteRequest {
 }
 export type SetChannelOverwriteResponse = ChannelOverwrite;
 
-/** DELETE /api/channels/:id/overwrites/:targetType/:targetId —— 清除覆盖（MANAGE_CHANNEL） */
+/** DELETE /api/channels/:id/overwrites/:targetType/:targetId —— 清除覆盖（社区级 MANAGE_CHANNEL） */
 export type DeleteChannelOverwriteResponse = { ok: true };
 
 // ------- 成员 ---------------------------------------------------------------
@@ -196,17 +206,17 @@ export type CommunityMemberItem = CommunityMember & { user: User; roleIds: ID[] 
 
 export type ListMembersResponse = OffsetPaginated<CommunityMemberItem>;
 
-/** PUT /api/communities/:id/members/:userId/roles —— 设置成员角色（MANAGE_CHANNEL） */
+/** PUT /api/communities/:id/members/:userId/roles —— 设置成员角色（MANAGE_ROLES，受角色层级限制） */
 export interface SetMemberRolesRequest {
   /** 成员持有的角色 id 全集（@everyone 不需传） */
   roleIds: ID[];
 }
 export type SetMemberRolesResponse = CommunityMemberItem;
 
-/** DELETE /api/communities/:id/members/:userId —— 踢人（MANAGE_CHANNEL，不能踢 owner） */
+/** DELETE /api/communities/:id/members/:userId —— 踢人（KICK_MEMBERS，不能踢 owner） */
 export type RemoveMemberResponse = { ok: true };
 
-// ------- 封禁（成员被移出后阻止重新加入；MANAGE_CHANNEL） ----------------
+// ------- 封禁（成员被移出后阻止重新加入；BAN_MEMBERS） --------------------
 
 /** 单条封禁：操作者 + 被封用户快照 + 理由/时间 */
 export interface CommunityBanItem {

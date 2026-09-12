@@ -236,7 +236,7 @@ async function assertCanManage(
     db,
     row.communityId,
     userId,
-    Permission.MANAGE_CHANNEL,
+    Permission.MANAGE_THREADS,
     "无权管理讨论组",
   );
 }
@@ -446,7 +446,7 @@ threadsApi.post("/:id/members", async (c) => {
       db,
       row.communityId,
       userId,
-      Permission.MANAGE_CHANNEL,
+      Permission.MANAGE_THREADS,
       "无权邀请成员进入讨论组",
     );
   }

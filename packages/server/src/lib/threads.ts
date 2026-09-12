@@ -3,7 +3,7 @@
 // 惰性自动归档、按用户汇总未读。路由（REST/WS）与社区详情复用这里。
 //
 // 可见性：public = 社区成员自由进出；private = 仅成员可进出，非成员可见但加锁。
-//   可进入 = 发起人 / 成员名单 / 持有社区 MANAGE_CHANNEL 权限者（管理员保留管理能力）。
+//   可进入 = 发起人 / 成员名单 / 持有社区 MANAGE_THREADS 权限者（管理员保留管理能力）。
 // ================================================================
 
 import type { ThreadSummary } from "@dsh-talk/types/api";
@@ -52,25 +52,25 @@ export async function isThreadMember(db: Db, threadId: string, userId: string): 
   return rows.length > 0;
 }
 
-/** 我是否持有该社区的 MANAGE_CHANNEL 权限（对私密讨论组保留查看与管理能力） */
-export async function isCommunityModerator(
+/** 我是否能管理该社区的讨论组（MANAGE_THREADS；owner/管理员含在内） */
+export async function isThreadModerator(
   db: Db,
   communityId: string,
   userId: string,
 ): Promise<boolean> {
   const access = await resolveCommunityPermissions(db, communityId, userId);
-  return access.isOwner || (access.permissions & Permission.MANAGE_CHANNEL) !== 0;
+  return access.isOwner || (access.permissions & Permission.MANAGE_THREADS) !== 0;
 }
 
 /**
  * 能否进入该讨论组（读消息 / 发消息 / 连 WS / 看成员名单）。
- * 公开组恒 true（社区成员资格由调用方先校验）；私密组 = 发起人 / 成员 / 社区管理员。
+ * 公开组恒 true（社区成员资格由调用方先校验）；私密组 = 发起人 / 成员 / 讨论组管理员。
  */
 export async function canEnterThread(db: Db, row: ThreadRow, userId: string): Promise<boolean> {
   if (row.visibility === "public") return true;
   if (row.createdBy === userId) return true;
   if (await isThreadMember(db, row.id, userId)) return true;
-  return isCommunityModerator(db, row.communityId, userId);
+  return isThreadModerator(db, row.communityId, userId);
 }
 
 /** 对若干 threads 行补「我」的未读与锁态（私有组一次性取成员/角色，避免逐条查询） */
@@ -92,7 +92,7 @@ async function enrichWithUnread(
   const communityIds = uniq(rows.map((r) => r.communityId));
   const modSet = new Set<string>();
   for (const communityId of communityIds) {
-    if (await isCommunityModerator(db, communityId, userId)) modSet.add(communityId);
+    if (await isThreadModerator(db, communityId, userId)) modSet.add(communityId);
   }
 
   for (const row of rows) {

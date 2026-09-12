@@ -64,6 +64,8 @@ import type {
   OverwriteTargetType,
   RemoveMemberResponse,
   RemoveThreadMemberResponse,
+  ReorderRolesRequest,
+  ReorderRolesResponse,
   RequestPasswordResetOTPResponse,
   RequestPasswordResetRequest,
   ResetPasswordRequest,
@@ -538,7 +540,7 @@ export class ServerClient {
     );
   }
 
-  /** POST /api/communities/:id/roles —— 新建角色（MANAGE_CHANNEL） */
+  /** POST /api/communities/:id/roles —— 新建角色（MANAGE_ROLES） */
   createRole(communityId: string, body: CreateRoleRequest): Promise<CreateRoleResponse> {
     return this.call<CreateRoleResponse>(
       "POST",
@@ -548,7 +550,17 @@ export class ServerClient {
     );
   }
 
-  /** PATCH /api/communities/:id/roles/:roleId —— 改角色（MANAGE_CHANNEL） */
+  /** PUT /api/communities/:id/roles/order —— 整体重排角色层级（MANAGE_ROLES，order 从高到低） */
+  reorderRoles(communityId: string, body: ReorderRolesRequest): Promise<ReorderRolesResponse> {
+    return this.call<ReorderRolesResponse>(
+      "PUT",
+      `/api/communities/${communityId}/roles/order`,
+      body,
+      true,
+    );
+  }
+
+  /** PATCH /api/communities/:id/roles/:roleId —— 改角色（MANAGE_ROLES） */
   updateRole(
     communityId: string,
     roleId: string,

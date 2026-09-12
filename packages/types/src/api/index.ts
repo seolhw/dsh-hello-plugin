@@ -49,13 +49,14 @@ export * from "./threads";
  *   PATCH /api/channels/:id              UpdateChannelRequest       → UpdateChannelResponse
  *   DELETE /api/channels/:id             —                         → DeleteChannelResponse
  *
- *  角色（Discord 式；MANAGE_CHANNEL）
+ *  角色（Discord 式；MANAGE_ROLES）
  *   GET    /api/communities/:id/roles                    —                  → ListRolesResponse
  *   POST   /api/communities/:id/roles                    CreateRoleRequest  → CreateRoleResponse
+ *   PUT    /api/communities/:id/roles/order              ReorderRolesRequest → ReorderRolesResponse
  *   PATCH  /api/communities/:id/roles/:roleId            UpdateRoleRequest  → UpdateRoleResponse
  *   DELETE /api/communities/:id/roles/:roleId            —                  → DeleteRoleResponse
  *
- *  频道权限覆盖（overwrite；MANAGE_CHANNEL）
+ *  频道权限覆盖（overwrite；社区级 MANAGE_CHANNEL，仅接受频道级权限位）
  *   GET    /api/channels/:id/overwrites                                  → ListChannelOverwritesResponse
  *   PUT    /api/channels/:id/overwrites/:targetType/:targetId  SetChannelOverwriteRequest → SetChannelOverwriteResponse
  *   DELETE /api/channels/:id/overwrites/:targetType/:targetId —          → DeleteChannelOverwriteResponse
@@ -65,12 +66,12 @@ export * from "./threads";
  *   PUT   /api/communities/:id/members/:userId/roles  SetMemberRolesRequest → SetMemberRolesResponse
  *   DELETE /api/communities/:id/members/:userId      —                 → RemoveMemberResponse
  *
- *  封禁（成员被移出后阻止重新加入；MANAGE_CHANNEL）
+ *  封禁（成员被移出后阻止重新加入；BAN_MEMBERS）
  *   GET    /api/communities/:id/bans              —                            → ListCommunityBansResponse
  *   POST   /api/communities/:id/bans              BanCommunityMemberRequest    → BanCommunityMemberResponse
  *   DELETE /api/communities/:id/bans/:userId      —                            → UnbanCommunityMemberResponse
  *
- *  邀请 / 站内信
+ *  邀请 / 站内信（发邀请需 INVITE_MEMBERS）
  *   POST  /api/communities/:id/invites   CreateInviteRequest       → CreateInviteResponse
  *   POST  /api/invites/:id/accept        —                         → AcceptInviteResponse
  *   POST  /api/invites/:id/decline       —                         → DeclineInviteResponse

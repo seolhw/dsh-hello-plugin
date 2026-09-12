@@ -1,23 +1,28 @@
 // ================================================================
-// Discord 式频道权限解析
+// Discord 式权限解析
 //
 // 模型：
-//   - communities.ownerId 为 owner，恒定拥有全部权限（绕过一切判定）
-//   - 每个社区必有且仅有一个 @everyone 角色（隐式作用于全体成员）
+//   - communities.ownerId 为 owner，恒定拥有全部权限（绕过一切判定，但转让/删社区之外仍需 owner）
+//   - 每个社区必有且仅有一个 @everyone 角色（isEveryone，隐式作用于全体成员，position 恒 0）
 //   - 成员可持有多个自定义角色（member_roles），基础权限 = 各角色 permissions 的并集
+//   - 角色带唯一 position（越大越靠上）；只能操作层级**严格低于**自己的角色/成员，
+//     也不能授予自己没有的权限位（见 assert* / planRoleReorder）
+//   - ADMINISTRATOR 展开为全量权限，并忽略频道覆盖
 //   - 频道维度用 channel_overwrites 对 @everyone / 角色 / 成员 叠加 allow/deny
 //
 // 解析顺序（与 Discord 一致）：
-//   1) 非成员 => 0（社区频道一律不可见）
-//   2) 基础权限 base = union(全部持有角色.permissions，含 @everyone)
-//   3) 应用 @everyone 覆盖：base = (base & ~deny) | allow
-//   4) 应用该成员全部角色覆盖：base = (base | allowAll) & ~denyAll
-//   5) 应用成员级覆盖：base = (base & ~deny) | allow
+//   1) owner / ADMINISTRATOR => ALL_PERMISSIONS（忽略覆盖）
+//   2) 非成员 => 0（社区频道一律不可见）
+//   3) 基础权限 base = union(全部持有角色.permissions，含 @everyone)
+//   4) @everyone 覆盖：base = (base & ~deny) | allow
+//   5) 持有角色的覆盖：按 position 从低到高逐个 (base & ~deny) | allow（高位覆盖低位）
+//   6) 成员级覆盖：base = (base & ~deny) | allow
 // ================================================================
 
 import type { ChannelAccess } from "@dsh-talk/types/api";
 import {
   ALL_PERMISSIONS,
+  CHANNEL_OVERWRITE_PERMISSIONS,
   DEFAULT_EVERYONE_PERMISSIONS,
   Permission,
   type PermissionFlags,
@@ -120,9 +125,12 @@ export async function loadRoleIdsByMember(
 
 // ---------------- 权限计算 ----------------
 
-/** 基础权限 = 各持有角色 permissions 的并集（含 @everyone） */
+/**
+ * 基础权限 = 各持有角色 permissions 的并集（含 @everyone）。
+ * ADMINISTRATOR 直接展开为全量权限（等价 Discord 的「管理员」）。
+ */
 export function computeBasePermissions(
-  roles: CommunityRoleRow[],
+  roles: readonly CommunityRoleRow[],
   roleIds: readonly string[],
 ): PermissionFlags {
   const held = new Set(roleIds);
@@ -130,12 +138,20 @@ export function computeBasePermissions(
   for (const role of roles) {
     if (role.isEveryone || held.has(role.id)) flags |= role.permissions;
   }
-  return flags;
+  return (flags & Permission.ADMINISTRATOR) !== 0 ? ALL_PERMISSIONS : flags;
 }
 
-/** 按 Discord 顺序把频道覆盖叠加到基础权限上 */
+/**
+ * 把频道覆盖按 Discord 顺序叠加到基础权限上：
+ *   1) @everyone 覆盖
+ *   2) 该成员持有的角色覆盖，**按角色层级从低到高**逐个整体覆盖
+ *      （高位的 deny 能压过低位的 allow，反之亦然）
+ *   3) 成员级覆盖（优先级最高）
+ * 调用前保证调用方不是管理员（管理员忽略一切覆盖）。
+ */
 export function applyChannelOverwrites(
   base: PermissionFlags,
+  roles: readonly CommunityRoleRow[],
   roleIds: readonly string[],
   overwrites: readonly ChannelOverwriteRow[],
 ): PermissionFlags {
@@ -147,16 +163,22 @@ export function applyChannelOverwrites(
     if (ow.targetType !== "everyone") continue;
     flags = (flags & ~ow.deny) | ow.allow;
   }
-  // 2) 角色覆盖（多个角色：allow 取并集，deny 取并集）
-  let allowRoles = 0;
-  let denyRoles = 0;
-  for (const ow of overwrites) {
-    if (ow.targetType !== "role" || !held.has(ow.targetId)) continue;
-    allowRoles |= ow.allow;
-    denyRoles |= ow.deny;
+
+  // 2) 角色覆盖：position 升序（低层级先应用，高层级后应用=最终生效）
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const ordered = overwrites
+    .filter((ow) => ow.targetType === "role" && held.has(ow.targetId))
+    .sort((a, b) => {
+      const pa = byId.get(a.targetId)?.position ?? 0;
+      const pb = byId.get(b.targetId)?.position ?? 0;
+      if (pa !== pb) return pa - pb;
+      return a.targetId < b.targetId ? -1 : 1;
+    });
+  for (const ow of ordered) {
+    flags = (flags & ~ow.deny) | ow.allow;
   }
-  flags = (flags | allowRoles) & ~denyRoles;
-  // 3) 成员覆盖（优先级最高）
+
+  // 3) 成员覆盖
   for (const ow of overwrites) {
     if (ow.targetType !== "member") continue;
     flags = (flags & ~ow.deny) | ow.allow;
@@ -164,17 +186,23 @@ export function applyChannelOverwrites(
   return flags;
 }
 
-/** 某频道「我」的权限位 */
+/**
+ * 某频道「我」的权限位。
+ * owner 与 ADMINISTRATOR 拥有全量权限且忽略频道覆盖；非成员恒 0。
+ */
 export function computeChannelPermissions(opts: {
   basePermissions: PermissionFlags;
   isOwner: boolean;
   isMember: boolean;
+  roles: readonly CommunityRoleRow[];
   roleIds: readonly string[];
   overwrites: readonly ChannelOverwriteRow[];
 }): PermissionFlags {
-  if (opts.isOwner) return ALL_PERMISSIONS;
+  if (opts.isOwner || (opts.basePermissions & Permission.ADMINISTRATOR) !== 0) {
+    return ALL_PERMISSIONS;
+  }
   if (!opts.isMember) return 0;
-  return applyChannelOverwrites(opts.basePermissions, opts.roleIds, opts.overwrites);
+  return applyChannelOverwrites(opts.basePermissions, opts.roles, opts.roleIds, opts.overwrites);
 }
 
 /** 按频道 id 分组加载覆盖行 */
@@ -243,8 +271,14 @@ export async function resolveChannelPermissions(
   const access = await resolveCommunityPermissions(db, channel.communityId, userId);
   if (access.isOwner) return ALL_PERMISSIONS;
   if (!access.isMember) return 0;
+  if ((access.permissions & Permission.ADMINISTRATOR) !== 0) return ALL_PERMISSIONS;
   const owMap = await loadOverwritesByChannel(db, [channel.id]);
-  return applyChannelOverwrites(access.permissions, access.roleIds, owMap.get(channel.id) ?? []);
+  return applyChannelOverwrites(
+    access.permissions,
+    access.roles,
+    access.roleIds,
+    owMap.get(channel.id) ?? [],
+  );
 }
 
 /** 社区下「我」可见的频道（含各自权限位） */
@@ -271,6 +305,7 @@ export async function listChannelAccess(
       basePermissions: access.permissions,
       isOwner: access.isOwner,
       isMember: access.isMember,
+      roles: access.roles,
       roleIds: access.roleIds,
       overwrites: owMap.get(row.id) ?? [],
     });
@@ -278,6 +313,128 @@ export async function listChannelAccess(
     out.push({ ...row, permissions });
   }
   return out;
+}
+
+// ---------------- 角色层级（防提权） ----------------
+
+/**
+ * 我持有的最高角色层级（@everyone 不计入；无自定义角色 = 0）。
+ * 层级比较一律用 position：position 大者在上，持权者只能操作**严格低于**自己的对象。
+ */
+export function highestHeldPosition(access: CommunityPermissions): number {
+  const held = new Set(access.roleIds);
+  let max = 0;
+  for (const role of access.roles) {
+    if (role.isEveryone || !held.has(role.id)) continue;
+    if (role.position > max) max = role.position;
+  }
+  return max;
+}
+
+/** 只有 owner 与「层级严格高于该角色」的人能改/删/移动它 */
+export function assertCanManageRole(access: CommunityPermissions, role: CommunityRoleRow): void {
+  if (access.isOwner) return;
+  if (role.position >= highestHeldPosition(access)) {
+    throw HttpApiError.forbidden("不能操作层级不低于自己的角色");
+  }
+}
+
+/** 频道覆盖只接受频道级权限位（ADMINISTRATOR 与社区级位不能作为覆盖目标） */
+export function assertOverwritePermissions(allow: PermissionFlags, deny: PermissionFlags): void {
+  const allowed = CHANNEL_OVERWRITE_PERMISSIONS.reduce((sum, p) => sum | p.bit, 0);
+  if (((allow | deny) & ~allowed) !== 0) {
+    throw HttpApiError.badRequest("频道覆盖只支持频道级权限位（不含管理员与社区级权限）");
+  }
+}
+
+/** 非 owner 不得授予自己没有的权限位（角色基础权限与频道覆盖 allow 同理） */
+export function assertGrantablePermissions(
+  access: CommunityPermissions,
+  permissions: PermissionFlags,
+): void {
+  if (access.isOwner) return;
+  if ((permissions & ~access.permissions) !== 0) {
+    throw HttpApiError.forbidden("不能授予自己没有的权限");
+  }
+}
+
+/**
+ * 不能管理「当前最高角色层级不低于自己」的成员（踢人 / 封禁 / 改角色共用）。
+ */
+export function assertCanManageMember(
+  access: CommunityPermissions,
+  targetRoleIds: readonly string[],
+): void {
+  if (access.isOwner) return;
+  const mine = highestHeldPosition(access);
+  const roleById = new Map(access.roles.map((r) => [r.id, r]));
+  if (targetRoleIds.some((id) => (roleById.get(id)?.position ?? 0) >= mine)) {
+    throw HttpApiError.forbidden("不能管理层级不低于自己的成员");
+  }
+}
+
+/**
+ * 设置成员角色前的层级校验：owner 恒可；否则
+ *   - 不能管理「当前最高角色层级不低于自己」的成员
+ *   - 不能授予或剥夺层级不低于自己的角色
+ */
+export function assertMemberRolesEditable(
+  access: CommunityPermissions,
+  targetRoleIds: readonly string[],
+  nextRoleIds: readonly string[],
+): void {
+  if (access.isOwner) return;
+  assertCanManageMember(access, targetRoleIds);
+  const mine = highestHeldPosition(access);
+  const roleById = new Map(access.roles.map((r) => [r.id, r]));
+  if (nextRoleIds.some((id) => (roleById.get(id)?.position ?? 0) >= mine)) {
+    throw HttpApiError.forbidden("不能授予层级不低于自己的角色");
+  }
+}
+
+/**
+ * 角色重排计划：owner 可整体重排；非 owner 只能重排层级严格低于自己的那段
+ * （更高角色锁在原位），返回需要写入的新位置 roleId → position。
+ * orderedIds 必须是全部自定义角色、按**从高到低**排列。
+ */
+export function planRoleReorder(
+  access: CommunityPermissions,
+  orderedIds: readonly string[],
+): { roleId: string; position: number }[] {
+  const custom = access.roles.filter((r) => !r.isEveryone);
+  const customIds = new Set(custom.map((r) => r.id));
+  for (const id of orderedIds) {
+    if (!customIds.has(id)) throw HttpApiError.badRequest("包含不属于本社区的自定义角色 id");
+  }
+  if (orderedIds.length !== custom.length) {
+    throw HttpApiError.badRequest("roleIds 必须恰好包含本社区全部自定义角色");
+  }
+
+  // 非 owner：层级 >= 自己的角色锁住，且提交顺序里这段前缀顺序必须保持不变
+  const mine = highestHeldPosition(access);
+  const locked = access.isOwner ? [] : custom.filter((r) => r.position >= mine);
+  const lockedIds = new Set(locked.map((r) => r.id));
+  if (locked.length > 0) {
+    const lockedOrder = custom.filter((r) => lockedIds.has(r.id)).map((r) => r.id);
+    const submitted = orderedIds.filter((id) => lockedIds.has(id));
+    if (lockedOrder.join("\u0000") !== submitted.join("\u0000")) {
+      throw HttpApiError.forbidden("不能调整层级不低于自己的角色");
+    }
+  }
+
+  // 槽位沿用现有 position 集合：锁定角色占住原槽位，其余按提交顺序填入剩余槽位
+  const allSlots = custom.map((r) => r.position).sort((a, b) => b - a);
+  const lockedSlots = new Set(locked.map((r) => r.position));
+  const freeSlots = allSlots.filter((p) => !lockedSlots.has(p));
+  const plan: { roleId: string; position: number }[] = [];
+  let next = 0;
+  for (const id of orderedIds) {
+    if (lockedIds.has(id)) continue;
+    const position = freeSlots[next];
+    next += 1;
+    if (position !== undefined) plan.push({ roleId: id, position });
+  }
+  return plan;
 }
 
 // ---------------- 断言 ----------------

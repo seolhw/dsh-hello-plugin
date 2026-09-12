@@ -4,7 +4,7 @@
 //   - 身份：Better Auth 会话（Bearer）
 //   - 看历史/未读/在线：需频道的 VIEW_CHANNEL 位
 //   - 发消息：需频道的 SEND_MESSAGES 位（公告频道的只读由 @everyone overwrite 实现）
-//   - 改/删消息：作者本人，或持有社区 MANAGE_CHANNEL 位
+//   - 改/删消息：作者本人，或持有社区 MANAGE_MESSAGES 位
 //   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）；超时后作者只能编辑，不能撤回
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片引用 /api/shares 登记的分享
 //   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
@@ -450,7 +450,7 @@ async function loadMessageRow(db: ReturnType<typeof dbOf>, messageId: string): P
   return row;
 }
 
-/** 谁能改消息：作者本人 or 持有社区 MANAGE_CHANNEL 位 */
+/** 谁能改消息：作者本人 or 持有社区 MANAGE_MESSAGES 位 */
 async function assertCanEditMessage(
   db: ReturnType<typeof dbOf>,
   row: MessageRow,
@@ -461,12 +461,12 @@ async function assertCanEditMessage(
     db,
     row.communityId,
     userId,
-    Permission.MANAGE_CHANNEL,
+    Permission.MANAGE_MESSAGES,
     "无权管理消息",
   );
 }
 
-/** 谁能删/撤回：作者仅在发送后 2 分钟内可撤回；持有 MANAGE_CHANNEL 位可随时删 */
+/** 谁能删/撤回：作者仅在发送后 2 分钟内可撤回；持有 MANAGE_MESSAGES 位可随时删 */
 async function assertCanRetractMessage(
   db: ReturnType<typeof dbOf>,
   row: MessageRow,
@@ -482,7 +482,7 @@ async function assertCanRetractMessage(
     db,
     row.communityId,
     userId,
-    Permission.MANAGE_CHANNEL,
+    Permission.MANAGE_MESSAGES,
     "无权管理消息",
   );
 }

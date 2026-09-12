@@ -20,11 +20,11 @@ import type { ChangeEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   cancelReply,
+  canManageThreads,
   channelPermissions,
   clearMessageFocus,
   closeThread,
   fetchChannelOnline,
-  isModerator,
   loadOlderMessages,
   type MemberLite,
   type MessageItem,
@@ -119,9 +119,9 @@ export function ChatPane({
   const channelPerms = channel ? channelPermissions(channel.id) : 0;
   const canPost = (channelPerms & Permission.SEND_MESSAGES) !== 0;
   const canCreateThread = (channelPerms & Permission.CREATE_THREAD) !== 0;
-  /** 能否管理当前讨论组（发起人或持有社区 MANAGE_CHANNEL） */
+  /** 能否管理当前讨论组（发起人或持有社区 MANAGE_THREADS） */
   const canManageThread =
-    currentThread !== null && (currentThread.createdBy === talk.me?.id || isModerator());
+    currentThread !== null && (currentThread.createdBy === talk.me?.id || canManageThreads());
 
   /** 在主频道头部开一个空白讨论组（弹窗由 HomeScreen 承载） */
   function openBlankThread(): void {

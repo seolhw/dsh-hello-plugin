@@ -6,8 +6,8 @@ import type {
   PermissionFlags,
   User,
 } from "../entities";
-import type { ChannelAccess } from "./communities";
 import type { OffsetPaginated, OffsetPaginationQuery } from "./common";
+import type { ChannelAccess } from "./communities";
 
 // ===============================================================
 // /api/communities/:id/invites & /api/invites/* & /api/notifications/*
@@ -16,7 +16,7 @@ import type { OffsetPaginated, OffsetPaginationQuery } from "./common";
 
 // ------- 邀请 --------------------------------------------------------------
 
-/** POST /api/communities/:id/invites —— 邀请一个已注册用户入社区（owner/admin） */
+/** POST /api/communities/:id/invites —— 邀请一个已注册用户入社区（INVITE_MEMBERS） */
 export interface CreateInviteRequest {
   /** @handle 或注册邮箱，二者都精确匹配 */
   handleOrEmail: string;

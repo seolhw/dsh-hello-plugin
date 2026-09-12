@@ -79,16 +79,35 @@ export interface Channel {
 /**
  * 权限位（bitfield）。角色自带一组基础权限，频道再用 overwrite 对
  * @everyone / 角色 / 成员 逐个叠加 allow/deny；解析见 server/src/lib/permissions.ts。
+ *
+ * 命名与语义对齐 Discord：频道级位可作 overwrite 目标，社区级位只能挂在角色上
+ * （见 PERMISSION_INFO 的 scope）。位序即 UI 展示顺序，新增位一律追加。
  */
 export const Permission = {
   /** 查看频道：看不到 = 频道不下发、不可订阅、不可读消息 */
   VIEW_CHANNEL: 1 << 0,
   /** 发送消息：在主频道与讨论组里发言 */
   SEND_MESSAGES: 1 << 1,
-  /** 管理频道：改/删频道、管理成员与封禁、管理他人消息、管理角色与权限覆盖 */
-  MANAGE_CHANNEL: 1 << 2,
   /** 创建讨论组/话题 */
-  CREATE_THREAD: 1 << 3,
+  CREATE_THREAD: 1 << 2,
+  /** 管理讨论组：改名/归档/删除/加人/标记解决 */
+  MANAGE_THREADS: 1 << 3,
+  /** 管理消息：改/删/撤回他人消息 */
+  MANAGE_MESSAGES: 1 << 4,
+  /** 管理频道：新建/改名/删除频道、调整顺序、管理频道权限覆盖 */
+  MANAGE_CHANNEL: 1 << 5,
+  /** 管理社区：改社区资料、隐私与短标识（删社区/转让仅 owner） */
+  MANAGE_COMMUNITY: 1 << 6,
+  /** 管理角色：增删改角色、调整层级、给成员分配角色（受层级限制） */
+  MANAGE_ROLES: 1 << 7,
+  /** 邀请成员：邀请注册用户加入社区 */
+  INVITE_MEMBERS: 1 << 8,
+  /** 移除成员（踢人，可被邀请码重新加入） */
+  KICK_MEMBERS: 1 << 9,
+  /** 封禁成员：移出并阻止重新加入、管理封禁名单 */
+  BAN_MEMBERS: 1 << 10,
+  /** 管理员：等价于拥有全部权限且忽略频道覆盖（仍不能转让/删除社区） */
+  ADMINISTRATOR: 1 << 11,
 } as const;
 
 export type PermissionBit = (typeof Permission)[keyof typeof Permission];
@@ -96,21 +115,124 @@ export type PermissionBit = (typeof Permission)[keyof typeof Permission];
 /** 权限位组合（bitfield number） */
 export type PermissionFlags = number;
 
-/** 全部权限位（owner 恒定拥有） */
+/** 全部权限位（owner 与 ADMINISTRATOR 恒定拥有） */
 export const ALL_PERMISSIONS: PermissionFlags =
   Permission.VIEW_CHANNEL |
   Permission.SEND_MESSAGES |
+  Permission.CREATE_THREAD |
+  Permission.MANAGE_THREADS |
+  Permission.MANAGE_MESSAGES |
   Permission.MANAGE_CHANNEL |
-  Permission.CREATE_THREAD;
+  Permission.MANAGE_COMMUNITY |
+  Permission.MANAGE_ROLES |
+  Permission.INVITE_MEMBERS |
+  Permission.KICK_MEMBERS |
+  Permission.BAN_MEMBERS |
+  Permission.ADMINISTRATOR;
 
 /** @everyone 默认权限：能看、能发、能开讨论组，但不能管理 */
 export const DEFAULT_EVERYONE_PERMISSIONS: PermissionFlags =
   Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES | Permission.CREATE_THREAD;
 
+/** 权限位作用域：community = 只能挂在角色上；channel = 也可作为频道覆盖目标 */
+export type PermissionScope = "community" | "channel";
+
+/** 权限位元数据（管理界面/文档的唯一来源，避免各处重复维护中文名与说明） */
+export interface PermissionInfo {
+  bit: PermissionBit;
+  label: string;
+  hint: string;
+  scope: PermissionScope;
+}
+
+/** 全部权限位元数据（顺序即 UI 顺序） */
+export const PERMISSION_INFO: readonly PermissionInfo[] = [
+  {
+    bit: Permission.VIEW_CHANNEL,
+    label: "查看频道",
+    hint: "看不到则频道不下发、不可订阅、不可读消息",
+    scope: "channel",
+  },
+  {
+    bit: Permission.SEND_MESSAGES,
+    label: "发送消息",
+    hint: "在频道与讨论组里发言",
+    scope: "channel",
+  },
+  {
+    bit: Permission.CREATE_THREAD,
+    label: "创建讨论组",
+    hint: "在频道里开讨论组/话题",
+    scope: "channel",
+  },
+  {
+    bit: Permission.MANAGE_THREADS,
+    label: "管理讨论组",
+    hint: "改名/归档/删除讨论组、加人、标记解决",
+    scope: "channel",
+  },
+  {
+    bit: Permission.MANAGE_MESSAGES,
+    label: "管理消息",
+    hint: "改/删/撤回他人消息",
+    scope: "channel",
+  },
+  {
+    bit: Permission.MANAGE_CHANNEL,
+    label: "管理频道",
+    hint: "新建/改名/删除频道、调整顺序、管理频道权限覆盖",
+    scope: "channel",
+  },
+  {
+    bit: Permission.MANAGE_COMMUNITY,
+    label: "管理社区",
+    hint: "改社区资料、隐私与短标识（删除/转让仅 owner）",
+    scope: "community",
+  },
+  {
+    bit: Permission.MANAGE_ROLES,
+    label: "管理角色",
+    hint: "增删改角色、调整层级、给成员分配角色（受层级限制）",
+    scope: "community",
+  },
+  {
+    bit: Permission.INVITE_MEMBERS,
+    label: "邀请成员",
+    hint: "邀请已注册用户加入社区",
+    scope: "community",
+  },
+  {
+    bit: Permission.KICK_MEMBERS,
+    label: "移除成员",
+    hint: "把成员移出社区（可被邀请码重新加入）",
+    scope: "community",
+  },
+  {
+    bit: Permission.BAN_MEMBERS,
+    label: "封禁成员",
+    hint: "移出并禁止重新加入、管理封禁名单",
+    scope: "community",
+  },
+  {
+    bit: Permission.ADMINISTRATOR,
+    label: "管理员",
+    hint: "拥有全部权限并忽略频道覆盖（删除/转让社区仍仅 owner）",
+    scope: "community",
+  },
+];
+
+/** 可作频道覆盖目标的权限位（ADMINISTRATOR 与社区级位不可覆盖） */
+export const CHANNEL_OVERWRITE_PERMISSIONS: readonly PermissionInfo[] = PERMISSION_INFO.filter(
+  (p) => p.scope === "channel",
+);
+
 /**
  * 社区角色（Discord 式）。每个社区必有且仅有一个 @everyone 角色
- * （isEveryone=true，自动作用于全部成员，不可删除/改名）。
+ * （isEveryone=true，position 恒为 0，自动作用于全部成员，不可删除/改名/调层级）。
  * owner（communities.ownerId）绕过所有权限判定。
+ *
+ * position：自定义角色取 1..N 的唯一槽位，越大越靠上；只有层级**严格更高**的人
+ * 才能操作某角色（改/删/调层级），层级通过 PUT /roles/order 整体重排。
  */
 export interface CommunityRole {
   id: ID;
@@ -118,7 +240,7 @@ export interface CommunityRole {
   name: string;
   /** 展示色（0xRRGGBB；null = 默认灰） */
   color: number | null;
-  /** 层级，越大越靠上（成员分组展示用） */
+  /** 层级槽位：越大越靠上（@everyone 恒为 0，自定义角色唯一） */
   position: number;
   /** 该角色自带的基础权限位 */
   permissions: PermissionFlags;

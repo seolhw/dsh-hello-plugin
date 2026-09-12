@@ -1,7 +1,8 @@
 // ================================================================
 // 管理 UI：社区工具（成员/角色/邀请码/设置/退出）、频道创建/编辑/删除、
 // 频道权限覆盖（Discord 式：@everyone / 角色 / 成员 的 allow-deny 位）。
-// 权限判定统一走 store 的权限位（MANAGE_CHANNEL / CREATE_THREAD / SEND_MESSAGES …）
+// 权限判定统一走 store 的权限位（MANAGE_CHANNEL / MANAGE_ROLES / KICK_MEMBERS …），
+// 服务端才是最终裁决（层级、可授予权限等约束由 server 兜底）。
 // ================================================================
 
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -22,12 +23,14 @@ import {
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CommunityBanItem } from "@dsh-talk/types/api";
 import {
+  CHANNEL_OVERWRITE_PERMISSIONS,
   type Channel,
   type ChannelOverwrite,
   type CommunityRole,
   EVERYONE_TARGET_ID,
   type ID,
   type OverwriteTargetType,
+  PERMISSION_INFO,
   Permission,
   type PermissionFlags,
   type User,
@@ -36,6 +39,12 @@ import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
   banUser,
+  canBanMembers,
+  canInviteMembers,
+  canKickMembers,
+  canManageCommunity,
+  canManageRolePosition,
+  canManageRoles,
   channelPermissions,
   createChannel,
   createRole,
@@ -43,7 +52,9 @@ import {
   deleteChannelOverwrite,
   deleteCommunity,
   deleteRole,
+  highestPositionOf,
   inviteMember,
+  isMember,
   isModerator,
   isOwner,
   kickMember,
@@ -52,7 +63,10 @@ import {
   listChannelOverwrites,
   listMembers,
   moveChannel,
+  myHighestRolePosition,
+  myPermissions,
   notify,
+  reorderRoles,
   setChannelOverwrite,
   setMemberRoles,
   transferOwner,
@@ -78,13 +92,11 @@ import {
 } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
-/** 权限位的展示清单（顺序即 UI 顺序） */
-const PERMISSION_FIELDS: { bit: PermissionFlags; label: string; hint: string }[] = [
-  { bit: Permission.VIEW_CHANNEL, label: "查看频道", hint: "看不到则频道不下发、不可读消息" },
-  { bit: Permission.SEND_MESSAGES, label: "发送消息", hint: "在频道与讨论组里发言" },
-  { bit: Permission.MANAGE_CHANNEL, label: "管理频道", hint: "改/删频道、管理成员、管理消息" },
-  { bit: Permission.CREATE_THREAD, label: "创建讨论组", hint: "在频道里开讨论组/话题" },
-];
+/** 角色编辑器的权限位（全部位；中文名/说明/作用域来自 types 的 PERMISSION_INFO） */
+const PERMISSION_FIELDS = PERMISSION_INFO;
+
+/** 频道覆盖只接受频道级位（社区级位与 ADMINISTRATOR 由 scope 排除） */
+const OVERWRITE_FIELDS = CHANNEL_OVERWRITE_PERMISSIONS;
 
 /** 角色展示色（color 为 0xRRGGBB；null = 默认灰） */
 const roleColorOf = (role: CommunityRole): string =>
@@ -127,20 +139,23 @@ export function CommunityTools(): ReactElement | null {
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<CommunityDialog>(null);
   const communityId = talk.view.communityId;
-  const moder = isModerator();
+  const canRoles = canManageRoles();
+  const canInvite = canInviteMembers();
+  const canCommunity = canManageCommunity();
+  // 成员管理里同时含角色分配 / 踢人 / 封禁 / 转让，任一可见即显示
+  const canMembers = canRoles || canKickMembers() || canBanMembers();
+  const member = isMember();
   if (!communityId) return null;
 
   const menuItems: MenuEntry[] = [];
-  if (moder) {
-    menuItems.push(
-      { id: "members", label: "成员管理", icon: <IconUserOutline16 /> },
-      { id: "roles", label: "角色管理", icon: <IconUserOutline16 /> },
-      { id: "invite-user", label: "邀请用户", icon: <IconPlusOutline16 /> },
-      { id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> },
-      { id: "settings", label: "社区设置", icon: <IconEditOutline16 /> },
-      { type: "separator", id: "sep" },
-    );
-  }
+  if (canMembers) menuItems.push({ id: "members", label: "成员管理", icon: <IconUserOutline16 /> });
+  if (canRoles) menuItems.push({ id: "roles", label: "角色管理", icon: <IconUserOutline16 /> });
+  if (canInvite)
+    menuItems.push({ id: "invite-user", label: "邀请用户", icon: <IconPlusOutline16 /> });
+  if (member) menuItems.push({ id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> });
+  if (canCommunity)
+    menuItems.push({ id: "settings", label: "社区设置", icon: <IconEditOutline16 /> });
+  if (menuItems.length > 0) menuItems.push({ type: "separator", id: "sep" });
   menuItems.push({ id: "leave", label: "退出社区", danger: true, icon: <IconRightUpOutline16 /> });
 
   return (
@@ -446,7 +461,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
 
 type MemberRow = { user: User; roleIds: ID[]; joinedAt: number };
 
-/** 成员管理（owner/admin） */
+/** 成员管理（MANAGE_ROLES / KICK_MEMBERS / BAN_MEMBERS 各按钮分别判定） */
 function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
   const talk = useTalkState();
   const me = talk.me;
@@ -457,13 +472,17 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const [loading, setLoading] = useState(true);
   const [assigning, setAssigning] = useState<MemberRow | null>(null);
   const owner = isOwner();
-  const moder = isModerator();
+  const canRoles = canManageRoles();
+  const canKick = canKickMembers();
+  const canBan = canBanMembers();
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setLoading(true);
-    void Promise.all([listMembers(), listBannedUsers()]).then(([ms, bs]) => {
+    // 封禁名单需要 BAN_MEMBERS，无权限时不请求（否则整批请求会 403）
+    const bansTask = canBan ? listBannedUsers() : Promise.resolve<CommunityBanItem[]>([]);
+    void Promise.all([listMembers(), bansTask]).then(([ms, bs]) => {
       if (cancelled) return;
       setMembers(ms.map((m) => ({ user: m.user, roleIds: m.roleIds, joinedAt: m.joinedAt })));
       setBans(bs);
@@ -472,7 +491,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, canBan]);
 
   /** 把角色 id 映射成角色对象，按层级从高到低展示 */
   function rolesOf(ids: ID[]): CommunityRole[] {
@@ -522,7 +541,13 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
           {members.map((m) => {
             const self = me !== null && m.user.id === me.id;
             const targetIsOwner = m.user.id === community?.ownerId;
-            const rowCanManage = moder && !self && !targetIsOwner;
+            // 层级：只能管理层级严格低于自己、且非自己/owner 的成员
+            const manageable =
+              !self && !targetIsOwner && canManageRolePosition(highestPositionOf(m.roleIds));
+            const rowCanRoles = canRoles && manageable;
+            const rowCanKick = canKick && manageable;
+            const rowCanBan = canBan && manageable;
+            const rowCanManage = rowCanRoles || rowCanKick || rowCanBan;
             const canTransfer = owner && !self && !targetIsOwner;
             const held = rolesOf(m.roleIds);
             return (
@@ -575,27 +600,33 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 ) : null}
                 {rowCanManage ? (
                   <span style={{ display: "flex", gap: 2 }}>
-                    <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
-                      角色
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<IconTrashOutline16 />}
-                      onClick={() => void kick(m.user)}
-                      aria-label="移除成员"
-                    >
-                      移除
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void ban(m.user)}
-                      aria-label="封禁成员"
-                      title="封禁（同时移出成员并禁止再次加入）"
-                    >
-                      封禁
-                    </Button>
+                    {rowCanRoles ? (
+                      <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
+                        角色
+                      </Button>
+                    ) : null}
+                    {rowCanKick ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconTrashOutline16 />}
+                        onClick={() => void kick(m.user)}
+                        aria-label="移除成员"
+                      >
+                        移除
+                      </Button>
+                    ) : null}
+                    {rowCanBan ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void ban(m.user)}
+                        aria-label="封禁成员"
+                        title="封禁（同时移出成员并禁止再次加入）"
+                      >
+                        封禁
+                      </Button>
+                    ) : null}
                   </span>
                 ) : null}
               </div>
@@ -672,7 +703,10 @@ function MemberRolesDialog({
 }): ReactElement {
   const [selected, setSelected] = useState<ID[]>(member.roleIds);
   const [busy, setBusy] = useState(false);
-  const assignable = roles.filter((r) => !r.isEveryone).sort((a, b) => b.position - a.position);
+  // 只能分配层级严格低于自己的角色（与 server 的层级校验一致）
+  const assignable = roles
+    .filter((r) => !r.isEveryone && canManageRolePosition(r.position))
+    .sort((a, b) => b.position - a.position);
 
   function toggle(roleId: ID): void {
     setSelected((prev) =>
@@ -910,8 +944,9 @@ const moveUpIcon: CSSProperties = { display: "inline-flex", transform: "rotate(9
 const moveDownIcon: CSSProperties = { display: "inline-flex", transform: "rotate(-90deg)" };
 
 /**
- * 每行的频道呼出菜单：创建讨论组（有 CREATE_THREAD 位者可见）+
- * 排序 / 权限覆盖 / 改名 / 删除（有 MANAGE_CHANNEL 位者可见）。无可用项时不渲染。
+ * 每行的频道呼出菜单：创建讨论组（该频道 CREATE_THREAD 位）+
+ * 排序 / 改名 / 删除（该频道 MANAGE_CHANNEL 位）/ 权限覆盖（社区级 MANAGE_CHANNEL）。
+ * 无可用项时不渲染。
  */
 export function ChannelRowMenu({
   channel,
@@ -924,12 +959,15 @@ export function ChannelRowMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [overwriting, setOverwriting] = useState(false);
-  const moderator = isModerator();
+  // 权限覆盖读写走社区级 MANAGE_CHANNEL（避免频道级 deny 自锁）；
+  // 频道改名/删除/排序走该频道解析后的 MANAGE_CHANNEL 位
+  const canOverwrite = isModerator();
+  const canManageChannel = (channelPermissions(channel.id) & Permission.MANAGE_CHANNEL) !== 0;
 
   const channels = talk.view.community?.channels ?? [];
   const index = channels.findIndex((c) => c.id === channel.id);
-  const canMoveUp = moderator && index > 0;
-  const canMoveDown = moderator && index >= 0 && index < channels.length - 1;
+  const canMoveUp = canManageChannel && index > 0;
+  const canMoveDown = canManageChannel && index >= 0 && index < channels.length - 1;
   // 能否建讨论组取决于该频道的 CREATE_THREAD 位（公告频道默认被 everyone 覆盖拒绝）
   const canCreateThread = (channelPermissions(channel.id) & Permission.CREATE_THREAD) !== 0;
   const isForum = channel.kind === "forum";
@@ -976,9 +1014,9 @@ export function ChannelRowMenu({
           },
         ]
       : []),
-    ...(moderator
+    ...(canOverwrite ? [{ id: "overwrites", label: "权限覆盖", icon: <IconUserOutline16 /> }] : []),
+    ...(canManageChannel
       ? [
-          { id: "overwrites", label: "权限覆盖", icon: <IconUserOutline16 /> },
           { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
           { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
         ]
@@ -1025,7 +1063,7 @@ export function ChannelRowMenu({
 
 // ---------------- 角色管理 ----------------
 
-/** 角色管理（MANAGE_CHANNEL）：列表 + 新建/编辑/删除 + 层级调整 */
+/** 角色管理（MANAGE_ROLES；只能操作层级低于自己的角色）：列表 + 新建/编辑/删除 + 层级调整 */
 function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
   const talk = useTalkState();
   const roles = talk.view.community?.roles ?? [];
@@ -1039,15 +1077,15 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
     await deleteRole(role.id);
   }
 
-  /** 与相邻自定义角色交换层级 */
+  /** 与相邻自定义角色交换层级（服务端按整表重排，含层级校验） */
   async function move(role: CommunityRole, dir: "up" | "down"): Promise<void> {
     const index = custom.findIndex((r) => r.id === role.id);
     const other = custom[dir === "up" ? index - 1 : index + 1];
     if (index < 0 || other === undefined) return;
-    await Promise.all([
-      updateRole(role.id, { position: other.position }),
-      updateRole(other.id, { position: role.position }),
-    ]);
+    const next = [...custom];
+    next[index] = other;
+    next[dir === "up" ? index - 1 : index + 1] = role;
+    await reorderRoles(next.map((r) => r.id));
   }
 
   return (
@@ -1062,7 +1100,13 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
           <Button variant="ghost" onClick={onClose}>
             关闭
           </Button>
-          <Button variant="primary" icon={<IconPlusOutline16 />} onClick={() => setEditing("new")}>
+          <Button
+            variant="primary"
+            icon={<IconPlusOutline16 />}
+            disabled={!isOwner() && myHighestRolePosition() === 0}
+            title={!isOwner() && myHighestRolePosition() === 0 ? "需要先拥有一个角色" : undefined}
+            onClick={() => setEditing("new")}
+          >
             新建角色
           </Button>
         </>
@@ -1089,7 +1133,7 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
             <Button
               size="sm"
               variant="ghost"
-              disabled={i === 0}
+              disabled={i === 0 || !canManageRolePosition(role.position)}
               onClick={() => void move(role, "up")}
               aria-label={`${role.name} 上移`}
             >
@@ -1098,18 +1142,24 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
             <Button
               size="sm"
               variant="ghost"
-              disabled={i === custom.length - 1}
+              disabled={i === custom.length - 1 || !canManageRolePosition(role.position)}
               onClick={() => void move(role, "down")}
               aria-label={`${role.name} 下移`}
             >
               下移
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(role)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canManageRolePosition(role.position)}
+              onClick={() => setEditing(role)}
+            >
               编辑
             </Button>
             <Button
               size="sm"
               variant="ghost"
+              disabled={!canManageRolePosition(role.position)}
               icon={<IconTrashOutline16 />}
               onClick={() => void remove(role)}
               aria-label={`删除角色 ${role.name}`}
@@ -1135,7 +1185,12 @@ function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }):
                 {permissionSummary(everyone.permissions)}
               </div>
             </div>
-            <Button size="sm" variant="ghost" onClick={() => setEditing(everyone)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!canManageRolePosition(everyone.position)}
+              onClick={() => setEditing(everyone)}
+            >
               编辑
             </Button>
           </div>
@@ -1260,14 +1315,19 @@ function RoleEditorDialog({
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {PERMISSION_FIELDS.map((field) => {
               const on = (permissions & field.bit) !== 0;
+              // 不能授予自己没有的位（已授予的位仍可关闭）
+              const grantable = isOwner() || (field.bit & myPermissions()) === field.bit;
+              const blocked = !on && !grantable;
               return (
                 <button
                   key={field.label}
                   type="button"
+                  disabled={blocked}
                   onClick={() => toggle(field.bit)}
                   style={{
                     ...listCard,
-                    cursor: "pointer",
+                    cursor: blocked ? "not-allowed" : "pointer",
+                    opacity: blocked ? 0.55 : 1,
                     textAlign: "left",
                     border: `1px solid ${on ? palette.accent : palette.border}`,
                     background: on ? palette.hoverAccent : palette.inputBg,
@@ -1277,7 +1337,9 @@ function RoleEditorDialog({
                     <div style={listCardName}>{field.label}</div>
                     <div style={{ ...smallText, fontSize: 11 }}>{field.hint}</div>
                   </div>
-                  <span style={{ ...smallText, fontSize: 11 }}>{on ? "允许" : "未授予"}</span>
+                  <span style={{ ...smallText, fontSize: 11 }}>
+                    {blocked ? "无权授予" : on ? "允许" : "未授予"}
+                  </span>
                 </button>
               );
             })}
@@ -1456,7 +1518,7 @@ function ChannelOverwriteDialog({
             <span style={dialogHint}>带蓝色边框的目标已存在覆盖；成员列表仅含当前社区成员。</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {PERMISSION_FIELDS.map((field) => {
+            {OVERWRITE_FIELDS.map((field) => {
               const choice = choiceOf(allow, deny, field.bit);
               return (
                 <div key={field.label} style={listCard}>

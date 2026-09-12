@@ -8,9 +8,9 @@ import type { ThreadVisibility, User } from "@dsh-talk/types/entities";
 import { type ReactElement, useEffect, useState } from "react";
 import {
   addThreadMember,
+  canManageThreads,
   closeThread,
   createThreadInChannel,
-  isModerator,
   joinThreadWithPasscode,
   listThreadCandidates,
   listThreadMembers,
@@ -407,7 +407,7 @@ export function ThreadMembersModal({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const canManage = thread.createdBy === me?.id || isModerator();
+  const canManage = thread.createdBy === me?.id || canManageThreads();
 
   useEffect(() => {
     if (!open) return;

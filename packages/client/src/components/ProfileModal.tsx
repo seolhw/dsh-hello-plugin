@@ -149,7 +149,11 @@ export function ProfileModal({
           <Button variant="ghost" onClick={onClose}>
             关闭
           </Button>
-          <Button variant="outline" onClick={confirmLogout}>
+          <Button
+            variant="outline"
+            onClick={confirmLogout}
+            style={{ color: palette.danger, borderColor: palette.danger }}
+          >
             退出登录
           </Button>
         </>

@@ -16,11 +16,11 @@ import {
 import { Avatar, palette, smallText, timeLabel } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
-function BellGlyph(): ReactElement {
+function BellGlyph({ size = 16 }: { size?: number }): ReactElement {
   return (
     <svg
-      width="16"
-      height="16"
+      width={size}
+      height={size}
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"

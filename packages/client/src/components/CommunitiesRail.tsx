@@ -70,6 +70,18 @@ function CommunityMetaCard({ community }: { community: Community }): ReactElemen
             {community.name}
           </div>
           <div style={tipHint}>{PRIVACY_LABELS[community.privacy]}</div>
+          {community.slug ? (
+            <div
+              style={{
+                ...tipHint,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              @{community.slug}
+            </div>
+          ) : null}
         </div>
       </div>
       {community.description ? (
@@ -167,9 +179,9 @@ export function CommunitiesRail({
         {withTip(
           <button type="button" style={railAction} onClick={onInbox} aria-label="站内信">
             <span style={railAvatar}>
-              <BellGlyph />
+              <BellGlyph size={24} />
               {talk.inboxUnread > 0 ? (
-                <span style={{ ...railBubble, top: -5, right: -7 }}>{unreadLabel}</span>
+                <span style={{ ...railBubble, top: -4, right: -6 }}>{unreadLabel}</span>
               ) : null}
             </span>
           </button>,
@@ -185,7 +197,7 @@ export function CommunitiesRail({
             onClick={onAdd}
             aria-label="加入、发现或创建社区"
           >
-            <IconPlusOutline16 />
+            <IconPlusOutline16 size={24} />
           </button>,
           <RailTip title="加入、发现或创建社区" hint="用邀请码加入，或发现、创建新社区" />,
         )}

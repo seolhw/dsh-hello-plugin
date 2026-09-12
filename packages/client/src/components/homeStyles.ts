@@ -48,7 +48,7 @@ export const railAction: CSSProperties = {
 // 单个社区域（48 高，内容水平垂直居中），左缘留出激活指示条
 export const railItem: CSSProperties = {
   width: "100%",
-  height: 48,
+  height: 56,
   display: "flex",
   alignItems: "center",
   justifyContent: "center",

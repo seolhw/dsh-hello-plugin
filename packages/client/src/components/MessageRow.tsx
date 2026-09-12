@@ -229,7 +229,7 @@ export function MessageRow({
       data-msg-id={item.id}
       style={msgRow}
     >
-      <Avatar label={item.author.handle} src={item.author.avatarUrl} />
+      <Avatar size={38} label={item.author.handle} src={item.author.avatarUrl} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {quote ? (
           <button

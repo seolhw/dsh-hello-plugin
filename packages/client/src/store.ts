@@ -292,6 +292,7 @@ export async function login(mode: LoginMode, account: string, password: string):
     const { user, token } = result;
     if (!token || !user) throw new Error("服务端未返回会话 token");
     await applySession({ user, token });
+    notify("登录成功");
   } catch (error) {
     // 未验证邮箱的账号不允许登录：不发会话，切到验证码界面并补发验证码
     // （sign-in 已校验过密码，此处向该邮箱重发验证码是安全的）
@@ -334,6 +335,7 @@ export async function verifyOtp(otp: string): Promise<void> {
   if (!result.user) throw new Error("验证失败，请重试");
   if (result.token) {
     await applySession({ user: result.user, token: result.token });
+    notify("邮箱验证成功，已自动登录");
     return;
   }
   // 未自动登录：回登录页，让用户手动登录

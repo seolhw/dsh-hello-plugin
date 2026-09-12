@@ -7,7 +7,7 @@
 
 import { Button, Toast } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ReactElement } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AuthScreen } from "./components/AuthScreen";
 import { HomeScreen } from "./components/HomeScreen";
 import { pageRoot, palette } from "./components/styles";
@@ -85,6 +85,9 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
   const talk = useTalkState();
   const ready = talk.phase === "ready";
   const sessionId = props.sessionId ?? null;
+  // Toast 通过 body portal 渲染，不传 anchor 会相对整个视口居中；
+  // 这里用社区页根节点当锚点，让横幅居中在社区内容区而不是整个网页。
+  const [pageEl, setPageEl] = useState<HTMLElement | null>(null);
 
   // 记录当前 DSH 会话 id：「分享会话」入口默认用它
   useEffect(() => {
@@ -133,9 +136,11 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
   }
 
   return (
-    <div style={pageRoot} data-dsht-page-root data-conversation-composer-overlay="">
+    <div ref={setPageEl} style={pageRoot} data-dsht-page-root data-conversation-composer-overlay="">
       {body}
-      {talk.toast.length > 0 ? <Toast text={talk.toast} onDone={() => dismissToast()} /> : null}
+      {talk.toast.length > 0 ? (
+        <Toast text={talk.toast} anchor={pageEl} onDone={() => dismissToast()} />
+      ) : null}
     </div>
   );
 }

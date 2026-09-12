@@ -2,7 +2,7 @@
 // 个人中心：改头像 / 改昵称 / 改用户名 / 改密码；邮箱只读；退出登录。
 // ================================================================
 
-import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
+import { Button, HoverCard, Input } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
@@ -40,6 +40,51 @@ const infoValue: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/** 「退出登录」的 hover 确认卡：悬停按钮时浮出，卡内点确认才真正退出 */
+function LogoutConfirmCard({ onConfirm }: { onConfirm: () => void }): ReactElement {
+  return (
+    <div data-dsht-logout-tip style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <span style={{ fontSize: 16, fontWeight: 600, color: palette.text }}>退出登录？</span>
+      <span style={{ fontSize: 14, lineHeight: 1.5, color: palette.muted }}>
+        退出后需要重新登录才能继续参与社区讨论。
+      </span>
+      <div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onConfirm}
+          style={{ color: palette.danger, borderColor: palette.danger }}
+        >
+          确认退出
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * HoverCard 卡片经 body portal 渲染、固定 z-index 100，会被宿主 Modal 的遮罩
+ * （z-index 1000）盖住而点不到；这里按上面确认卡的标记属性把这一张卡提到遮罩
+ * 之上。宿主类名是构建期哈希，故用结构选择器 + 数据属性定位。
+ */
+const LOGOUT_TIP_CSS = `
+body > div:has(> [data-dsht-logout-tip]) {
+  z-index: 1100;
+}
+`;
+
+let logoutTipCssInjected = false;
+
+/** 注入一次确认卡的层级覆盖样式（幂等） */
+function ensureLogoutTipCss(): void {
+  if (logoutTipCssInjected) return;
+  const style = document.createElement("style");
+  style.setAttribute("data-dsht-logout-tip-css", "");
+  style.textContent = LOGOUT_TIP_CSS;
+  document.head.appendChild(style);
+  logoutTipCssInjected = true;
+}
+
 export function ProfileModal({
   open,
   onClose,
@@ -76,6 +121,11 @@ export function ProfileModal({
       setNewPwd("");
       setConfirmPwd("");
     }
+  }, [open]);
+
+  // 确认卡的层级覆盖样式：打开时注入一次
+  useEffect(() => {
+    if (open) ensureLogoutTipCss();
   }, [open]);
 
   if (!me) return null;
@@ -130,10 +180,6 @@ export function ProfileModal({
     }
   }
 
-  function confirmLogout(): void {
-    if (window.confirm("确定要退出登录吗？")) void logout();
-  }
-
   const canSubmitPwd =
     !pwdBusy && currentPwd.length > 0 && newPwd.length >= 8 && newPwd === confirmPwd;
 
@@ -149,13 +195,18 @@ export function ProfileModal({
           <Button variant="ghost" onClick={onClose}>
             关闭
           </Button>
-          <Button
-            variant="outline"
-            onClick={confirmLogout}
-            style={{ color: palette.danger, borderColor: palette.danger }}
-          >
-            退出登录
-          </Button>
+          <HoverCard
+            openDelayMs={150}
+            content={<LogoutConfirmCard onConfirm={() => void logout()} />}
+            anchor={
+              <Button
+                variant="outline"
+                style={{ color: palette.danger, borderColor: palette.danger }}
+              >
+                退出登录
+              </Button>
+            }
+          />
         </>
       }
     >

@@ -56,6 +56,21 @@ const PAGE_HOST_CSS = `
 }
 `;
 
+/**
+ * 暗色主题下的灰度文字提亮（宿主 token 在深色底上偏暗，小字难以辨认）：
+ * 宿主主题由 `body[data-ds-dark-theme]` 切换，这里只覆盖本插件自己的
+ * --dsht-label-* 变量层（palette.secondary/muted/caption 引用它们），
+ * 不动宿主 token，因此不会影响 DSH 其他界面。
+ * 三档各提亮一档（200/300/400）并保持层级：secondary > muted > caption。
+ */
+const DARK_TEXT_CSS = `
+body[data-ds-dark-theme] {
+  --dsht-label-secondary: var(--dsw-static-neutral-bluish-200);
+  --dsht-label-tertiary: var(--dsw-static-neutral-bluish-300);
+  --dsht-label-caption: var(--dsw-static-neutral-bluish-400);
+}
+`;
+
 let hostCssInjected = false;
 
 /** 注入一次宿主覆盖样式（幂等） */
@@ -63,7 +78,7 @@ function ensureHostCss(): void {
   if (hostCssInjected) return;
   const style = document.createElement("style");
   style.setAttribute("data-dsht-page-css", "");
-  style.textContent = PAGE_HOST_CSS;
+  style.textContent = `${PAGE_HOST_CSS}${DARK_TEXT_CSS}`;
   document.head.appendChild(style);
   hostCssInjected = true;
 }

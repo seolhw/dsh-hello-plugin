@@ -25,11 +25,12 @@ export const palette = {
   border2: "var(--dsw-alias-border-l2)",
   border3: "var(--dsw-alias-border-l3)",
   border4: "var(--dsw-alias-border-l4)",
-  // 文字
+  // 文字（灰度三档走 --dsht-label-* 变量层：暗色主题下宿主 token 偏暗，
+  // 由 components.tsx 的 DARK_TEXT_CSS 在插件内提亮；未定义时回退宿主 token）
   text: "var(--dsw-alias-label-primary)",
-  secondary: "var(--dsw-alias-label-secondary)",
-  muted: "var(--dsw-alias-label-tertiary)",
-  caption: "var(--dsw-alias-label-caption)",
+  secondary: "var(--dsht-label-secondary, var(--dsw-alias-label-secondary))",
+  muted: "var(--dsht-label-tertiary, var(--dsw-alias-label-tertiary))",
+  caption: "var(--dsht-label-caption, var(--dsw-alias-label-caption))",
   // 品牌 / 状态
   accent: "var(--dsw-alias-state-business-primary)",
   danger: "var(--dsw-alias-state-error-primary)",

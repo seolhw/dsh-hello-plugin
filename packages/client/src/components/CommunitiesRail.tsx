@@ -31,7 +31,7 @@ const tipWrap: CSSProperties = {
   maxWidth: 260,
 };
 
-const tipTitle: CSSProperties = { fontSize: 14, fontWeight: 600, color: palette.text };
+const tipTitle: CSSProperties = { fontSize: 16, fontWeight: 600, color: palette.text };
 
 const tipHint: CSSProperties = { fontSize: 14, lineHeight: 1.5, color: palette.caption };
 

@@ -15,13 +15,16 @@ import {
   IconUserOutline16,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { ChannelOnlineMember } from "@dsh-talk/types/api";
+import { Permission } from "@dsh-talk/types/entities";
 import type { ChangeEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   cancelReply,
+  channelPermissions,
   clearMessageFocus,
   closeThread,
   fetchChannelOnline,
+  isModerator,
   loadOlderMessages,
   type MemberLite,
   type MessageItem,
@@ -110,13 +113,13 @@ export function ChatPane({
     ? replyParts({ replyTo: talk.view.replyingTo })
     : null;
 
-  // 公告频道仅 owner/admin 可发；其余频道所有成员可发
-  const myRole = community?.myRole ?? null;
-  const canPost = channel?.kind !== "announcement" || myRole === "owner" || myRole === "admin";
-  /** 能否管理当前讨论组（发起人或社区 owner/admin） */
+  // 权限位（含频道 overwrite 叠加）：能否发言 / 能否开讨论组 / 能否管理当前讨论组
+  const channelPerms = channel ? channelPermissions(channel.id) : 0;
+  const canPost = (channelPerms & Permission.SEND_MESSAGES) !== 0;
+  const canCreateThread = (channelPerms & Permission.CREATE_THREAD) !== 0;
+  /** 能否管理当前讨论组（发起人或持有社区 MANAGE_CHANNEL） */
   const canManageThread =
-    currentThread !== null &&
-    (currentThread.createdBy === talk.me?.id || myRole === "owner" || myRole === "admin");
+    currentThread !== null && (currentThread.createdBy === talk.me?.id || isModerator());
 
   /** 在主频道头部开一个空白讨论组（弹窗由 HomeScreen 承载） */
   function openBlankThread(): void {
@@ -415,7 +418,7 @@ export function ChatPane({
               {currentThread?.status === "active" ? "归档" : "恢复"}
             </Button>
           ) : null}
-          {!isThread && canPost && channel?.kind !== "announcement" ? (
+          {!isThread && canCreateThread ? (
             isForumChannel ? (
               <Button
                 size="sm"
@@ -535,8 +538,10 @@ export function ChatPane({
                     {channel?.kind === "announcement"
                       ? canPost
                         ? "在这里发布面向全员的公告。"
-                        : "公告由所有者/管理员发布。"
-                      : "来说第一句吧。"}
+                        : "你没有在此频道发言的权限。"
+                      : canPost
+                        ? "来说第一句吧。"
+                        : "你没有在此频道发言的权限。"}
                   </span>
                 </div>
               ) : (

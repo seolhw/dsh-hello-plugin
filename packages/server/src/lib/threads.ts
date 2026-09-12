@@ -3,23 +3,17 @@
 // 惰性自动归档、按用户汇总未读。路由（REST/WS）与社区详情复用这里。
 //
 // 可见性：public = 社区成员自由进出；private = 仅成员可进出，非成员可见但加锁。
-//   可进入 = 发起人 / 成员名单 / 社区 owner·admin（管理员保留管理能力）。
+//   可进入 = 发起人 / 成员名单 / 持有社区 MANAGE_CHANNEL 权限者（管理员保留管理能力）。
 // ================================================================
 
 import type { ThreadSummary } from "@dsh-talk/types/api";
-import type { Thread } from "@dsh-talk/types/entities";
+import { Permission, type Thread } from "@dsh-talk/types/entities";
 import { and, desc, eq, gt, inArray, type SQL, sql } from "drizzle-orm";
 import { uniq } from "es-toolkit/array";
 import { THREAD_AUTO_ARCHIVE_MS } from "../constants";
-import {
-  communityMembers,
-  messages,
-  type ThreadRow,
-  threadMembers,
-  threadReadStates,
-  threads,
-} from "../db/schema";
+import { messages, type ThreadRow, threadMembers, threadReadStates, threads } from "../db/schema";
 import type { db as dbOf } from "./db";
+import { resolveCommunityPermissions } from "./permissions";
 
 type Db = ReturnType<typeof dbOf>;
 
@@ -58,19 +52,14 @@ export async function isThreadMember(db: Db, threadId: string, userId: string): 
   return rows.length > 0;
 }
 
-/** 我是否是该社区 owner/admin（对私密讨论组保留查看与管理能力） */
+/** 我是否持有该社区的 MANAGE_CHANNEL 权限（对私密讨论组保留查看与管理能力） */
 export async function isCommunityModerator(
   db: Db,
   communityId: string,
   userId: string,
 ): Promise<boolean> {
-  const rows = await db
-    .select({ role: communityMembers.role })
-    .from(communityMembers)
-    .where(and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, userId)))
-    .limit(1);
-  const role = rows[0]?.role;
-  return role === "owner" || role === "admin";
+  const access = await resolveCommunityPermissions(db, communityId, userId);
+  return access.isOwner || (access.permissions & Permission.MANAGE_CHANNEL) !== 0;
 }
 
 /**
@@ -101,15 +90,10 @@ async function enrichWithUnread(
   const memberSet = new Set(memberRows.map((r) => r.threadId));
 
   const communityIds = uniq(rows.map((r) => r.communityId));
-  const modRows = await db
-    .select({ communityId: communityMembers.communityId, role: communityMembers.role })
-    .from(communityMembers)
-    .where(
-      and(eq(communityMembers.userId, userId), inArray(communityMembers.communityId, communityIds)),
-    );
-  const modSet = new Set(
-    modRows.filter((r) => r.role === "owner" || r.role === "admin").map((r) => r.communityId),
-  );
+  const modSet = new Set<string>();
+  for (const communityId of communityIds) {
+    if (await isCommunityModerator(db, communityId, userId)) modSet.add(communityId);
+  }
 
   for (const row of rows) {
     const archived = row.status === "archived";

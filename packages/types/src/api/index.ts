@@ -41,6 +41,7 @@ export * from "./threads";
  *   POST  /api/communities/join-by-code      JoinByInviteRequest       → JoinByInviteResponse
  *   POST  /api/communities/:id/join   —                                → JoinCommunityResponse
  *   POST  /api/communities/:id/leave  —                                → LeaveCommunityResponse
+ *   POST  /api/communities/:id/transfer-owner  TransferOwnerRequest     → TransferOwnerResponse
  *   DELETE /api/communities/:id       —                                → DeleteCommunityResponse
  *
  *  频道
@@ -48,12 +49,23 @@ export * from "./threads";
  *   PATCH /api/channels/:id              UpdateChannelRequest       → UpdateChannelResponse
  *   DELETE /api/channels/:id             —                         → DeleteChannelResponse
  *
+ *  角色（Discord 式；MANAGE_CHANNEL）
+ *   GET    /api/communities/:id/roles                    —                  → ListRolesResponse
+ *   POST   /api/communities/:id/roles                    CreateRoleRequest  → CreateRoleResponse
+ *   PATCH  /api/communities/:id/roles/:roleId            UpdateRoleRequest  → UpdateRoleResponse
+ *   DELETE /api/communities/:id/roles/:roleId            —                  → DeleteRoleResponse
+ *
+ *  频道权限覆盖（overwrite；MANAGE_CHANNEL）
+ *   GET    /api/channels/:id/overwrites                                  → ListChannelOverwritesResponse
+ *   PUT    /api/channels/:id/overwrites/:targetType/:targetId  SetChannelOverwriteRequest → SetChannelOverwriteResponse
+ *   DELETE /api/channels/:id/overwrites/:targetType/:targetId —          → DeleteChannelOverwriteResponse
+ *
  *  成员
  *   GET   /api/communities/:id/members        query:ListMembersQuery   → ListMembersResponse
- *   PATCH /api/communities/:id/members/:userId/role  UpdateMemberRoleRequest → UpdateMemberRoleResponse
+ *   PUT   /api/communities/:id/members/:userId/roles  SetMemberRolesRequest → SetMemberRolesResponse
  *   DELETE /api/communities/:id/members/:userId      —                 → RemoveMemberResponse
  *
- *  封禁（成员被移出后阻止重新加入；owner/admin）
+ *  封禁（成员被移出后阻止重新加入；MANAGE_CHANNEL）
  *   GET    /api/communities/:id/bans              —                            → ListCommunityBansResponse
  *   POST   /api/communities/:id/bans              BanCommunityMemberRequest    → BanCommunityMemberResponse
  *   DELETE /api/communities/:id/bans/:userId      —                            → UnbanCommunityMemberResponse

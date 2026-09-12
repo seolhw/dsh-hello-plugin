@@ -1,9 +1,13 @@
 // 冒烟：每频道一个 ChannelActor(DO) 的实时链路
 //   /ws?token=<session>&channelId=<id> → Worker 鉴权 → 频道 DO 成员校验 → 101
 //   REST 写库成功 → RPC stub.broadcast(frame) → DO 实例内扇出（mentionMe 逐人计算）
+import { execSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 const BASE = "http://127.0.0.1:8787";
+// 本包根目录（wrangler 命令的工作目录，用于直读本地 D1 里的邮箱验证码）
+const SERVER_DIR = fileURLToPath(new URL("..", import.meta.url));
 // 认证请求必须带 Origin（缺了 better-auth 直接拒 MISSING_OR_NULL_ORIGIN），
 // 且必须「已信任 + 与 Worker 不同源」：同源时 wrangler dev 会按 wrangler.jsonc 的
 // routes 把它改写成自定义域 Origin，该域不在本地白名单里 → 403 INVALID_ORIGIN。
@@ -52,15 +56,40 @@ async function uploadAttachment(token, name, bytes, contentType) {
   return { status: res.status, json };
 }
 
+/** 直读本地 D1 里该邮箱最近一条验证码（value 形如 "<otp>:<attempts>"，仅本地冒烟可用） */
+function readLocalOtp(email) {
+  const out = execSync(
+    `wrangler d1 execute dsh-talk --local --json --command "SELECT value FROM verification WHERE identifier = 'email-verification-otp-${email}' ORDER BY createdAt DESC LIMIT 1"`,
+    { cwd: SERVER_DIR, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+  );
+  const value = JSON.parse(out)?.[0]?.results?.[0]?.value;
+  if (typeof value !== "string") throw new Error(`未找到邮箱验证码：${email}`);
+  return value.split(":")[0];
+}
+
+// requireEmailVerification：注册不建会话，需走「注册 → 邮箱验证码 → 会话 token」，
+// 与客户端一致从响应头 set-auth-token 取 token。
 async function signup(name) {
+  const email = `${name}${ts}@example.com`;
   const res = await call("POST", "/api/auth/sign-up/email", {
     name,
-    email: `${name}${ts}@example.com`,
+    email,
     password: "Password1234",
     username: `${name}${ts.toString(36)}`,
   });
-  console.log(`signup ${name} -> ${res.status}`, JSON.stringify(res.json)?.slice(0, 120));
-  return res.json?.token;
+  console.log(`signup ${name} -> ${res.status}`);
+  const otp = readLocalOtp(email);
+  const verify = await fetch(`${BASE}/api/auth/email-otp/verify-email`, {
+    method: "POST",
+    headers: { origin: ORIGIN, "content-type": "application/json" },
+    body: JSON.stringify({ email, otp }),
+  });
+  const token = verify.headers.get("set-auth-token");
+  if (verify.status !== 200 || !token) {
+    throw new Error(`邮箱验证失败 ${name} -> ${verify.status}`);
+  }
+  console.log(`verify ${name} -> 已获得会话 token`);
+  return token;
 }
 
 function assert(cond, msg) {
@@ -70,7 +99,7 @@ function assert(cond, msg) {
 
 function connectWs(token, channelId) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${WS}/ws?token=${token}&channelId=${channelId}`);
+    const ws = new WebSocket(`${WS}/ws?token=${encodeURIComponent(token)}&channelId=${channelId}`);
     ws.addEventListener("open", () => resolve(ws));
     ws.addEventListener("error", () => reject(new Error("ws open failed")));
   });
@@ -79,7 +108,7 @@ function connectWs(token, channelId) {
 /** 期望连接失败（非 101，如非成员被拒） */
 function expectWsRejected(token, channelId) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`${WS}/ws?token=${token}&channelId=${channelId}`);
+    const ws = new WebSocket(`${WS}/ws?token=${encodeURIComponent(token)}&channelId=${channelId}`);
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("expected rejection but ws stayed open"));
@@ -143,7 +172,7 @@ const newP = waitFrame(ws, (f) => f.type === "evt.message.new");
 const post = await call(
   "POST",
   `/api/channels/${channelId}/messages`,
-  { content: "hi per-channel realtime", mentionHandles: [`chalice${ts}`] },
+  { content: "hi per-channel realtime", mentionHandles: [`chalice${ts.toString(36)}`] },
   tokenB,
 );
 assert(post.status === 201, "B REST 发消息成功");
@@ -209,7 +238,8 @@ const bad = await call(
 );
 assert(bad.status === 400, "引用不存在附件被拒（400）");
 
-const getRes = await fetch(sentAtt.url);
+// 广播里的 url 用 Worker 侧 origin（本地 dev 会被 routes 改写成自定义域），改回本地直读
+const getRes = await fetch(`${BASE}/api/r2/objects/${upl.json.r2Key}`);
 assert(getRes.status === 200, "附件 GET 200");
 assert((getRes.headers.get("content-type") ?? "").startsWith("image/png"), "附件 GET content-type 正确");
 

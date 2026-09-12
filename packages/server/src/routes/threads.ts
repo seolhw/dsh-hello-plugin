@@ -24,7 +24,12 @@ import type {
   UpdateThreadReadStateRequest,
   UpdateThreadRequest,
 } from "@dsh-talk/types/api";
-import type { ThreadReadState, ThreadVisibility, User } from "@dsh-talk/types/entities";
+import {
+  Permission,
+  type ThreadReadState,
+  type ThreadVisibility,
+  type User,
+} from "@dsh-talk/types/entities";
 import { and, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { THREAD_NAME_MAX, THREAD_STARTER_SNIPPET_MAX } from "../constants";
@@ -38,13 +43,14 @@ import {
   threadReadStates,
   threads,
 } from "../db/schema";
-import { getMembership, requireMember, requireModerator } from "../lib/access";
+import { getMembership, requireMember } from "../lib/access";
 import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
 import { loadChannelRow } from "../lib/channels";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { hashPasscode, PASSCODE_MAX, PASSCODE_MIN, verifyPasscode } from "../lib/passcode";
+import { requireChannelPermission, requireCommunityPermission } from "../lib/permissions";
 import { emptyOk, jsonBody } from "../lib/response";
 import {
   canEnterThread,
@@ -124,7 +130,7 @@ channelThreadsApi.get("/:channelId/threads", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("channelId");
   const channel = await loadChannelRow(db, channelId);
-  await requireMember(db, channel.communityId, userId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
 
   const all = (c.req.query("archived") ?? "").trim() === "all";
   const items = await listThreadSummaries(db, { channelId }, userId);
@@ -141,7 +147,13 @@ channelThreadsApi.post("/:channelId/threads", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("channelId");
   const channel = await loadChannelRow(db, channelId);
-  await requireMember(db, channel.communityId, userId);
+  await requireChannelPermission(
+    db,
+    channel,
+    userId,
+    Permission.CREATE_THREAD,
+    "无权在该频道创建讨论组",
+  );
   assertThreadable(channel.kind);
 
   const body = await jsonBody<CreateThreadRequest>(c);
@@ -220,7 +232,13 @@ async function assertCanManage(
   userId: string,
 ): Promise<void> {
   if (row.createdBy === userId) return;
-  await requireModerator(db, row.communityId, userId);
+  await requireCommunityPermission(
+    db,
+    row.communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "无权管理讨论组",
+  );
 }
 
 async function summaryOrThrow(db: ReturnType<typeof dbOf>, threadId: string, userId: string) {
@@ -423,7 +441,15 @@ threadsApi.post("/:id/members", async (c) => {
     throw HttpApiError.badRequest("公开讨论组无需邀请，社区成员可直接进入");
   }
   const mine = row.createdBy === userId || (await isThreadMember(db, row.id, userId));
-  if (!mine) await requireModerator(db, row.communityId, userId);
+  if (!mine) {
+    await requireCommunityPermission(
+      db,
+      row.communityId,
+      userId,
+      Permission.MANAGE_CHANNEL,
+      "无权邀请成员进入讨论组",
+    );
+  }
 
   const body = await jsonBody<AddThreadMemberRequest>(c);
   const targetId = (body.userId ?? "").trim();

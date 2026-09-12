@@ -74,14 +74,89 @@ export interface Channel {
   updatedAt: TimestampMs;
 }
 
-// ====================== 社区成员（多对多） ======================
+// ====================== 权限（Discord 式位标志） ======================
 
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * 权限位（bitfield）。角色自带一组基础权限，频道再用 overwrite 对
+ * @everyone / 角色 / 成员 逐个叠加 allow/deny；解析见 server/src/lib/permissions.ts。
+ */
+export const Permission = {
+  /** 查看频道：看不到 = 频道不下发、不可订阅、不可读消息 */
+  VIEW_CHANNEL: 1 << 0,
+  /** 发送消息：在主频道与讨论组里发言 */
+  SEND_MESSAGES: 1 << 1,
+  /** 管理频道：改/删频道、管理成员与封禁、管理他人消息、管理角色与权限覆盖 */
+  MANAGE_CHANNEL: 1 << 2,
+  /** 创建讨论组/话题 */
+  CREATE_THREAD: 1 << 3,
+} as const;
+
+export type PermissionBit = (typeof Permission)[keyof typeof Permission];
+
+/** 权限位组合（bitfield number） */
+export type PermissionFlags = number;
+
+/** 全部权限位（owner 恒定拥有） */
+export const ALL_PERMISSIONS: PermissionFlags =
+  Permission.VIEW_CHANNEL |
+  Permission.SEND_MESSAGES |
+  Permission.MANAGE_CHANNEL |
+  Permission.CREATE_THREAD;
+
+/** @everyone 默认权限：能看、能发、能开讨论组，但不能管理 */
+export const DEFAULT_EVERYONE_PERMISSIONS: PermissionFlags =
+  Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES | Permission.CREATE_THREAD;
+
+/**
+ * 社区角色（Discord 式）。每个社区必有且仅有一个 @everyone 角色
+ * （isEveryone=true，自动作用于全部成员，不可删除/改名）。
+ * owner（communities.ownerId）绕过所有权限判定。
+ */
+export interface CommunityRole {
+  id: ID;
+  communityId: ID;
+  name: string;
+  /** 展示色（0xRRGGBB；null = 默认灰） */
+  color: number | null;
+  /** 层级，越大越靠上（成员分组展示用） */
+  position: number;
+  /** 该角色自带的基础权限位 */
+  permissions: PermissionFlags;
+  /** 是否 @everyone（每社区唯一） */
+  isEveryone: boolean;
+  createdAt: TimestampMs;
+}
+
+/** 成员 ↔ 角色 分配（多对多；@everyone 不写行，隐式作用于全体成员） */
+export interface RoleAssignment {
+  communityId: ID;
+  userId: ID;
+  roleId: ID;
+  assignedAt: TimestampMs;
+}
+
+/** 频道权限覆盖目标：@everyone / 角色 / 单个成员 */
+export type OverwriteTargetType = "everyone" | "role" | "member";
+
+/** @everyone 覆盖用固定 targetId（避免 null 主键） */
+export const EVERYONE_TARGET_ID = "@everyone";
+
+/** 频道权限覆盖（allow/deny 位并集，按 Discord 顺序叠加到角色基础权限上） */
+export interface ChannelOverwrite {
+  channelId: ID;
+  targetType: OverwriteTargetType;
+  /** role/member 时为 roleId/userId；everyone 时恒为 EVERYONE_TARGET_ID */
+  targetId: ID;
+  allow: PermissionFlags;
+  deny: PermissionFlags;
+  updatedAt: TimestampMs;
+}
+
+// ====================== 社区成员（多对多） ======================
 
 export interface CommunityMember {
   communityId: ID;
   userId: ID;
-  role: MemberRole;
   joinedAt: TimestampMs;
 }
 

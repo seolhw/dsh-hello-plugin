@@ -4,7 +4,7 @@
 // ================================================================
 
 import { HoverCard, IconPlusOutline16 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { Community, MemberRole } from "@dsh-talk/types/entities";
+import type { Community } from "@dsh-talk/types/entities";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { openCommunity, useTalkState } from "../store";
 import {
@@ -46,11 +46,7 @@ function RailTip({ title, hint }: { title: string; hint?: string }): ReactElemen
 }
 
 /** 社区栏 hover 小窗：名称、可见性、描述、成员总数（只读，点击仍选社区） */
-function CommunityMetaCard({
-  community,
-}: {
-  community: Community & { role: MemberRole };
-}): ReactElement {
+function CommunityMetaCard({ community }: { community: Community }): ReactElement {
   return (
     <div style={tipWrap}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

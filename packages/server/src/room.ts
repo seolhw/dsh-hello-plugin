@@ -19,8 +19,12 @@
 // ================================================================
 
 import { DurableObject } from "cloudflare:workers";
-import type { ID } from "@dsh-talk/types/entities";
+import { Permission, type ID } from "@dsh-talk/types/entities";
 import type { ServerFrame } from "@dsh-talk/types/ws";
+import { and, eq } from "drizzle-orm";
+import { createDbForWorker, type Db } from "./db";
+import { channels, threadMembers, threads } from "./db/schema";
+import { resolveChannelPermissions, resolveCommunityPermissions } from "./lib/permissions";
 import type { Env } from "./types";
 
 /** 持久化到每个 WebSocket 连接的会话档案（跨休眠恢复用，≤16KB） */
@@ -96,37 +100,13 @@ export class ChannelActor extends DurableObject<Env> {
     }
     this.channelId = channelId;
 
-    // 鉴权唯一入口：房间存在 + 调用方有权进入（D1 为准）
-    // roomId 既可能是主频道，也可能是讨论组（thread）——两种都放行到对应 DO 实例。
-    // 讨论组隐私：public 全体社区成员可连；private 仅发起人 / 成员名单 / 社区 owner·admin。
-    const allowed =
-      (await this.env.DB.prepare(
-        `SELECT 1 FROM channels c
-         JOIN community_members m ON m.community_id = c.community_id
-         WHERE c.id = ? AND m.user_id = ? LIMIT 1`,
-      )
-        .bind(this.channelId, userId)
-        .first()) ??
-      (await this.env.DB.prepare(
-        `SELECT 1 FROM threads t
-         JOIN community_members m ON m.community_id = t.community_id
-         WHERE t.id = ? AND m.user_id = ?
-           AND (
-             t.visibility = 'public'
-             OR t.created_by = ?
-             OR m.role IN ('owner', 'admin')
-             OR EXISTS (
-               SELECT 1 FROM thread_members tm
-               WHERE tm.thread_id = t.id AND tm.user_id = ?
-             )
-           )
-         LIMIT 1`,
-      )
-        .bind(this.channelId, userId, userId, userId)
-        .first());
-    if (!allowed) {
+    // 鉴权唯一入口：房间存在 + 调用方在该房间持有 VIEW_CHANNEL（D1 权限为准）。
+    // roomId 既可能是主频道，也可能是讨论组（thread）——两者都按父频道的权限位判定。
+    // 讨论组隐私：public 社区成员可连；private 仅发起人 / 成员名单 / 持有 MANAGE_CHANNEL 者。
+    const db = createDbForWorker(this.env.DB);
+    if (!(await this.canConnect(db, this.channelId, userId))) {
       return Response.json(
-        { code: "FORBIDDEN", message: "not a member of this room's community" },
+        { code: "FORBIDDEN", message: "not allowed to connect this room" },
         { status: 403 },
       );
     }
@@ -173,6 +153,41 @@ export class ChannelActor extends DurableObject<Env> {
     } as unknown as ServerFrame);
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /**
+   * 能否连接该房间：主频道要求父频道 VIEW_CHANNEL；
+   * 讨论组在此基础上再叠加讨论组自身的可见性（public / 发起人 / 成员 / MANAGE_CHANNEL）。
+   */
+  private async canConnect(db: Db, roomId: string, userId: string): Promise<boolean> {
+    const channelRow = (
+      await db.select().from(channels).where(eq(channels.id, roomId)).limit(1)
+    )[0];
+    if (channelRow) {
+      const perms = await resolveChannelPermissions(db, channelRow, userId);
+      return (perms & Permission.VIEW_CHANNEL) !== 0;
+    }
+
+    const threadRow = (await db.select().from(threads).where(eq(threads.id, roomId)).limit(1))[0];
+    if (!threadRow) return false;
+    const parent = (
+      await db.select().from(channels).where(eq(channels.id, threadRow.channelId)).limit(1)
+    )[0];
+    if (!parent) return false;
+    if ((await resolveChannelPermissions(db, parent, userId)) & Permission.VIEW_CHANNEL) {
+      // 父频道可见；再按讨论组可见性判定
+      if (threadRow.visibility === "public") return true;
+      if (threadRow.createdBy === userId) return true;
+      const member = await db
+        .select({ userId: threadMembers.userId })
+        .from(threadMembers)
+        .where(and(eq(threadMembers.threadId, threadRow.id), eq(threadMembers.userId, userId)))
+        .limit(1);
+      if (member.length > 0) return true;
+      const access = await resolveCommunityPermissions(db, threadRow.communityId, userId);
+      return access.isOwner || (access.permissions & Permission.MANAGE_CHANNEL) !== 0;
+    }
+    return false;
   }
 
   // ---------------- Hibernation 事件处理器 ----------------

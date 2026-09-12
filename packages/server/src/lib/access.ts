@@ -1,6 +1,5 @@
 // ================================================================
-// 社区成员/角色鉴权：所有「改社区/频道、拉成员、管理消息」的入口都必须
-// 经过这里做成员资格 + 角色判定，杜绝越权（如普通成员改社区、被踢者仍可发消息）。
+// 社区成员资格 / 封禁判定（权限位判定见 lib/permissions.ts）
 // 身份本身由 Better Auth 会话（Bearer）保证，见 lib/auth.ts。
 // ================================================================
 
@@ -54,29 +53,5 @@ export async function requireMember(
 ): Promise<CommunityMemberRow> {
   const member = await getMembership(db, communityId, userId);
   if (!member) throw HttpApiError.forbidden("you are not a member of this community");
-  return member;
-}
-
-/** 必须是 owner/admin（管理社区/频道/成员/他人消息） */
-export async function requireModerator(
-  db: Db,
-  communityId: string,
-  userId: string,
-): Promise<CommunityMemberRow> {
-  const member = await requireMember(db, communityId, userId);
-  if (member.role !== "owner" && member.role !== "admin") {
-    throw HttpApiError.forbidden("owner or admin required");
-  }
-  return member;
-}
-
-/** 必须是 owner（最高权限：删除社区/转让等敏感操作按需用） */
-export async function requireOwner(
-  db: Db,
-  communityId: string,
-  userId: string,
-): Promise<CommunityMemberRow> {
-  const member = await requireMember(db, communityId, userId);
-  if (member.role !== "owner") throw HttpApiError.forbidden("community owner required");
   return member;
 }

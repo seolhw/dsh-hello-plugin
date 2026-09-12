@@ -12,6 +12,7 @@ import type {
   ChannelOnlineMember,
   CommunityBanItem,
   CreateMessageRequest,
+  CreateRoleRequest,
   CreateThreadRequest,
   DiscoverCommunitiesResponse,
   GetCommunityResponse,
@@ -21,17 +22,23 @@ import type {
   ListMembersResponse,
   MessageAttachmentPut,
   SearchMessageResult,
+  SetChannelOverwriteRequest,
   SignUpEmailRequest,
   ThreadMemberItem,
   ThreadSummary,
+  UpdateRoleRequest,
   UpdateThreadRequest,
   UpdateUserRequest,
 } from "@dsh-talk/types/api";
 import {
+  type ChannelOverwrite,
+  type CommunityRole,
   type ID,
   MESSAGE_RETRACT_MS,
-  type MemberRole,
   type Message,
+  type OverwriteTargetType,
+  Permission,
+  type PermissionFlags,
   type ThreadVisibility,
   type User,
 } from "@dsh-talk/types/entities";
@@ -66,7 +73,8 @@ export interface MemberLite {
   handle: string;
   displayName: string | null;
   avatarUrl: string | null;
-  role: MemberRole;
+  /** 成员持有的角色 id（@everyone 不计入） */
+  roleIds: ID[];
 }
 
 export interface ViewState {
@@ -813,8 +821,8 @@ export async function openCommunity(communityId: string): Promise<void> {
   try {
     const detail = await server.getCommunity(communityId);
     patchView({ community: detail, communityLoading: false });
-    // 若当前用户在社区里，进入第一个频道，并预取成员列表供 @ 补全
-    if (detail.myRole) {
+    // 若当前用户在该社区有任意权限（即成员且未被完全屏蔽），进入第一个频道并预取成员列表
+    if (detail.myPermissions !== 0) {
       void refreshCommunityMembers(communityId);
       const first = detail.channels[0];
       if (first) void selectChannel(first.id);
@@ -1012,14 +1020,147 @@ export async function listMembers(): Promise<ListMembersResponse["items"]> {
   }
 }
 
-/** 调整成员角色 / owner 转让 */
-export async function setMemberRole(userId: string, role: MemberRole): Promise<boolean> {
+/** 设置成员的角色全集（@everyone 不需传） */
+export async function setMemberRoles(userId: string, roleIds: ID[]): Promise<boolean> {
   const server = serverOf();
   const communityId = state.view.communityId;
   if (!server || !communityId) return false;
   try {
-    await server.updateMemberRole(communityId, userId, { role });
-    notify(role === "owner" ? "所有权已转让" : "成员角色已更新");
+    await server.setMemberRoles(communityId, userId, { roleIds });
+    notify("成员角色已更新");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 转让社区所有权（仅 owner） */
+export async function transferOwner(userId: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.transferOwner(communityId, { userId });
+    notify("所有权已转让");
+    await reloadCommunityDetail();
+    await refreshCommunities();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+// ------- 角色（Discord 式；MANAGE_CHANNEL 可改） -------
+
+/** 拉当前社区的完整角色表（含 @everyone） */
+export async function listRoles(): Promise<CommunityRole[]> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return [];
+  try {
+    const res = await server.listRoles(communityId);
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 新建角色 */
+export async function createRole(body: CreateRoleRequest): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.createRole(communityId, body);
+    notify("角色已创建");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 修改角色（名/色/权限位/层级；@everyone 不可改名） */
+export async function updateRole(roleId: string, body: UpdateRoleRequest): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.updateRole(communityId, roleId, body);
+    notify("角色已更新");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 删除角色（@everyone 不可删） */
+export async function deleteRole(roleId: string): Promise<boolean> {
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return false;
+  try {
+    await server.deleteRole(communityId, roleId);
+    notify("角色已删除");
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+// ------- 频道权限覆盖（overwrite；MANAGE_CHANNEL 可改） -------
+
+/** 拉某频道的覆盖列表 */
+export async function listChannelOverwrites(channelId: string): Promise<ChannelOverwrite[]> {
+  const server = serverOf();
+  if (!server) return [];
+  try {
+    const res = await server.listChannelOverwrites(channelId);
+    return res.items;
+  } catch (error) {
+    notify(errorText(error));
+    return [];
+  }
+}
+
+/** 写入/覆盖某目标在该频道的 allow/deny 位 */
+export async function setChannelOverwrite(
+  channelId: string,
+  targetType: OverwriteTargetType,
+  targetId: string,
+  body: SetChannelOverwriteRequest,
+): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.setChannelOverwrite(channelId, targetType, targetId, body);
+    await reloadCommunityDetail();
+    return true;
+  } catch (error) {
+    notify(errorText(error));
+    return false;
+  }
+}
+
+/** 清除某目标在该频道的覆盖 */
+export async function deleteChannelOverwrite(
+  channelId: string,
+  targetType: OverwriteTargetType,
+  targetId: string,
+): Promise<boolean> {
+  const server = serverOf();
+  if (!server) return false;
+  try {
+    await server.deleteChannelOverwrite(channelId, targetType, targetId);
     await reloadCommunityDetail();
     return true;
   } catch (error) {
@@ -1900,25 +2041,51 @@ export async function cloneShareToSession(shareId: string): Promise<boolean> {
   }
 }
 
-/** 我在当前社区的角色 */
-export function myRole(): MemberRole | null {
-  return state.view.community?.myRole ?? null;
+/** 我在当前社区的基础权限位（非成员 = 0） */
+export function myPermissions(): PermissionFlags {
+  return state.view.community?.myPermissions ?? 0;
 }
 
-/** 是否当前社区 owner/admin */
+/** 我持有的角色 id（@everyone 不计入） */
+export function myRoleIds(): ID[] {
+  return state.view.community?.myRoleIds ?? [];
+}
+
+/** 我是否是当前社区成员（有任意权限位即视为成员；公开访客为 0） */
+export function isMember(): boolean {
+  return myPermissions() !== 0;
+}
+
+/** 我是否持有社区级 MANAGE_CHANNEL 权限 */
 export function isModerator(): boolean {
-  const role = myRole();
-  return role === "owner" || role === "admin";
+  return (myPermissions() & Permission.MANAGE_CHANNEL) !== 0;
 }
 
-/** 能否编辑：作者本人（随时）或社区 owner/admin */
+/** 我是否是当前社区的所有者（owner 绕过所有权限判定） */
+export function isOwner(): boolean {
+  const community = state.view.community;
+  if (community === null || state.me === null) return false;
+  return community.ownerId === state.me.id;
+}
+
+/** 我在某频道下的解析后权限位（含 overwrite 叠加；非成员 = 0） */
+export function channelPermissions(channelId: ID): PermissionFlags {
+  return state.view.community?.channels.find((c) => c.id === channelId)?.permissions ?? 0;
+}
+
+/** 我在某频道是否持有指定权限位 */
+export function can(channelId: ID, bit: PermissionFlags): boolean {
+  return (channelPermissions(channelId) & bit) !== 0;
+}
+
+/** 能否编辑：作者本人（随时）或持有社区 MANAGE_CHANNEL */
 export function canEditMessage(item: MessageItem): boolean {
   if (state.me === null) return false;
   if (item.authorId === state.me.id) return true;
   return isModerator();
 }
 
-/** 能否撤回/删除：作者仅在发送 2 分钟内；owner/admin 随时可删 */
+/** 能否撤回/删除：作者仅在发送 2 分钟内；持有 MANAGE_CHANNEL 随时可删 */
 export function canRetractMessage(item: MessageItem): boolean {
   if (state.me === null) return false;
   if (item.authorId === state.me.id) return Date.now() - item.createdAt <= MESSAGE_RETRACT_MS;
@@ -1983,7 +2150,7 @@ function toMemberLite(item: ListMembersResponse["items"][number]): MemberLite {
     handle: item.user.handle,
     displayName: item.user.displayName,
     avatarUrl: item.user.avatarUrl,
-    role: item.role,
+    roleIds: item.roleIds,
   };
 }
 

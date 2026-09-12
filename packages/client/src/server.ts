@@ -24,11 +24,15 @@ import type {
   CreateInviteResponse,
   CreateMessageRequest,
   CreateMessageResponse,
+  CreateRoleRequest,
+  CreateRoleResponse,
   CreateThreadRequest,
   CreateThreadResponse,
   DeclineInviteResponse,
+  DeleteChannelOverwriteResponse,
   DeleteChannelResponse,
   DeleteCommunityResponse,
+  DeleteRoleResponse,
   DiscoverCommunitiesQuery,
   DiscoverCommunitiesResponse,
   GetChannelOnlineResponse,
@@ -44,17 +48,20 @@ import type {
   JoinThreadRequest,
   JoinThreadResponse,
   LeaveCommunityResponse,
+  ListChannelOverwritesResponse,
   ListCommunityBansResponse,
   ListMembersQuery,
   ListMembersResponse,
   ListMessagesQuery,
   ListMessagesResponse,
   ListNotificationsResponse,
+  ListRolesResponse,
   ListThreadCandidatesResponse,
   ListThreadMembersResponse,
   ListThreadsResponse,
   MarkAllNotificationsReadResponse,
   MarkNotificationReadResponse,
+  OverwriteTargetType,
   RemoveMemberResponse,
   RemoveThreadMemberResponse,
   RequestPasswordResetOTPResponse,
@@ -65,19 +72,25 @@ import type {
   SearchMessagesResponse,
   SendVerificationEmailRequest,
   SendVerificationOTPRequest,
+  SetChannelOverwriteRequest,
+  SetChannelOverwriteResponse,
+  SetMemberRolesRequest,
+  SetMemberRolesResponse,
   SignInEmailRequest,
   SignInUsernameRequest,
   SignUpEmailRequest,
   ThreadSummary,
+  TransferOwnerRequest,
+  TransferOwnerResponse,
   UpdateChannelRequest,
   UpdateChannelResponse,
   UpdateCommunityRequest,
   UpdateCommunityResponse,
-  UpdateMemberRoleRequest,
-  UpdateMemberRoleResponse,
   UpdateMessageRequest,
   UpdateMessageResponse,
   UpdateReadStateRequest,
+  UpdateRoleRequest,
+  UpdateRoleResponse,
   UpdateThreadReadStateRequest,
   UpdateThreadReadStateResponse,
   UpdateThreadRequest,
@@ -470,13 +483,13 @@ export class ServerClient {
     );
   }
 
-  /** GET /api/communities/:id/members —— 成员列表（须是成员） */
+  /** GET /api/communities/:id/members —— 成员列表（须是成员；可按角色 id 过滤） */
   listMembers(
     communityId: string,
-    query: Pick<ListMembersQuery, "role" | "q" | "limit" | "offset"> = {},
+    query: Pick<ListMembersQuery, "roleId" | "q" | "limit" | "offset"> = {},
   ): Promise<ListMembersResponse> {
     const qs = toQuery({
-      role: query.role ?? "",
+      roleId: query.roleId ?? "",
       q: query.q ?? "",
       limit: query.limit ?? 100,
       offset: query.offset ?? 0,
@@ -489,16 +502,111 @@ export class ServerClient {
     );
   }
 
-  /** PATCH /api/communities/:id/members/:userId/role —— 角色调整 / owner 转让 */
-  updateMemberRole(
+  /** PUT /api/communities/:id/members/:userId/roles —— 设置成员角色全集（MANAGE_CHANNEL） */
+  setMemberRoles(
     communityId: string,
     userId: string,
-    body: UpdateMemberRoleRequest,
-  ): Promise<UpdateMemberRoleResponse> {
-    return this.call<UpdateMemberRoleResponse>(
-      "PATCH",
-      `/api/communities/${communityId}/members/${userId}/role`,
+    body: SetMemberRolesRequest,
+  ): Promise<SetMemberRolesResponse> {
+    return this.call<SetMemberRolesResponse>(
+      "PUT",
+      `/api/communities/${communityId}/members/${userId}/roles`,
       body,
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/transfer-owner —— 转让所有权（仅 owner） */
+  transferOwner(communityId: string, body: TransferOwnerRequest): Promise<TransferOwnerResponse> {
+    return this.call<TransferOwnerResponse>(
+      "POST",
+      `/api/communities/${communityId}/transfer-owner`,
+      body,
+      true,
+    );
+  }
+
+  // ---------- 业务 REST：角色 & 频道权限覆盖 ----------
+
+  /** GET /api/communities/:id/roles —— 社区全部角色（成员可见） */
+  listRoles(communityId: string): Promise<ListRolesResponse> {
+    return this.call<ListRolesResponse>(
+      "GET",
+      `/api/communities/${communityId}/roles`,
+      undefined,
+      true,
+    );
+  }
+
+  /** POST /api/communities/:id/roles —— 新建角色（MANAGE_CHANNEL） */
+  createRole(communityId: string, body: CreateRoleRequest): Promise<CreateRoleResponse> {
+    return this.call<CreateRoleResponse>(
+      "POST",
+      `/api/communities/${communityId}/roles`,
+      body,
+      true,
+    );
+  }
+
+  /** PATCH /api/communities/:id/roles/:roleId —— 改角色（MANAGE_CHANNEL） */
+  updateRole(
+    communityId: string,
+    roleId: string,
+    body: UpdateRoleRequest,
+  ): Promise<UpdateRoleResponse> {
+    return this.call<UpdateRoleResponse>(
+      "PATCH",
+      `/api/communities/${communityId}/roles/${roleId}`,
+      body,
+      true,
+    );
+  }
+
+  /** DELETE /api/communities/:id/roles/:roleId —— 删角色（MANAGE_CHANNEL） */
+  deleteRole(communityId: string, roleId: string): Promise<DeleteRoleResponse> {
+    return this.call<DeleteRoleResponse>(
+      "DELETE",
+      `/api/communities/${communityId}/roles/${roleId}`,
+      undefined,
+      true,
+    );
+  }
+
+  /** GET /api/channels/:id/overwrites —— 频道的权限覆盖列表（MANAGE_CHANNEL） */
+  listChannelOverwrites(channelId: string): Promise<ListChannelOverwritesResponse> {
+    return this.call<ListChannelOverwritesResponse>(
+      "GET",
+      `/api/channels/${channelId}/overwrites`,
+      undefined,
+      true,
+    );
+  }
+
+  /** PUT /api/channels/:id/overwrites/:targetType/:targetId —— 写入覆盖（MANAGE_CHANNEL） */
+  setChannelOverwrite(
+    channelId: string,
+    targetType: OverwriteTargetType,
+    targetId: string,
+    body: SetChannelOverwriteRequest,
+  ): Promise<SetChannelOverwriteResponse> {
+    return this.call<SetChannelOverwriteResponse>(
+      "PUT",
+      `/api/channels/${channelId}/overwrites/${targetType}/${encodeURIComponent(targetId)}`,
+      body,
+      true,
+    );
+  }
+
+  /** DELETE /api/channels/:id/overwrites/:targetType/:targetId —— 清除覆盖（MANAGE_CHANNEL） */
+  deleteChannelOverwrite(
+    channelId: string,
+    targetType: OverwriteTargetType,
+    targetId: string,
+  ): Promise<DeleteChannelOverwriteResponse> {
+    return this.call<DeleteChannelOverwriteResponse>(
+      "DELETE",
+      `/api/channels/${channelId}/overwrites/${targetType}/${encodeURIComponent(targetId)}`,
+      undefined,
       true,
     );
   }

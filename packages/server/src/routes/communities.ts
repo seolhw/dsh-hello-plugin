@@ -1,53 +1,79 @@
 // ================================================================
-// /api/communities/* 与 /api/channels/*（社区管理、频道、成员）
-// 权限模型：
+// /api/communities/* 与 /api/channels/*（社区管理、频道、角色、权限覆盖、成员）
+// 权限模型（Discord 式，见 lib/permissions.ts）：
 //   - 身份由 Better Auth 会话（Bearer）保证，见 lib/auth.ts
-//   - 社区内角色：owner > admin > member（community_members 表）
-//   - 浏览私密内容需成员身份；管理操作需 owner/admin；踢人/转让/删除社区等需 owner
-//   - owner 同时冗余在 communities.owner_id，以 owner_id 为最终权威
+//   - communities.owner_id 为 owner，恒定全权限；每个社区一个 @everyone 角色
+//   - 自定义角色自带权限位；频道用 overwrite（@everyone/角色/成员）叠加 allow/deny
+//   - 管理类操作需 MANAGE_CHANNEL 位；删社区/转让需 owner
 // ================================================================
 
 import type {
   BanCommunityMemberRequest,
+  ChannelAccess,
+  CommunityMemberItem,
   CreateChannelRequest,
   CreateCommunityRequest,
   CreateInviteRequest,
+  CreateRoleRequest,
   DiscoverCommunitiesQuery,
   GetMyCommunitiesResponse,
   ListMembersQuery,
+  SetChannelOverwriteRequest,
+  SetMemberRolesRequest,
+  TransferOwnerRequest,
   UpdateChannelRequest,
   UpdateCommunityRequest,
-  UpdateMemberRoleRequest,
+  UpdateRoleRequest,
 } from "@dsh-talk/types/api";
-import type { CommunityMember, MemberRole, User } from "@dsh-talk/types/entities";
+import {
+  ALL_PERMISSIONS,
+  type CommunityMember,
+  type CommunityRole,
+  EVERYONE_TARGET_ID,
+  type OverwriteTargetType,
+  Permission,
+  type PermissionFlags,
+  type User,
+} from "@dsh-talk/types/entities";
 import { and, count, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import {
+  type ChannelOverwriteRow,
   type ChannelRow,
   type CommunityMemberRow,
+  type CommunityRoleRow,
   type CommunityRow,
+  channelOverwrites,
   channelReadStates,
   channels,
   communities,
   communityBans,
   communityMembers,
+  communityRoles,
+  memberRoles,
   messages,
 } from "../db/schema";
-import {
-  getMembership,
-  isCommunityBanned,
-  requireMember,
-  requireModerator,
-  requireNotBanned,
-  requireOwner,
-} from "../lib/access";
+import { getMembership, isCommunityBanned, requireMember, requireNotBanned } from "../lib/access";
 import { createBearerAuth, requireCurrentUser, requireUserId } from "../lib/auth";
-import { listChannels, loadChannelRow } from "../lib/channels";
+import { loadChannelRow } from "../lib/channels";
 import { mapCommunity } from "../lib/communities";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId, newInviteCode, newSlug } from "../lib/ids";
 import { createCommunityInvite, finalizePendingInvites } from "../lib/invites";
+import {
+  ensureEveryoneRole,
+  getEveryoneRole,
+  isCommunityOwner,
+  listChannelAccess,
+  loadRoleIdsByMember,
+  loadRoles,
+  requireChannelPermission,
+  requireCommunityOwner,
+  requireCommunityPermission,
+  resolveChannelPermissions,
+  resolveCommunityPermissions,
+} from "../lib/permissions";
 import {
   type AppCtx,
   emptyOk,
@@ -76,6 +102,45 @@ function validateCommunityName(name: string): void {
   if (n.length < 1 || n.length > 50) throw HttpApiError.badRequest("name 长度需在 1~50 之间");
 }
 
+/** 角色行 → 对外实体 */
+function mapRole(row: CommunityRoleRow): CommunityRole {
+  return row;
+}
+
+/** 频道行 + 权限位 → 对外 ChannelAccess */
+function channelAccess(row: ChannelRow, permissions: PermissionFlags): ChannelAccess {
+  return { ...row, permissions };
+}
+
+const OVERWRITE_TARGET_TYPES: readonly OverwriteTargetType[] = ["everyone", "role", "member"];
+
+/** 校验路径里的覆盖目标，并确认目标确实属于该社区 */
+async function validateOverwriteTarget(
+  db: ReturnType<typeof dbOf>,
+  communityId: string,
+  targetType: string,
+  targetId: string,
+): Promise<{ targetType: OverwriteTargetType; targetId: string }> {
+  if (!OVERWRITE_TARGET_TYPES.includes(targetType as OverwriteTargetType)) {
+    throw HttpApiError.badRequest("targetType 只能是 everyone / role / member");
+  }
+  const type = targetType as OverwriteTargetType;
+  const id = type === "everyone" ? EVERYONE_TARGET_ID : targetId;
+  if (type === "role") {
+    const rows = await db
+      .select({ id: communityRoles.id })
+      .from(communityRoles)
+      .where(and(eq(communityRoles.id, id), eq(communityRoles.communityId, communityId)))
+      .limit(1);
+    if (rows.length === 0) throw HttpApiError.notFound("role not found in this community");
+  }
+  if (type === "member") {
+    const member = await getMembership(db, communityId, id);
+    if (!member) throw HttpApiError.notFound("user is not a member of this community");
+  }
+  return { targetType: type, targetId: id };
+}
+
 // ================================================================
 // 社区路由
 // ================================================================
@@ -84,7 +149,7 @@ const communitiesApi = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>(
 
 export const communitiesRoutes = communitiesApi;
 
-// 身份由 Better Auth 会话（Bearer）解析并注入 userId；入口再判断成员/角色
+// 身份由 Better Auth 会话（Bearer）解析并注入 userId；入口再判断成员/权限位
 communitiesApi.use("*", createBearerAuth("required"));
 
 // --- GET /discover —— 公开社区目录 ---
@@ -123,10 +188,7 @@ communitiesApi.get("/mine", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const rows = await db
-    .select({
-      communityId: communityMembers.communityId,
-      role: communityMembers.role,
-    })
+    .select({ communityId: communityMembers.communityId })
     .from(communityMembers)
     .where(eq(communityMembers.userId, userId));
   const result: GetMyCommunitiesResponse = [];
@@ -135,6 +197,7 @@ communitiesApi.get("/mine", async (c) => {
       await db.select().from(communities).where(eq(communities.id, m.communityId)).limit(1)
     )[0];
     if (!communityRow) continue;
+    const access = await resolveCommunityPermissions(db, communityRow.id, userId);
     // 该社区有未读消息的频道数（未读 = 频道最后一条消息晚于该用户 read_state.last_read_at）
     const unreadRow = await db
       .select({ value: count() })
@@ -152,7 +215,7 @@ communitiesApi.get("/mine", async (c) => {
       .where(and(eq(channelReadStates.userId, userId), eq(channels.communityId, communityRow.id)));
     result.push({
       ...mapCommunity(communityRow),
-      role: m.role,
+      permissions: access.permissions,
       unreadChannels: unreadRow[0]?.value ?? 0,
       unreadMentions: Number(unreadMentionsRow[0]?.value ?? 0),
     });
@@ -160,7 +223,7 @@ communitiesApi.get("/mine", async (c) => {
   return c.json(result);
 });
 
-// --- POST / —— 创建社区（含默认频道、owner 成员、邀请码） ---
+// --- POST / —— 创建社区（含 @everyone 角色、默认频道、owner 成员、邀请码） ---
 communitiesApi.post("/", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
@@ -207,21 +270,18 @@ communitiesApi.post("/", async (c) => {
     createdAt: now,
     updatedAt: now,
   });
-  await db.insert(communityMembers).values({
-    communityId,
-    userId,
-    role: "owner",
-    joinedAt: now,
-  });
-  // 默认频道：全员（文字讨论）+ 公告（announcement，只有管理员可发）
+  await db.insert(communityMembers).values({ communityId, userId, joinedAt: now });
+  // @everyone 角色（默认 VIEW/SEND/CREATE_THREAD）
+  const everyone = await ensureEveryoneRole(db, communityId, now);
+  // 默认频道：全员（文字讨论）+ 公告（所有人默认禁言，仅拥有 SEND_MESSAGES 的角色可发）
   const defaults = [
     { name: "全员", kind: "text" as const, position: 0 },
     { name: "公告", kind: "announcement" as const, position: 1 },
   ];
-  const createdChannels: ChannelRow[] = [];
+  const createdChannels: ChannelAccess[] = [];
   for (const d of defaults) {
     const channelId = newId();
-    await db.insert(channels).values({
+    const row: ChannelRow = {
       id: channelId,
       communityId,
       name: d.name,
@@ -230,18 +290,21 @@ communitiesApi.post("/", async (c) => {
       topic: null,
       createdAt: now,
       updatedAt: now,
-    });
-    createdChannels.push({
-      id: channelId,
-      communityId,
-      name: d.name,
-      kind: d.kind,
-      position: d.position,
-      topic: null,
-      createdAt: now,
-      updatedAt: now,
-    });
+    };
+    await db.insert(channels).values(row);
+    if (d.kind === "announcement") {
+      await db.insert(channelOverwrites).values({
+        channelId,
+        targetType: "everyone",
+        targetId: EVERYONE_TARGET_ID,
+        allow: 0,
+        deny: Permission.SEND_MESSAGES | Permission.CREATE_THREAD,
+        updatedAt: now,
+      });
+    }
+    createdChannels.push(channelAccess(row, ALL_PERMISSIONS));
   }
+  void everyone;
   const created = await mustRow(
     db.select().from(communities).where(eq(communities.id, communityId)).limit(1),
     "community",
@@ -255,29 +318,38 @@ communitiesApi.get("/:id", async (c) => {
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
   const row = await communityById(db, communityId);
-  const membership = await getMembership(db, communityId, userId);
-  if (!membership && row.privacy === "private") {
+  const access = await resolveCommunityPermissions(db, communityId, userId);
+  if (!access.isMember && row.privacy === "private") {
     throw HttpApiError.forbidden("private community");
   }
-  const myRole = membership?.role ?? null;
-  const chans = await listChannels(db, communityId);
+  const chans = access.isMember ? await listChannelAccess(db, communityId, userId) : [];
   // 讨论组仅成员可见（含未读聚合）；公开访客拿空数组
-  const threadSummaries = membership ? await listThreadSummaries(db, { communityId }, userId) : [];
+  const threadSummaries = access.isMember
+    ? await listThreadSummaries(db, { communityId }, userId)
+    : [];
   return c.json({
     ...mapCommunity(row),
     channels: chans,
     threads: threadSummaries,
-    myRole,
+    myPermissions: access.permissions,
+    myRoleIds: access.roleIds,
+    roles: access.isMember ? access.roles.map(mapRole) : [],
   });
 });
 
-// --- PATCH /:id —— 改社区（owner/admin） ---
+// --- PATCH /:id —— 改社区（MANAGE_CHANNEL） ---
 communitiesApi.patch("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
   await communityById(db, communityId);
-  await requireModerator(db, communityId, userId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
   const body = await jsonBody<UpdateCommunityRequest>(c);
   if (body.name !== undefined) validateCommunityName(body.name);
@@ -350,7 +422,6 @@ async function joinCommunity(
     await db.insert(communityMembers).values({
       communityId: communityRow.id,
       userId,
-      role: "member",
       joinedAt: Date.now(),
     });
     await db
@@ -358,11 +429,17 @@ async function joinCommunity(
       .set({ memberCount: communityRow.memberCount + 1 })
       .where(eq(communities.id, communityRow.id));
   }
+  // @everyone 角色兜底（历史社区可能缺失）
+  await ensureEveryoneRole(db, communityRow.id, Date.now());
   // 收敛该用户可能遗留的 pending 邀请（用邀请码/公开方式加入也算接受邀请）
   await finalizePendingInvites(db, communityRow.id, userId, "accepted");
-  const chans = await listChannels(db, communityRow.id);
-  const role = (existing?.role ?? "member") as MemberRole;
-  return c.json({ ...mapCommunity(communityRow), channels: chans, myRole: role });
+  const access = await resolveCommunityPermissions(db, communityRow.id, userId);
+  const chans = await listChannelAccess(db, communityRow.id, userId);
+  return c.json({
+    ...mapCommunity(communityRow),
+    channels: chans,
+    myPermissions: access.permissions,
+  });
 }
 
 // --- POST /:id/leave —— 退出（owner 需先转让） ---
@@ -372,9 +449,12 @@ communitiesApi.post("/:id/leave", async (c) => {
   const communityId = c.req.param("id");
   const member = await getMembership(db, communityId, userId);
   if (!member) throw HttpApiError.notFound("not a member");
-  if (member.role === "owner") {
+  if (await isCommunityOwner(db, communityId, userId)) {
     throw HttpApiError.badRequest("owner 不能退出社区，请先转让所有权");
   }
+  await db
+    .delete(memberRoles)
+    .where(and(eq(memberRoles.communityId, communityId), eq(memberRoles.userId, userId)));
   await db
     .delete(communityMembers)
     .where(and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, userId)));
@@ -389,14 +469,41 @@ communitiesApi.post("/:id/leave", async (c) => {
   return c.json({ ok: true });
 });
 
-// --- POST /:id/invites —— 邀请注册用户入社区（owner/admin；目标收站内信+邮件） ---
+// --- POST /:id/transfer-owner —— 转让所有权（仅 owner） ---
+communitiesApi.post("/:id/transfer-owner", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  await communityById(db, communityId);
+  await requireCommunityOwner(db, communityId, userId);
+
+  const body = await jsonBody<TransferOwnerRequest>(c);
+  const targetId = body.userId?.trim();
+  if (!targetId) throw HttpApiError.badRequest("userId required");
+  if (targetId === userId) throw HttpApiError.badRequest("你已经是 owner");
+  await requireMember(db, communityId, targetId);
+
+  await db
+    .update(communities)
+    .set({ ownerId: targetId, updatedAt: Date.now() })
+    .where(eq(communities.id, communityId));
+  return c.json({ ok: true });
+});
+
+// --- POST /:id/invites —— 邀请注册用户入社区（MANAGE_CHANNEL） ---
 communitiesApi.post("/:id/invites", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const actor = requireCurrentUser(c);
   const communityId = c.req.param("id");
   const row = await communityById(db, communityId);
-  await requireModerator(db, communityId, actorId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
   const body = await jsonBody<CreateInviteRequest>(c);
   const who = body.handleOrEmail?.trim() ?? "";
@@ -428,14 +535,14 @@ communitiesApi.post("/:id/invites", async (c) => {
 });
 
 // --- DELETE /:id —— 删除社区（仅 owner） ---
-// 级联清理顺序：先删子表（消息/未读/频道/成员）再删社区本身；R2 附件对象
-// 留在桶里由孤儿回收策略兜底（与删频道一致），不影响数据一致性。
+// 级联清理顺序：先删子表（消息/未读/频道）再删社区本身；角色/成员/覆盖由外键级联，
+// 或在此显式清理以兼容本地旧库。R2 附件对象留在桶里由孤儿回收策略兜底。
 communitiesApi.delete("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
   await communityById(db, communityId);
-  await requireOwner(db, communityId, userId);
+  await requireCommunityOwner(db, communityId, userId);
 
   const channelRows = await db
     .select({ id: channels.id })
@@ -443,10 +550,13 @@ communitiesApi.delete("/:id", async (c) => {
     .where(eq(channels.communityId, communityId));
   const channelIds = channelRows.map((r) => r.id);
   if (channelIds.length > 0) {
+    await db.delete(channelOverwrites).where(inArray(channelOverwrites.channelId, channelIds));
     await db.delete(channelReadStates).where(inArray(channelReadStates.channelId, channelIds));
   }
   await db.delete(messages).where(eq(messages.communityId, communityId));
   await db.delete(channels).where(eq(channels.communityId, communityId));
+  await db.delete(memberRoles).where(eq(memberRoles.communityId, communityId));
+  await db.delete(communityRoles).where(eq(communityRoles.communityId, communityId));
   await db.delete(communityMembers).where(eq(communityMembers.communityId, communityId));
   await db.delete(communities).where(eq(communities.id, communityId));
   return emptyOk(c);
@@ -456,13 +566,19 @@ communitiesApi.delete("/:id", async (c) => {
 // 频道（创建挂在社区下 /:id/channels）
 // ================================================================
 
-// --- POST /:id/channels —— 新增频道（owner/admin） ---
+// --- POST /:id/channels —— 新增频道（MANAGE_CHANNEL） ---
 communitiesApi.post("/:id/channels", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const communityId = c.req.param("id");
   await communityById(db, communityId);
-  await requireModerator(db, communityId, userId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
   const body = await jsonBody<CreateChannelRequest>(c);
   const name = body.name?.trim();
@@ -477,7 +593,7 @@ communitiesApi.post("/:id/channels", async (c) => {
     position = (maxRow[0]?.value ?? 0) + 1;
   }
   const id = newId();
-  await db.insert(channels).values({
+  const row: ChannelRow = {
     id,
     communityId,
     name,
@@ -486,19 +602,145 @@ communitiesApi.post("/:id/channels", async (c) => {
     topic: body.topic ?? null,
     createdAt: now,
     updatedAt: now,
-  });
-  const row = await mustRow(
-    db.select().from(channels).where(eq(channels.id, id)).limit(1),
-    "channel",
+  };
+  await db.insert(channels).values(row);
+  const permissions = await resolveChannelPermissions(db, row, userId);
+  return c.json(channelAccess(row, permissions), 201);
+});
+
+// ================================================================
+// 角色（Discord 式）
+// ================================================================
+
+// --- GET /:id/roles —— 社区全部角色（成员可见） ---
+communitiesApi.get("/:id/roles", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  await requireMember(db, communityId, userId);
+  const roles = await loadRoles(db, communityId);
+  return c.json({ items: roles.map(mapRole) });
+});
+
+// --- POST /:id/roles —— 新建角色（MANAGE_CHANNEL） ---
+communitiesApi.post("/:id/roles", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  await requireCommunityPermission(
+    db,
+    communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
   );
-  return c.json(row, 201);
+
+  const body = await jsonBody<CreateRoleRequest>(c);
+  const name = body.name?.trim();
+  if (!name || name.length > 50) throw HttpApiError.badRequest("角色名长度需在 1~50 之间");
+  if (name === "@everyone") throw HttpApiError.badRequest("@everyone 为保留角色名");
+  const now = Date.now();
+  let position = body.position;
+  if (position === undefined) {
+    const maxRow = await db
+      .select({ value: sql<number>`COALESCE(MAX(position), 0)` })
+      .from(communityRoles)
+      .where(eq(communityRoles.communityId, communityId));
+    position = (maxRow[0]?.value ?? 0) + 1;
+  }
+  const row: CommunityRoleRow = {
+    id: newId(),
+    communityId,
+    name,
+    color: body.color ?? null,
+    position,
+    permissions: body.permissions ?? 0,
+    isEveryone: false,
+    createdAt: now,
+  };
+  await db.insert(communityRoles).values(row);
+  return c.json(mapRole(row), 201);
+});
+
+// --- PATCH /:id/roles/:roleId —— 改角色（MANAGE_CHANNEL；@everyone 不可改名） ---
+communitiesApi.patch("/:id/roles/:roleId", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const roleId = c.req.param("roleId");
+  await requireCommunityPermission(
+    db,
+    communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
+
+  const role = await firstOr404(
+    db
+      .select()
+      .from(communityRoles)
+      .where(and(eq(communityRoles.id, roleId), eq(communityRoles.communityId, communityId)))
+      .limit(1),
+    "role not found",
+  );
+  const body = await jsonBody<UpdateRoleRequest>(c);
+  const patch: Partial<CommunityRoleRow> = {};
+  if (body.name !== undefined) {
+    if (role.isEveryone) throw HttpApiError.badRequest("@everyone 角色不能改名");
+    const name = body.name.trim();
+    if (!name || name.length > 50) throw HttpApiError.badRequest("角色名长度需在 1~50 之间");
+    if (name === "@everyone") throw HttpApiError.badRequest("@everyone 为保留角色名");
+    patch.name = name;
+  }
+  if (body.color !== undefined) patch.color = body.color;
+  if (body.permissions !== undefined) patch.permissions = body.permissions;
+  if (body.position !== undefined) {
+    if (role.isEveryone) throw HttpApiError.badRequest("@everyone 层级不可调整");
+    patch.position = body.position;
+  }
+  if (Object.keys(patch).length === 0) throw HttpApiError.badRequest("empty patch");
+  await db.update(communityRoles).set(patch).where(eq(communityRoles.id, roleId));
+  const updated = await mustRow(
+    db.select().from(communityRoles).where(eq(communityRoles.id, roleId)).limit(1),
+    "role",
+  );
+  return c.json(mapRole(updated));
+});
+
+// --- DELETE /:id/roles/:roleId —— 删角色（MANAGE_CHANNEL；@everyone 不可删） ---
+communitiesApi.delete("/:id/roles/:roleId", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  const roleId = c.req.param("roleId");
+  await requireCommunityPermission(
+    db,
+    communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
+
+  const role = await firstOr404(
+    db
+      .select()
+      .from(communityRoles)
+      .where(and(eq(communityRoles.id, roleId), eq(communityRoles.communityId, communityId)))
+      .limit(1),
+    "role not found",
+  );
+  if (role.isEveryone) throw HttpApiError.badRequest("@everyone 角色不能删除");
+  await db.delete(memberRoles).where(eq(memberRoles.roleId, roleId));
+  await db.delete(communityRoles).where(eq(communityRoles.id, roleId));
+  return c.json({ ok: true });
 });
 
 // ================================================================
 // 成员
 // ================================================================
 
-// --- GET /:id/members ---
+// --- GET /:id/members —— 成员列表（成员可见；可 roleId 过滤） ---
 communitiesApi.get("/:id/members", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
@@ -507,20 +749,25 @@ communitiesApi.get("/:id/members", async (c) => {
   const q = c.req.query() as ListMembersQuery;
   const { limit, offset } = parseLimitOffset(c.req.query(), 50, 200);
 
-  const conds = [eq(communityMembers.communityId, communityId)];
-  if (q.role) conds.push(eq(communityMembers.role, q.role));
   const rows = await db
     .select()
     .from(communityMembers)
-    .where(and(...conds))
+    .where(eq(communityMembers.communityId, communityId))
     .orderBy(desc(communityMembers.joinedAt));
+  const roleIdsByMember = await loadRoleIdsByMember(db, communityId);
+  let filtered: CommunityMemberRow[] = rows;
+  if (q.roleId) {
+    filtered = rows.filter((r) =>
+      (roleIdsByMember.get(r.userId) ?? []).includes(q.roleId as string),
+    );
+  }
 
   const users = await fetchUsersByIds(
     c.env.DB,
-    rows.map((r) => r.userId),
+    filtered.map((r) => r.userId),
   );
   const userById = new Map(users.map((u) => [u.id, u]));
-  let entries = rows
+  let entries = filtered
     .map((r) => ({ member: r, user: userById.get(r.userId) ?? null }))
     .filter((e): e is { member: CommunityMemberRow; user: User } => e.user !== null);
   if (q.q?.trim()) {
@@ -533,75 +780,59 @@ communitiesApi.get("/:id/members", async (c) => {
   }
   const total = entries.length;
   const page = entries.slice(offset, offset + limit);
-  const items = page.map((e) => ({
+  const items: CommunityMemberItem[] = page.map((e) => ({
     ...(e.member as unknown as CommunityMember),
     user: e.user,
+    roleIds: roleIdsByMember.get(e.member.userId) ?? [],
   }));
   return c.json({ items, total, offset, limit });
 });
 
-// --- PATCH /:id/members/:userId/role —— 角色变更（含 owner 转让） ---
-communitiesApi.patch("/:id/members/:userId/role", async (c) => {
+// --- PUT /:id/members/:userId/roles —— 设置成员角色（MANAGE_CHANNEL） ---
+communitiesApi.put("/:id/members/:userId/roles", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   const targetId = c.req.param("userId");
-  const body = await jsonBody<UpdateMemberRoleRequest>(c);
-  const targetRole: MemberRole = body.role;
-  if (targetRole !== "owner" && targetRole !== "admin" && targetRole !== "member") {
-    throw HttpApiError.badRequest("invalid role");
-  }
-  const communityRow = await communityById(db, communityId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
-  const actor = await requireMember(db, communityId, actorId);
   const target = await requireMember(db, communityId, targetId);
+  if (await isCommunityOwner(db, communityId, targetId)) {
+    throw HttpApiError.forbidden("不能修改 owner 的角色（owner 恒定拥有全部权限）");
+  }
+  void target;
 
-  const actorIsOwner = actor.role === "owner";
-  if (!actorIsOwner && actor.role !== "admin") throw HttpApiError.forbidden("owner/admin required");
-  // 被操作对象是 owner 时，只允许 owner 本人发起转让
-  if (target.role === "owner" && !actorIsOwner)
-    throw HttpApiError.forbidden("只有 owner 能调整 owner");
-  // admin 不能把别人提为 owner
-  if (targetRole === "owner" && !actorIsOwner)
-    throw HttpApiError.forbidden("只有 owner 能指定新 owner");
-
-  if (targetRole === "owner") {
-    // 转让：新 owner = target，旧 owner 降为 admin
-    if (targetId !== communityRow.ownerId) {
-      const now = Date.now();
-      await db
-        .update(communityMembers)
-        .set({ role: "admin" })
-        .where(
-          and(
-            eq(communityMembers.communityId, communityId),
-            eq(communityMembers.userId, communityRow.ownerId),
-          ),
-        );
-      await db
-        .update(communityMembers)
-        .set({ role: "owner" })
-        .where(
-          and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, targetId)),
-        );
-      await db
-        .update(communities)
-        .set({ ownerId: targetId, updatedAt: now })
-        .where(eq(communities.id, communityId));
+  const body = await jsonBody<SetMemberRolesRequest>(c);
+  const roleIds = [...new Set((body.roleIds ?? []).map((r) => r.trim()).filter(Boolean))];
+  if (roleIds.length > 0) {
+    const valid = await db
+      .select({ id: communityRoles.id, isEveryone: communityRoles.isEveryone })
+      .from(communityRoles)
+      .where(and(eq(communityRoles.communityId, communityId), inArray(communityRoles.id, roleIds)));
+    const validIds = new Set(valid.filter((r) => !r.isEveryone).map((r) => r.id));
+    for (const id of roleIds) {
+      if (!validIds.has(id)) throw HttpApiError.badRequest("包含不属于该社区的角色 id");
     }
-  } else {
-    // 普通角色变更：不能动 owner
-    if (target.role === "owner")
-      throw HttpApiError.forbidden("不能修改 owner 角色（owner 只能整体转让）");
+  }
+
+  const now = Date.now();
+  await db
+    .delete(memberRoles)
+    .where(and(eq(memberRoles.communityId, communityId), eq(memberRoles.userId, targetId)));
+  if (roleIds.length > 0) {
     await db
-      .update(communityMembers)
-      .set({ role: targetRole })
-      .where(
-        and(eq(communityMembers.communityId, communityId), eq(communityMembers.userId, targetId)),
+      .insert(memberRoles)
+      .values(
+        roleIds.map((roleId) => ({ communityId, userId: targetId, roleId, assignedAt: now })),
       );
   }
-
-  const updatedMember = await mustRow(
+  const member = await mustRow(
     db
       .select()
       .from(communityMembers)
@@ -613,21 +844,33 @@ communitiesApi.patch("/:id/members/:userId/role", async (c) => {
   );
   const user = await fetchUserById(c.env.DB, targetId);
   if (!user) throw HttpApiError.notFound("user not found");
-  return c.json({ ...(updatedMember as unknown as CommunityMember), user });
+  return c.json({
+    ...(member as unknown as CommunityMember),
+    user,
+    roleIds,
+  } satisfies CommunityMemberItem);
 });
 
-// --- DELETE /:id/members/:userId —— 踢人（owner/admin；不能踢 owner；不能从 admin 踢 owner 等） ---
+// --- DELETE /:id/members/:userId —— 踢人（MANAGE_CHANNEL；不能踢 owner/自己） ---
 communitiesApi.delete("/:id/members/:userId", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   const targetId = c.req.param("userId");
-  const actor = await requireMember(db, communityId, actorId);
-  if (actor.role !== "owner" && actor.role !== "admin")
-    throw HttpApiError.forbidden("owner/admin required");
-  const target = await requireMember(db, communityId, targetId);
-  if (target.role === "owner") throw HttpApiError.badRequest("不能移除 owner");
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
+  await requireMember(db, communityId, targetId);
+  if (await isCommunityOwner(db, communityId, targetId))
+    throw HttpApiError.badRequest("不能移除 owner");
   if (targetId === actorId) throw HttpApiError.badRequest("请用 leave 退出社区");
+  await db
+    .delete(memberRoles)
+    .where(and(eq(memberRoles.communityId, communityId), eq(memberRoles.userId, targetId)));
   await db
     .delete(communityMembers)
     .where(
@@ -644,13 +887,19 @@ communitiesApi.delete("/:id/members/:userId", async (c) => {
   return emptyOk(c);
 });
 
-// --- GET /:id/bans —— 封禁列表（owner/admin，时间倒序） ---
+// --- GET /:id/bans —— 封禁列表（MANAGE_CHANNEL，时间倒序） ---
 communitiesApi.get("/:id/bans", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   await communityById(db, communityId);
-  await requireModerator(db, communityId, actorId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
   const rows = await db
     .select()
@@ -675,13 +924,19 @@ communitiesApi.get("/:id/bans", async (c) => {
   return c.json({ items });
 });
 
-// --- POST /:id/bans —— 封禁：移出成员 + 记录封禁（owner/admin；不能封 owner/自己） ---
+// --- POST /:id/bans —— 封禁：移出成员 + 记录封禁（MANAGE_CHANNEL；不能封 owner/自己） ---
 communitiesApi.post("/:id/bans", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   const communityRow = await communityById(db, communityId);
-  await requireModerator(db, communityId, actorId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
 
   const body = await jsonBody<BanCommunityMemberRequest>(c);
   const byUserId = body.userId?.trim() ?? "";
@@ -705,9 +960,12 @@ communitiesApi.post("/:id/bans", async (c) => {
   if (targetId === communityRow.ownerId) throw HttpApiError.badRequest("不能封禁 owner");
   if (targetId === actorId) throw HttpApiError.badRequest("不能封禁自己");
 
-  // 仍在该社区 → 同时移出成员
+  // 仍在该社区 → 同时移出成员与角色
   const membership = await getMembership(db, communityId, targetId);
-  if (membership && membership.role !== "owner") {
+  if (membership) {
+    await db
+      .delete(memberRoles)
+      .where(and(eq(memberRoles.communityId, communityId), eq(memberRoles.userId, targetId)));
     await db
       .delete(communityMembers)
       .where(
@@ -743,14 +1001,20 @@ communitiesApi.post("/:id/bans", async (c) => {
   });
 });
 
-// --- DELETE /:id/bans/:userId —— 解封（owner/admin） ---
+// --- DELETE /:id/bans/:userId —— 解封（MANAGE_CHANNEL） ---
 communitiesApi.delete("/:id/bans/:userId", async (c) => {
   const db = dbOf(c);
   const actorId = requireUserId(c);
   const communityId = c.req.param("id");
   const targetId = c.req.param("userId");
   await communityById(db, communityId);
-  await requireModerator(db, communityId, actorId);
+  await requireCommunityPermission(
+    db,
+    communityId,
+    actorId,
+    Permission.MANAGE_CHANNEL,
+    "需要管理频道权限",
+  );
   await db
     .delete(communityBans)
     .where(and(eq(communityBans.communityId, communityId), eq(communityBans.userId, targetId)));
@@ -758,7 +1022,7 @@ communitiesApi.delete("/:id/bans/:userId", async (c) => {
 });
 
 // ================================================================
-// 频道独立路由（/api/channels/:id）—— 改 / 删
+// 频道独立路由（/api/channels/:id）—— 改 / 删 / 权限覆盖
 // ================================================================
 
 const channelsApi = new Hono<{ Bindings: Env; Variables: HonoAppVariables }>();
@@ -773,7 +1037,7 @@ channelsApi.patch("/:id", async (c) => {
   const userId = requireUserId(c);
   const body = await jsonBody<UpdateChannelRequest>(c);
   const row = await loadChannelRow(db, c.req.param("id"));
-  await requireModerator(db, row.communityId, userId);
+  await requireChannelPermission(db, row, userId, Permission.MANAGE_CHANNEL, "需要管理频道权限");
   const patch: Partial<ChannelRow> = {};
   if (body.name !== undefined) {
     const name = body.name.trim();
@@ -801,7 +1065,98 @@ channelsApi.delete("/:id", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
   const row = await loadChannelRow(db, c.req.param("id"));
-  await requireModerator(db, row.communityId, userId);
+  await requireChannelPermission(db, row, userId, Permission.MANAGE_CHANNEL, "需要管理频道权限");
   await db.delete(channels).where(eq(channels.id, row.id));
   return emptyOk(c);
 });
+
+// --- GET /:id/overwrites —— 频道权限覆盖列表（MANAGE_CHANNEL） ---
+channelsApi.get("/:id/overwrites", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadChannelRow(db, c.req.param("id"));
+  await requireChannelPermission(db, row, userId, Permission.MANAGE_CHANNEL, "需要管理频道权限");
+  const items: ChannelOverwriteRow[] = await db
+    .select()
+    .from(channelOverwrites)
+    .where(eq(channelOverwrites.channelId, row.id));
+  return c.json({ items });
+});
+
+// --- PUT /:id/overwrites/:targetType/:targetId —— 写入/覆盖（MANAGE_CHANNEL） ---
+channelsApi.put("/:id/overwrites/:targetType/:targetId", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadChannelRow(db, c.req.param("id"));
+  await requireChannelPermission(db, row, userId, Permission.MANAGE_CHANNEL, "需要管理频道权限");
+
+  const target = await validateOverwriteTarget(
+    db,
+    row.communityId,
+    c.req.param("targetType"),
+    c.req.param("targetId"),
+  );
+  const body = await jsonBody<SetChannelOverwriteRequest>(c);
+  const allow = Number.isFinite(body.allow) ? body.allow | 0 : 0;
+  const deny = Number.isFinite(body.deny) ? body.deny | 0 : 0;
+  const now = Date.now();
+  await db
+    .insert(channelOverwrites)
+    .values({
+      channelId: row.id,
+      targetType: target.targetType,
+      targetId: target.targetId,
+      allow,
+      deny,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        channelOverwrites.channelId,
+        channelOverwrites.targetType,
+        channelOverwrites.targetId,
+      ],
+      set: { allow, deny, updatedAt: now },
+    });
+  const saved = await mustRow(
+    db
+      .select()
+      .from(channelOverwrites)
+      .where(
+        and(
+          eq(channelOverwrites.channelId, row.id),
+          eq(channelOverwrites.targetType, target.targetType),
+          eq(channelOverwrites.targetId, target.targetId),
+        ),
+      )
+      .limit(1),
+    "overwrite",
+  );
+  return c.json(saved);
+});
+
+// --- DELETE /:id/overwrites/:targetType/:targetId —— 清除覆盖（MANAGE_CHANNEL） ---
+channelsApi.delete("/:id/overwrites/:targetType/:targetId", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const row = await loadChannelRow(db, c.req.param("id"));
+  await requireChannelPermission(db, row, userId, Permission.MANAGE_CHANNEL, "需要管理频道权限");
+  const target = await validateOverwriteTarget(
+    db,
+    row.communityId,
+    c.req.param("targetType"),
+    c.req.param("targetId"),
+  );
+  await db
+    .delete(channelOverwrites)
+    .where(
+      and(
+        eq(channelOverwrites.channelId, row.id),
+        eq(channelOverwrites.targetType, target.targetType),
+        eq(channelOverwrites.targetId, target.targetId),
+      ),
+    );
+  return c.json({ ok: true });
+});
+
+void getEveryoneRole;

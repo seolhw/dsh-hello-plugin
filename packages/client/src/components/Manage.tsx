@@ -1,6 +1,7 @@
 // ================================================================
-// 管理 UI：社区工具（成员/邀请码/设置/退出）、频道创建/编辑/删除
-// 权限判定以 talk.view.community.myRole 为准（owner/admin 可见管理项）
+// 管理 UI：社区工具（成员/角色/邀请码/设置/退出）、频道创建/编辑/删除、
+// 频道权限覆盖（Discord 式：@everyone / 角色 / 成员 的 allow-deny 位）。
+// 权限判定统一走 store 的权限位（MANAGE_CHANNEL / CREATE_THREAD / SEND_MESSAGES …）
 // ================================================================
 
 import type { MenuEntry } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -20,25 +21,45 @@ import {
   writeClipboard,
 } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CommunityBanItem } from "@dsh-talk/types/api";
-import type { Channel, MemberRole, User } from "@dsh-talk/types/entities";
+import {
+  type Channel,
+  type ChannelOverwrite,
+  type CommunityRole,
+  EVERYONE_TARGET_ID,
+  type ID,
+  type OverwriteTargetType,
+  Permission,
+  type PermissionFlags,
+  type User,
+} from "@dsh-talk/types/entities";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
   banUser,
+  channelPermissions,
   createChannel,
+  createRole,
   deleteChannelById,
+  deleteChannelOverwrite,
   deleteCommunity,
+  deleteRole,
   inviteMember,
+  isModerator,
+  isOwner,
   kickMember,
   leaveCommunity,
   listBannedUsers,
+  listChannelOverwrites,
   listMembers,
   moveChannel,
   notify,
-  setMemberRole,
+  setChannelOverwrite,
+  setMemberRoles,
+  transferOwner,
   unbanUser,
   updateChannelById,
   updateCommunity,
+  updateRole,
   uploadImage,
   useTalkState,
 } from "../store";
@@ -57,16 +78,37 @@ import {
 } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
-const isModerator = (role: MemberRole | null | undefined): boolean =>
-  role === "owner" || role === "admin";
+/** 权限位的展示清单（顺序即 UI 顺序） */
+const PERMISSION_FIELDS: { bit: PermissionFlags; label: string; hint: string }[] = [
+  { bit: Permission.VIEW_CHANNEL, label: "查看频道", hint: "看不到则频道不下发、不可读消息" },
+  { bit: Permission.SEND_MESSAGES, label: "发送消息", hint: "在频道与讨论组里发言" },
+  { bit: Permission.MANAGE_CHANNEL, label: "管理频道", hint: "改/删频道、管理成员、管理消息" },
+  { bit: Permission.CREATE_THREAD, label: "创建讨论组", hint: "在频道里开讨论组/话题" },
+];
 
-const roleColor: Record<MemberRole, string> = {
-  owner: "var(--dsw-alias-state-warn-primary)",
-  admin: "var(--dsw-alias-state-business-primary)",
-  member: palette.muted,
+/** 角色展示色（color 为 0xRRGGBB；null = 默认灰） */
+const roleColorOf = (role: CommunityRole): string =>
+  role.color === null || role.color === 0
+    ? palette.muted
+    : `#${role.color.toString(16).padStart(6, "0")}`;
+
+/** 角色可选展示色（0xRRGGBB；null = 默认灰） */
+const ROLE_COLOR_CHOICES: { value: number | null; label: string }[] = [
+  { value: null, label: "默认" },
+  { value: 0x5865f2, label: "蓝" },
+  { value: 0x57f287, label: "绿" },
+  { value: 0xfee75c, label: "黄" },
+  { value: 0xe67e22, label: "橙" },
+  { value: 0xed4245, label: "红" },
+  { value: 0xeb459e, label: "粉" },
+  { value: 0x9b59b6, label: "紫" },
+];
+
+/** 把权限位渲染成简短文本 */
+const permissionSummary = (bits: PermissionFlags): string => {
+  const names = PERMISSION_FIELDS.filter((f) => (bits & f.bit) !== 0).map((f) => f.label);
+  return names.length > 0 ? names.join(" · ") : "无权限";
 };
-
-const roleName: Record<MemberRole, string> = { owner: "所有者", admin: "管理员", member: "成员" };
 
 // ---------- 弹窗共享样式 ----------
 
@@ -77,21 +119,22 @@ const dialogHint: CSSProperties = {
   lineHeight: 1.6,
 };
 
-type CommunityDialog = null | "members" | "invite-user" | "invite" | "settings";
+type CommunityDialog = null | "members" | "roles" | "invite-user" | "invite" | "settings";
 
-/** 频道列表顶部的社区管理菜单（成员 / 邀请码 / 设置 / 退出） */
+/** 频道列表顶部的社区管理菜单（成员 / 角色 / 邀请码 / 设置 / 退出） */
 export function CommunityTools(): ReactElement | null {
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<CommunityDialog>(null);
   const communityId = talk.view.communityId;
-  const moder = isModerator(talk.view.community?.myRole);
+  const moder = isModerator();
   if (!communityId) return null;
 
   const menuItems: MenuEntry[] = [];
   if (moder) {
     menuItems.push(
       { id: "members", label: "成员管理", icon: <IconUserOutline16 /> },
+      { id: "roles", label: "角色管理", icon: <IconUserOutline16 /> },
       { id: "invite-user", label: "邀请用户", icon: <IconPlusOutline16 /> },
       { id: "invite", label: "邀请码", icon: <IconCopyOutline16 /> },
       { id: "settings", label: "社区设置", icon: <IconEditOutline16 /> },
@@ -107,7 +150,13 @@ export function CommunityTools(): ReactElement | null {
         onClose={() => setMenuOpen(false)}
         onSelect={(id) => {
           setMenuOpen(false);
-          if (id === "members" || id === "invite-user" || id === "invite" || id === "settings")
+          if (
+            id === "members" ||
+            id === "roles" ||
+            id === "invite-user" ||
+            id === "invite" ||
+            id === "settings"
+          )
             setDialog(id);
           if (id === "leave") {
             if (window.confirm("退出该社区？所有者需先转让所有权。"))
@@ -127,6 +176,7 @@ export function CommunityTools(): ReactElement | null {
         portal
       />
       {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
+      {dialog === "roles" ? <RolesDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite-user" ? <InviteUserDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite" ? <InviteDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "settings" ? <SettingsDialog open onClose={() => setDialog(null)} /> : null}
@@ -237,6 +287,7 @@ function InviteUserDialog({ open, onClose }: { open: boolean; onClose: () => voi
 function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
   const talk = useTalkState();
   const community = talk.view.community;
+  const owner = isOwner();
   const [name, setName] = useState(community?.name ?? "");
   const [description, setDescription] = useState(community?.description ?? "");
   const [privacy, setPrivacy] = useState<"public" | "private">(community?.privacy ?? "public");
@@ -359,7 +410,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             </button>
           </div>
         </div>
-        {community?.myRole === "owner" ? (
+        {owner ? (
           <div
             style={{
               borderTop: `1px solid ${palette.border}`,
@@ -370,7 +421,7 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
             }}
           >
             <span style={dialogHint}>
-              危险操作：删除社区「{community.name}」后，其全部频道与消息将被永久清除。
+              危险操作：删除社区「{community?.name}」后，其全部频道与消息将被永久清除。
             </span>
             <Button
               variant="ghost"
@@ -392,18 +443,20 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-type MemberRow = { user: User; role: MemberRole; joinedAt: number };
+type MemberRow = { user: User; roleIds: ID[]; joinedAt: number };
 
 /** 成员管理（owner/admin） */
 function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
   const talk = useTalkState();
   const me = talk.me;
-  const myRole = talk.view.community?.myRole ?? null;
+  const community = talk.view.community;
+  const roles = community?.roles ?? [];
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [bans, setBans] = useState<CommunityBanItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const isOwner = myRole === "owner";
-  const moder = isModerator(myRole);
+  const [assigning, setAssigning] = useState<MemberRow | null>(null);
+  const owner = isOwner();
+  const moder = isModerator();
 
   useEffect(() => {
     if (!open) return;
@@ -411,7 +464,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
     setLoading(true);
     void Promise.all([listMembers(), listBannedUsers()]).then(([ms, bs]) => {
       if (cancelled) return;
-      setMembers(ms as MemberRow[]);
+      setMembers(ms.map((m) => ({ user: m.user, roleIds: m.roleIds, joinedAt: m.joinedAt })));
       setBans(bs);
       setLoading(false);
     });
@@ -420,10 +473,14 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
     };
   }, [open]);
 
-  async function act(userId: string, role: MemberRole, label: string): Promise<void> {
-    if (!window.confirm(`确认${label}？`)) return;
-    const ok = await setMemberRole(userId, role);
-    if (ok) setMembers((prev) => prev.map((m) => (m.user.id === userId ? { ...m, role } : m)));
+  /** 把角色 id 映射成角色对象，按层级从高到低展示 */
+  function rolesOf(ids: ID[]): CommunityRole[] {
+    return roles.filter((r) => ids.includes(r.id)).sort((a, b) => b.position - a.position);
+  }
+
+  async function transfer(user: User): Promise<void> {
+    if (!window.confirm(`把社区所有权转让给 @${user.handle}？转让后你将失去所有者权限。`)) return;
+    await transferOwner(user.id);
   }
 
   async function kick(user: User): Promise<void> {
@@ -463,52 +520,63 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {members.map((m) => {
             const self = me !== null && m.user.id === me.id;
-            const targetIsOwner = m.role === "owner";
+            const targetIsOwner = m.user.id === community?.ownerId;
             const rowCanManage = moder && !self && !targetIsOwner;
-            const canTransfer = isOwner && !self && targetIsOwner;
+            const canTransfer = owner && !self && !targetIsOwner;
+            const held = rolesOf(m.roleIds);
             return (
               <div key={m.user.id} style={listCard}>
                 <Avatar label={m.user.handle} src={m.user.avatarUrl} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={listCardName}>
                     {m.user.displayName ?? m.user.handle}
+                    {targetIsOwner ? (
+                      <span style={{ color: palette.muted, fontSize: 11 }}>（所有者）</span>
+                    ) : null}
                     {self ? (
                       <span style={{ color: palette.muted, fontSize: 11 }}>（我）</span>
                     ) : null}
                   </div>
-                  <div style={{ ...smallText, fontSize: 11 }}>@{m.user.handle}</div>
-                </div>
-                <span style={{ fontSize: 12, color: roleColor[m.role], width: 44 }}>
-                  {roleName[m.role]}
-                </span>
-                {canTransfer ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void act(m.user.id, "owner", "转让所有权给该成员")}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                      marginTop: 2,
+                    }}
                   >
+                    {held.length === 0 ? (
+                      <span style={{ ...smallText, fontSize: 11 }}>仅 @everyone</span>
+                    ) : (
+                      held.map((r) => (
+                        <span
+                          key={r.id}
+                          style={{
+                            fontSize: 11,
+                            lineHeight: "16px",
+                            color: roleColorOf(r),
+                            border: `1px solid ${palette.border}`,
+                            borderRadius: 999,
+                            padding: "0 8px",
+                          }}
+                        >
+                          {r.name}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+                {canTransfer ? (
+                  <Button size="sm" variant="ghost" onClick={() => void transfer(m.user)}>
                     转让
                   </Button>
                 ) : null}
                 {rowCanManage ? (
                   <span style={{ display: "flex", gap: 2 }}>
-                    {m.role !== "admin" ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void act(m.user.id, "admin", "设为管理员")}
-                      >
-                        设管理员
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void act(m.user.id, "member", "降为成员")}
-                      >
-                        降为成员
-                      </Button>
-                    )}
+                    <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
+                      角色
+                    </Button>
                     <Button
                       size="sm"
                       variant="ghost"
@@ -572,17 +640,124 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
           ))}
         </div>
       ) : null}
+      {assigning ? (
+        <MemberRolesDialog
+          member={assigning}
+          roles={roles}
+          onClose={() => setAssigning(null)}
+          onSaved={(roleIds) => {
+            setMembers((prev) =>
+              prev.map((m) => (m.user.id === assigning.user.id ? { ...m, roleIds } : m)),
+            );
+            setAssigning(null);
+          }}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+/** 给成员分配角色（多选；@everyone 隐式作用于全体，不出现在这里） */
+function MemberRolesDialog({
+  member,
+  roles,
+  onClose,
+  onSaved,
+}: {
+  member: MemberRow;
+  roles: CommunityRole[];
+  onClose: () => void;
+  onSaved: (roleIds: ID[]) => void;
+}): ReactElement {
+  const [selected, setSelected] = useState<ID[]>(member.roleIds);
+  const [busy, setBusy] = useState(false);
+  const assignable = roles.filter((r) => !r.isEveryone).sort((a, b) => b.position - a.position);
+
+  function toggle(roleId: ID): void {
+    setSelected((prev) =>
+      prev.includes(roleId) ? prev.filter((id) => id !== roleId) : [...prev, roleId],
+    );
+  }
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    const ok = await setMemberRoles(member.user.id, selected);
+    setBusy(false);
+    if (ok) onSaved(selected);
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`@${member.user.handle} 的角色`}
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void save()}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      {assignable.length === 0 ? (
+        <div style={{ ...smallText, padding: "8px 2px" }}>
+          还没有自定义角色，请先在「角色管理」里创建。
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {assignable.map((r) => {
+            const on = selected.includes(r.id);
+            return (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => toggle(r.id)}
+                style={{
+                  ...listCard,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  border: `1px solid ${on ? palette.accent : palette.border}`,
+                  background: on ? palette.hoverAccent : palette.inputBg,
+                }}
+              >
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    flexShrink: 0,
+                    borderRadius: "50%",
+                    background: roleColorOf(r),
+                  }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={listCardName}>{r.name}</div>
+                  <div style={{ ...smallText, fontSize: 11 }}>
+                    {permissionSummary(r.permissions)}
+                  </div>
+                </div>
+                <span style={{ ...smallText, fontSize: 11 }}>{on ? "已分配" : "未分配"}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span style={{ ...dialogHint, display: "block", marginTop: 8 }}>
+        @everyone 角色自动作用于全体成员，无需单独分配。
+      </span>
     </Modal>
   );
 }
 
 // ---------------- 频道：创建 / 编辑 / 删除 ----------------
 
-/** 频道列表底部“新建频道”入口（owner/admin） */
+/** 频道列表底部“新建频道”入口（MANAGE_CHANNEL） */
 export function CreateChannelButton(): ReactElement | null {
-  const talk = useTalkState();
   const [open, setOpen] = useState(false);
-  if (!isModerator(talk.view.community?.myRole)) return null;
+  if (!isModerator()) return null;
   return (
     <>
       <div style={{ padding: "6px 8px" }}>
@@ -720,7 +895,7 @@ function ChannelDialog({
             {kind === "text"
               ? "全员自由发言。"
               : kind === "announcement"
-                ? "仅所有者/管理员可发，普通成员只读。"
+                ? "默认用 everyone 覆盖禁言（禁发送消息与开讨论组），可在「权限覆盖」里给特定角色放行。"
                 : "频道里只列话题，点进话题才聊天（24h 无人回复自动归档）。"}
           </span>
         </div>
@@ -734,8 +909,8 @@ const moveUpIcon: CSSProperties = { display: "inline-flex", transform: "rotate(9
 const moveDownIcon: CSSProperties = { display: "inline-flex", transform: "rotate(-90deg)" };
 
 /**
- * 每行的频道呼出菜单：创建讨论组（所有成员可见，公告频道除外）+
- * 排序 / 改名 / 删除（owner/admin 可见）。无可用项时不渲染。
+ * 每行的频道呼出菜单：创建讨论组（有 CREATE_THREAD 位者可见）+
+ * 排序 / 权限覆盖 / 改名 / 删除（有 MANAGE_CHANNEL 位者可见）。无可用项时不渲染。
  */
 export function ChannelRowMenu({
   channel,
@@ -747,14 +922,15 @@ export function ChannelRowMenu({
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
-  const moderator = isModerator(talk.view.community?.myRole);
+  const [overwriting, setOverwriting] = useState(false);
+  const moderator = isModerator();
 
   const channels = talk.view.community?.channels ?? [];
   const index = channels.findIndex((c) => c.id === channel.id);
   const canMoveUp = moderator && index > 0;
   const canMoveDown = moderator && index >= 0 && index < channels.length - 1;
-  // 公告频道不能建讨论组，与会话头部入口的条件一致
-  const canCreateThread = channel.kind !== "announcement";
+  // 能否建讨论组取决于该频道的 CREATE_THREAD 位（公告频道默认被 everyone 覆盖拒绝）
+  const canCreateThread = (channelPermissions(channel.id) & Permission.CREATE_THREAD) !== 0;
   const isForum = channel.kind === "forum";
 
   async function remove(): Promise<void> {
@@ -801,6 +977,7 @@ export function ChannelRowMenu({
       : []),
     ...(moderator
       ? [
+          { id: "overwrites", label: "权限覆盖", icon: <IconUserOutline16 /> },
           { id: "edit", label: "编辑频道", icon: <IconEditOutline16 /> },
           { id: "delete", label: "删除频道", danger: true, icon: <IconTrashOutline16 /> },
         ]
@@ -816,6 +993,7 @@ export function ChannelRowMenu({
         onSelect={(id) => {
           setMenuOpen(false);
           if (id === "create-thread") onCreateThread(channel.id);
+          if (id === "overwrites") setOverwriting(true);
           if (id === "edit") setEditing(true);
           if (id === "delete") void remove();
           if (id === "up") void moveChannel(channel.id, "up");
@@ -837,6 +1015,486 @@ export function ChannelRowMenu({
         portal
       />
       {editing ? <ChannelDialog open channel={channel} onClose={() => setEditing(false)} /> : null}
+      {overwriting ? (
+        <ChannelOverwriteDialog open channel={channel} onClose={() => setOverwriting(false)} />
+      ) : null}
     </>
+  );
+}
+
+// ---------------- 角色管理 ----------------
+
+/** 角色管理（MANAGE_CHANNEL）：列表 + 新建/编辑/删除 + 层级调整 */
+function RolesDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
+  const talk = useTalkState();
+  const roles = talk.view.community?.roles ?? [];
+  const [editing, setEditing] = useState<CommunityRole | "new" | null>(null);
+
+  const custom = roles.filter((r) => !r.isEveryone).sort((a, b) => b.position - a.position);
+  const everyone = roles.find((r) => r.isEveryone) ?? null;
+
+  async function remove(role: CommunityRole): Promise<void> {
+    if (!window.confirm(`删除角色「${role.name}」？持有该角色的成员将立即失去其权限。`)) return;
+    await deleteRole(role.id);
+  }
+
+  /** 与相邻自定义角色交换层级 */
+  async function move(role: CommunityRole, dir: "up" | "down"): Promise<void> {
+    const index = custom.findIndex((r) => r.id === role.id);
+    const other = custom[dir === "up" ? index - 1 : index + 1];
+    if (index < 0 || other === undefined) return;
+    await Promise.all([
+      updateRole(role.id, { position: other.position }),
+      updateRole(other.id, { position: role.position }),
+    ]);
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="角色管理"
+      closeLabel="关闭"
+      description="角色自带一组基础权限；在频道里可用「权限覆盖」针对单个角色放行或拒绝。"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            关闭
+          </Button>
+          <Button variant="primary" icon={<IconPlusOutline16 />} onClick={() => setEditing("new")}>
+            新建角色
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {custom.map((role, i) => (
+          <div key={role.id} style={listCard}>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                flexShrink: 0,
+                borderRadius: "50%",
+                background: roleColorOf(role),
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={listCardName}>{role.name}</div>
+              <div style={{ ...smallText, fontSize: 11 }}>
+                {permissionSummary(role.permissions)}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i === 0}
+              onClick={() => void move(role, "up")}
+              aria-label={`${role.name} 上移`}
+            >
+              上移
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={i === custom.length - 1}
+              onClick={() => void move(role, "down")}
+              aria-label={`${role.name} 下移`}
+            >
+              下移
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(role)}>
+              编辑
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<IconTrashOutline16 />}
+              onClick={() => void remove(role)}
+              aria-label={`删除角色 ${role.name}`}
+            />
+          </div>
+        ))}
+      </div>
+      {everyone ? (
+        <div style={{ marginTop: 10 }}>
+          <div style={listCard}>
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                flexShrink: 0,
+                borderRadius: "50%",
+                background: roleColorOf(everyone),
+              }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={listCardName}>@everyone</div>
+              <div style={{ ...smallText, fontSize: 11 }}>
+                {permissionSummary(everyone.permissions)}
+              </div>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(everyone)}>
+              编辑
+            </Button>
+          </div>
+          <span style={{ ...dialogHint, display: "block", marginTop: 6 }}>
+            @everyone 是全体成员的隐式角色，不能改名或删除，层级恒在最下。
+          </span>
+        </div>
+      ) : null}
+      {editing !== null ? (
+        <RoleEditorDialog
+          role={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+/** 新建 / 编辑角色（@everyone 只能改权限与颜色） */
+function RoleEditorDialog({
+  role,
+  onClose,
+}: {
+  /** null = 新建 */
+  role: CommunityRole | null;
+  onClose: () => void;
+}): ReactElement {
+  const isEdit = role !== null;
+  const everyone = role?.isEveryone ?? false;
+  const [name, setName] = useState(role?.name ?? "");
+  const [color, setColor] = useState<number | null>(role?.color ?? null);
+  const [permissions, setPermissions] = useState<PermissionFlags>(role?.permissions ?? 0);
+  const [busy, setBusy] = useState(false);
+
+  function toggle(bit: PermissionFlags): void {
+    setPermissions((prev) => ((prev & bit) !== 0 ? prev & ~bit : prev | bit));
+  }
+
+  async function save(): Promise<void> {
+    if (!everyone && name.trim().length === 0) return;
+    setBusy(true);
+    let ok: boolean;
+    if (role !== null) {
+      const patch: { name?: string; color: number | null; permissions: PermissionFlags } = {
+        color,
+        permissions,
+      };
+      if (!role.isEveryone) patch.name = name.trim();
+      ok = await updateRole(role.id, patch);
+    } else {
+      ok = await createRole({ name: name.trim(), color, permissions });
+    }
+    setBusy(false);
+    if (ok) onClose();
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? "编辑角色" : "新建角色"}
+      closeLabel="关闭"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={busy || (!everyone && name.trim().length === 0)}
+            onClick={() => void save()}
+          >
+            {isEdit ? "保存" : "创建"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={fieldBlock}>
+          <label htmlFor="talk-role-name" style={fieldLabel}>
+            角色名
+          </label>
+          <Input
+            id="talk-role-name"
+            value={everyone ? "@everyone" : name}
+            disabled={everyone}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="如 版主 / 新人"
+          />
+        </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>颜色</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {ROLE_COLOR_CHOICES.map((choice) => (
+              <button
+                key={choice.label}
+                type="button"
+                title={choice.label}
+                aria-label={`颜色 ${choice.label}`}
+                onClick={() => setColor(choice.value)}
+                style={{
+                  width: 24,
+                  height: 24,
+                  padding: 0,
+                  cursor: "pointer",
+                  borderRadius: "50%",
+                  background:
+                    choice.value === null
+                      ? palette.inputBg
+                      : `#${choice.value.toString(16).padStart(6, "0")}`,
+                  border:
+                    color === choice.value
+                      ? `2px solid ${palette.accent}`
+                      : `1px solid ${palette.border}`,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <div style={fieldBlock}>
+          <span style={fieldLabel}>权限</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {PERMISSION_FIELDS.map((field) => {
+              const on = (permissions & field.bit) !== 0;
+              return (
+                <button
+                  key={field.label}
+                  type="button"
+                  onClick={() => toggle(field.bit)}
+                  style={{
+                    ...listCard,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    border: `1px solid ${on ? palette.accent : palette.border}`,
+                    background: on ? palette.hoverAccent : palette.inputBg,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={listCardName}>{field.label}</div>
+                    <div style={{ ...smallText, fontSize: 11 }}>{field.hint}</div>
+                  </div>
+                  <span style={{ ...smallText, fontSize: 11 }}>{on ? "允许" : "未授予"}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={dialogHint}>
+            除角色自带权限外，还可对具体频道单独放行/拒绝（「权限覆盖」）。
+          </span>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------- 频道权限覆盖 ----------------
+
+type OverwriteChoice = "inherit" | "allow" | "deny";
+
+const OVERWRITE_CHOICES: { value: OverwriteChoice; label: string }[] = [
+  { value: "inherit", label: "继承" },
+  { value: "allow", label: "允许" },
+  { value: "deny", label: "拒绝" },
+];
+
+function choiceOf(
+  allow: PermissionFlags,
+  deny: PermissionFlags,
+  bit: PermissionFlags,
+): OverwriteChoice {
+  if ((allow & bit) !== 0) return "allow";
+  if ((deny & bit) !== 0) return "deny";
+  return "inherit";
+}
+
+/**
+ * 频道权限覆盖（MANAGE_CHANNEL）：对 @everyone / 角色 / 成员 逐位设置
+ * 继承（不写入）/ 允许 / 拒绝。解析优先级由服务端权限解析器决定。
+ */
+function ChannelOverwriteDialog({
+  open,
+  channel,
+  onClose,
+}: {
+  open: boolean;
+  channel: Channel;
+  onClose: () => void;
+}): ReactElement {
+  const talk = useTalkState();
+  const roles = talk.view.community?.roles ?? [];
+  const [overwrites, setOverwrites] = useState<ChannelOverwrite[]>([]);
+  const [members, setMembers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedKey, setSelectedKey] = useState(`everyone:${EVERYONE_TARGET_ID}`);
+  const [allow, setAllow] = useState<PermissionFlags>(0);
+  const [deny, setDeny] = useState<PermissionFlags>(0);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setLoading(true);
+    void Promise.all([listChannelOverwrites(channel.id), listMembers()]).then(([os, ms]) => {
+      if (cancelled) return;
+      setOverwrites(os);
+      setMembers(ms.map((m) => m.user));
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, channel.id]);
+
+  const targets: { type: OverwriteTargetType; id: string; label: string }[] = [
+    { type: "everyone", id: EVERYONE_TARGET_ID, label: "@everyone" },
+    ...roles
+      .filter((r) => !r.isEveryone)
+      .sort((a, b) => b.position - a.position)
+      .map((r) => ({ type: "role" as const, id: r.id, label: r.name })),
+    ...members.map((u) => ({ type: "member" as const, id: u.id, label: `@${u.handle}` })),
+  ];
+  const selected = targets.find((t) => `${t.type}:${t.id}` === selectedKey) ?? {
+    type: "everyone" as OverwriteTargetType,
+    id: EVERYONE_TARGET_ID,
+    label: "@everyone",
+  };
+  const current = overwrites.find(
+    (o) => o.targetType === selected.type && o.targetId === selected.id,
+  );
+
+  // 切换目标时用其现有覆盖预填编辑器
+  useEffect(() => {
+    setAllow(current?.allow ?? 0);
+    setDeny(current?.deny ?? 0);
+  }, [current?.allow, current?.deny]);
+
+  function setChoice(bit: PermissionFlags, choice: OverwriteChoice): void {
+    setAllow((prev) => (choice === "allow" ? prev | bit : prev & ~bit));
+    setDeny((prev) => (choice === "deny" ? prev | bit : prev & ~bit));
+  }
+
+  async function refresh(): Promise<void> {
+    setOverwrites(await listChannelOverwrites(channel.id));
+  }
+
+  async function save(): Promise<void> {
+    setBusy(true);
+    const ok = await setChannelOverwrite(channel.id, selected.type, selected.id, { allow, deny });
+    setBusy(false);
+    if (ok) {
+      notify("权限覆盖已保存");
+      await refresh();
+    }
+  }
+
+  async function clear(): Promise<void> {
+    if (!current) return;
+    setBusy(true);
+    const ok = await deleteChannelOverwrite(channel.id, selected.type, selected.id);
+    setBusy(false);
+    if (ok) {
+      notify("已清除该目标的覆盖");
+      await refresh();
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`#${channel.name} · 权限覆盖`}
+      closeLabel="关闭"
+      description="在角色自带权限之上，对该频道逐个目标放行或拒绝；「继承」表示不写入该位。"
+      footer={
+        <>
+          <Button variant="ghost" disabled={busy || !current} onClick={() => void clear()}>
+            清除覆盖
+          </Button>
+          <Button variant="primary" disabled={busy} onClick={() => void save()}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      {loading ? (
+        <div style={{ ...smallText, padding: "12px 4px" }}>加载权限覆盖…</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={fieldBlock}>
+            <span style={fieldLabel}>目标</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {targets.map((target) => {
+                const key = `${target.type}:${target.id}`;
+                const active = key === selectedKey;
+                const hasOverwrite = overwrites.some(
+                  (o) => o.targetType === target.type && o.targetId === target.id,
+                );
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSelectedKey(key)}
+                    style={{
+                      ...pillStyle(active),
+                      flex: "0 0 auto",
+                      padding: "5px 10px",
+                      fontSize: 12,
+                      border: hasOverwrite
+                        ? `1px solid ${palette.accent}`
+                        : `1px solid transparent`,
+                    }}
+                  >
+                    {target.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span style={dialogHint}>带蓝色边框的目标已存在覆盖；成员列表仅含当前社区成员。</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {PERMISSION_FIELDS.map((field) => {
+              const choice = choiceOf(allow, deny, field.bit);
+              return (
+                <div key={field.label} style={listCard}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={listCardName}>{field.label}</div>
+                    <div style={{ ...smallText, fontSize: 11 }}>{field.hint}</div>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 2,
+                      padding: 2,
+                      borderRadius: 8,
+                      background: palette.inputBg,
+                      border: `1px solid ${palette.border}`,
+                    }}
+                  >
+                    {OVERWRITE_CHOICES.map((item) => (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => setChoice(field.bit, item.value)}
+                        style={{
+                          ...pillStyle(choice === item.value),
+                          flex: "0 0 auto",
+                          padding: "4px 10px",
+                          fontSize: 12,
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

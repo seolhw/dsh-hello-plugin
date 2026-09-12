@@ -48,15 +48,76 @@ export const communityMembers = sqliteTable(
       .notNull()
       .references(() => communities.id, { onDelete: "cascade" }),
     userId: $id("user_id"), // 弱引用 better-auth user.id
-    role: text("role", { enum: ["owner", "admin", "member"] })
-      .notNull()
-      .default("member"),
     joinedAt: integer("joined_at", { mode: "number" }).notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.communityId, t.userId] }),
     index("idx_members_user").on(t.userId),
-    index("idx_members_role").on(t.communityId, t.role),
+  ],
+);
+
+// ---------- 社区角色（Discord 式；每社区必有且仅有一个 @everyone） ----------
+export const communityRoles = sqliteTable(
+  "community_roles",
+  {
+    id: text("id").primaryKey(),
+    communityId: $id("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** 展示色（0xRRGGBB；null = 默认灰） */
+    color: integer("color", { mode: "number" }),
+    /** 层级，越大越靠上 */
+    position: integer("position", { mode: "number" }).notNull().default(0),
+    /** 该角色自带的基础权限位（PermissionFlags） */
+    permissions: integer("permissions", { mode: "number" }).notNull().default(0),
+    /** 是否 @everyone（每社区唯一；不可删/改名） */
+    isEveryone: integer("is_everyone", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    index("idx_roles_community_position").on(t.communityId, desc(t.position)),
+    index("idx_roles_community_everyone").on(t.communityId, t.isEveryone),
+  ],
+);
+
+// ---------- 成员 ↔ 角色 分配（多对多；@everyone 不写行） ----------
+export const memberRoles = sqliteTable(
+  "member_roles",
+  {
+    communityId: $id("community_id")
+      .notNull()
+      .references(() => communities.id, { onDelete: "cascade" }),
+    userId: $id("user_id"), // 弱引用 better-auth user.id
+    roleId: $id("role_id")
+      .notNull()
+      .references(() => communityRoles.id, { onDelete: "cascade" }),
+    assignedAt: integer("assigned_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.communityId, t.userId, t.roleId] }),
+    index("idx_member_roles_user").on(t.communityId, t.userId),
+    index("idx_member_roles_role").on(t.roleId),
+  ],
+);
+
+// ---------- 频道权限覆盖（@everyone / 角色 / 成员 的 allow-deny 位） ----------
+export const channelOverwrites = sqliteTable(
+  "channel_overwrites",
+  {
+    channelId: $id("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    targetType: text("target_type", { enum: ["everyone", "role", "member"] }).notNull(),
+    /** role/member = roleId/userId；everyone = "@everyone" */
+    targetId: $id("target_id"),
+    allow: integer("allow", { mode: "number" }).notNull().default(0),
+    deny: integer("deny", { mode: "number" }).notNull().default(0),
+    updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.channelId, t.targetType, t.targetId] }),
+    index("idx_overwrites_channel").on(t.channelId),
   ],
 );
 
@@ -291,6 +352,12 @@ export type CommunityRow = typeof communities.$inferSelect;
 export type NewCommunity = typeof communities.$inferInsert;
 export type CommunityMemberRow = typeof communityMembers.$inferSelect;
 export type NewCommunityMember = typeof communityMembers.$inferInsert;
+export type CommunityRoleRow = typeof communityRoles.$inferSelect;
+export type NewCommunityRole = typeof communityRoles.$inferInsert;
+export type MemberRoleRow = typeof memberRoles.$inferSelect;
+export type NewMemberRole = typeof memberRoles.$inferInsert;
+export type ChannelOverwriteRow = typeof channelOverwrites.$inferSelect;
+export type NewChannelOverwrite = typeof channelOverwrites.$inferInsert;
 export type CommunityBanRow = typeof communityBans.$inferSelect;
 export type NewCommunityBan = typeof communityBans.$inferInsert;
 export type ChannelRow = typeof channels.$inferSelect;

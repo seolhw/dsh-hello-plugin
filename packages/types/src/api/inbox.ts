@@ -1,12 +1,12 @@
 import type {
-  Channel,
   Community,
   CommunityInvite,
   InviteStatus,
-  MemberRole,
   Notification,
+  PermissionFlags,
   User,
 } from "../entities";
+import type { ChannelAccess } from "./communities";
 import type { OffsetPaginated, OffsetPaginationQuery } from "./common";
 
 // ===============================================================
@@ -28,7 +28,10 @@ export type CreateInviteResponse = CommunityInvite & {
 };
 
 /** POST /api/invites/:id/accept —— 接受邀请（仅被邀请人本人） */
-export type AcceptInviteResponse = Community & { channels: Channel[]; myRole: MemberRole };
+export type AcceptInviteResponse = Community & {
+  channels: ChannelAccess[];
+  myPermissions: PermissionFlags;
+};
 
 /** POST /api/invites/:id/decline —— 拒绝邀请（仅被邀请人本人） */
 export type DeclineInviteResponse = { ok: true };

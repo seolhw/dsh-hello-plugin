@@ -36,6 +36,13 @@
       "when": 1789020000000,
       "tag": "20260910140000_thread_visibility_and_members",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789187356419,
+      "tag": "20260912042916_amazing_vin_gonzales",
+      "breakpoints": true
     }
   ]
 }

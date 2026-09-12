@@ -11,12 +11,13 @@ import {
   IconLoadingOutline16,
   IconTrashOutline16,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { MessageAttachment } from "@dsh-talk/types/entities";
+import { type MessageAttachment, Permission } from "@dsh-talk/types/entities";
 import type { CSSProperties, KeyboardEvent, ReactElement, ReactNode } from "react";
 import { useState } from "react";
 import {
   canEditMessage,
   canRetractMessage,
+  channelPermissions,
   deleteMessage,
   type MessageItem,
   notify,
@@ -173,13 +174,15 @@ export function MessageRow({
   const allowEdit = canEditMessage(item);
   const allowRetract = canRetractMessage(item);
   const quote = item.replyTo ? replyParts(item) : null;
-  // 公告频道只读成员不能回复（也没有输入框）
+  // 该消息所在频道的权限位：能否回复 / 能否从这条消息开讨论组
   const channelOf = talk.view.community?.channels.find((c) => c.id === item.channelId);
-  const roleOf = talk.view.community?.myRole;
-  const canReplyHere =
-    channelOf?.kind !== "announcement" || roleOf === "owner" || roleOf === "admin";
+  const channelPerms = channelOf ? channelPermissions(channelOf.id) : 0;
+  const canReplyHere = (channelPerms & Permission.SEND_MESSAGES) !== 0;
   // 只能从文字频道主频道的直接消息开临时讨论（讨论组/话题内的消息不能再套娃）
-  const canThreadHere = item.threadId === null && roleOf !== null && channelOf?.kind === "text";
+  const canThreadHere =
+    item.threadId === null &&
+    channelOf?.kind === "text" &&
+    (channelPerms & Permission.CREATE_THREAD) !== 0;
 
   async function saveEdit(): Promise<void> {
     try {

@@ -10,6 +10,7 @@ import {
   addThreadMember,
   closeThread,
   createThreadInChannel,
+  isModerator,
   joinThreadWithPasscode,
   listThreadCandidates,
   listThreadMembers,
@@ -406,8 +407,7 @@ export function ThreadMembersModal({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const role = talk.view.community?.myRole ?? null;
-  const canManage = thread.createdBy === me?.id || role === "owner" || role === "admin";
+  const canManage = thread.createdBy === me?.id || isModerator();
 
   useEffect(() => {
     if (!open) return;

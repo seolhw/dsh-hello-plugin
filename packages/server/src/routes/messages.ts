@@ -1,12 +1,11 @@
 // ================================================================
 // /api/channels/:id/*（消息/未读）与 /api/messages/:id（改/删）
-// 权限模型：
+// 权限模型（Discord 式通道权限位，详见 lib/permissions.ts）：
 //   - 身份：Better Auth 会话（Bearer）
-//   - 发消息/看历史/未读：必须是该频道所属社区的成员；
-//     公告频道（kind=announcement）发消息额外要求 owner/admin（普通成员只读）
-//   - 改消息：仅消息作者本人，或该社区 owner/admin
-//   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）或该社区 owner/admin；
-//     超时后作者只能编辑，不能撤回
+//   - 看历史/未读/在线：需频道的 VIEW_CHANNEL 位
+//   - 发消息：需频道的 SEND_MESSAGES 位（公告频道的只读由 @everyone overwrite 实现）
+//   - 改/删消息：作者本人，或持有社区 MANAGE_CHANNEL 位
+//   - 删/撤回消息：作者本人（仅发送 2 分钟内可撤回）；超时后作者只能编辑，不能撤回
 //   - 附件：先 PUT /api/r2/objects 上传拿 r2Key，随消息提交；分享卡片引用 /api/shares 登记的分享
 //   - 搜索：GET /api/messages/search?communityId=&q= 社区成员可用
 // ================================================================
@@ -25,6 +24,7 @@ import {
   MESSAGE_RETRACT_MS,
   type Message,
   type MessageAttachment,
+  Permission,
   type User,
 } from "@dsh-talk/types/entities";
 import type { EvtMessageDeleted, EvtMessageNew, EvtMessageUpdated } from "@dsh-talk/types/ws";
@@ -43,12 +43,13 @@ import {
   type ThreadRow,
   threads,
 } from "../db/schema";
-import { requireMember, requireModerator } from "../lib/access";
+import { requireMember } from "../lib/access";
 import { createBearerAuth, requireUserId } from "../lib/auth";
 import { loadChannelRow } from "../lib/channels";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
+import { requireChannelPermission, requireCommunityPermission } from "../lib/permissions";
 import { broadcastToChannel } from "../lib/realtime";
 import { emptyOk, jsonBody, mustRow, parseJson } from "../lib/response";
 import { canEnterThread } from "../lib/threads";
@@ -102,15 +103,6 @@ export const channelMessagesRoutes = channelMessagesApi;
 
 channelMessagesApi.use("*", createBearerAuth("required"));
 
-/** 该用户必须是频道所属社区的成员 */
-async function requireChannelMember(
-  db: ReturnType<typeof dbOf>,
-  channel: ChannelRow,
-  userId: string,
-): Promise<void> {
-  await requireMember(db, channel.communityId, userId);
-}
-
 /** 校验讨论组（thread）属于该频道且我有权进入（私密组）；用于列表 ?threadId / 发消息 body.threadId */
 async function loadThreadInChannel(
   db: ReturnType<typeof dbOf>,
@@ -133,7 +125,7 @@ channelMessagesApi.get("/:id/messages", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
-  await requireChannelMember(db, channel, userId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
 
   const d1 = c.env.DB;
   const q = c.req.query() as ListMessagesQuery;
@@ -185,12 +177,13 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
-  await requireChannelMember(db, channel, userId);
-
-  // 公告频道只有 owner/admin 能发（requireModerator 内部已含成员判定）
-  if (channel.kind === "announcement") {
-    await requireModerator(db, channel.communityId, userId);
-  }
+  await requireChannelPermission(
+    db,
+    channel,
+    userId,
+    Permission.SEND_MESSAGES,
+    "无权在该频道发送消息",
+  );
 
   const body = await jsonBody<CreateMessageRequest>(c);
   const d1 = c.env.DB;
@@ -333,7 +326,7 @@ channelMessagesApi.get("/:id/read-state", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
-  await requireChannelMember(db, channel, userId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
 
   const row = (
     await db
@@ -366,7 +359,7 @@ channelMessagesApi.post("/:id/read-state", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
-  await requireChannelMember(db, channel, userId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
 
   const body = await jsonBody<UpdateReadStateRequest>(c);
   const msg = (
@@ -412,7 +405,7 @@ channelMessagesApi.get("/:id/online", async (c) => {
   const userId = requireUserId(c);
   const channelId = c.req.param("id");
   const channel = await loadChannelRow(db, channelId);
-  await requireChannelMember(db, channel, userId);
+  await requireChannelPermission(db, channel, userId, Permission.VIEW_CHANNEL, "无权查看该频道");
 
   // DO 的 presence 只统计当前保持连接的会话；实例被回收/无人在线时返回空快照
   const stub = c.env.ROOM_ACTOR.get(c.env.ROOM_ACTOR.idFromName(channelId));
@@ -457,17 +450,23 @@ async function loadMessageRow(db: ReturnType<typeof dbOf>, messageId: string): P
   return row;
 }
 
-/** 谁能改消息：作者本人 or 社区 owner/admin */
+/** 谁能改消息：作者本人 or 持有社区 MANAGE_CHANNEL 位 */
 async function assertCanEditMessage(
   db: ReturnType<typeof dbOf>,
   row: MessageRow,
   userId: string,
 ): Promise<void> {
   if (row.authorId === userId) return;
-  await requireModerator(db, row.communityId, userId);
+  await requireCommunityPermission(
+    db,
+    row.communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "无权管理消息",
+  );
 }
 
-/** 谁能删/撤回：作者仅在发送后 2 分钟内可撤回；owner/admin 随时可删 */
+/** 谁能删/撤回：作者仅在发送后 2 分钟内可撤回；持有 MANAGE_CHANNEL 位可随时删 */
 async function assertCanRetractMessage(
   db: ReturnType<typeof dbOf>,
   row: MessageRow,
@@ -479,7 +478,13 @@ async function assertCanRetractMessage(
     }
     return;
   }
-  await requireModerator(db, row.communityId, userId);
+  await requireCommunityPermission(
+    db,
+    row.communityId,
+    userId,
+    Permission.MANAGE_CHANNEL,
+    "无权管理消息",
+  );
 }
 
 // --- PATCH /:id —— 改消息（作者或 owner/admin） ---

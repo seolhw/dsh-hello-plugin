@@ -113,7 +113,11 @@ function randomTag(length: number): string {
 export async function uniqueUsernameForEmail(db: D1Database, email: string): Promise<string> {
   const prefix = email.split("@")[0] ?? "user";
   // 仅保留小写字母和数字，截到 12 位（为随机后缀留空间，合计 ≤16）
-  let base = prefix.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "user";
+  let base =
+    prefix
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 12) || "user";
 
   // 邮箱前缀过短：补齐到 ≥4，避免产生低于最小长度的用户名
   if (base.length < 4) {
@@ -131,7 +135,10 @@ export async function uniqueUsernameForEmail(db: D1Database, email: string): Pro
       .first();
     if (!existing) return candidate;
   }
-  return `${base}${crypto.randomUUID().replace(/[^a-z0-9]/g, "").slice(0, 8)}`.slice(0, 16);
+  return `${base}${crypto
+    .randomUUID()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 8)}`.slice(0, 16);
 }
 
 /** 单查一个认证用户；不存在返回 null */

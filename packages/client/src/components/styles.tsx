@@ -146,13 +146,7 @@ export const listCardName: CSSProperties = {
 export const talkLogoUrl = `data:image/svg+xml;utf8,${encodeURIComponent(__DSH_TALK_LOGO_SVG__)}`;
 
 /** 品牌 logo 标记：单色 mask 跟随宿主文字色，尺寸自定 */
-export function BrandLogo({
-  size = 34,
-  title,
-}: {
-  size?: number;
-  title?: string;
-}): ReactElement {
+export function BrandLogo({ size = 34, title }: { size?: number; title?: string }): ReactElement {
   return (
     <span
       role="img"

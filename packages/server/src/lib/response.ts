@@ -12,6 +12,18 @@ export function emptyOk(c: AppCtx) {
   return c.json({}, 200);
 }
 
+/**
+ * Worker 对外 origin（用于拼可公开访问的资源 URL）。
+ * 注意：不要直接用 new URL(c.req.url).origin。wrangler dev 配置了
+ * routes.custom_domain 时，Miniflare（mf-original-hostname 头）会把请求 host
+ * 改写成生产域名，导致本地请求拼出生产 URL（指向生产 R2，key 自然 404）。
+ * 因此优先用同一 Worker 的对外地址 BETTER_AUTH_URL，未配置时再回退请求 URL。
+ */
+export function publicOrigin(c: AppCtx): string {
+  const base = c.env.BETTER_AUTH_URL?.trim() || c.req.url;
+  return new URL(base).origin;
+}
+
 /** 读取 JSON 请求体；非法 JSON 统一 400 */
 export async function jsonBody<T>(c: AppCtx): Promise<T> {
   try {

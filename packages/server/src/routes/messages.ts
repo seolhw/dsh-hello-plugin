@@ -51,7 +51,7 @@ import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { requireChannelPermission, requireCommunityPermission } from "../lib/permissions";
 import { broadcastToChannel } from "../lib/realtime";
-import { emptyOk, jsonBody, mustRow, parseJson } from "../lib/response";
+import { emptyOk, jsonBody, mustRow, parseJson, publicOrigin } from "../lib/response";
 import { canEnterThread } from "../lib/threads";
 import { fetchUsersByIds, requireUserById, resolveUserIdsByHandles } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
@@ -205,7 +205,7 @@ channelMessagesApi.post("/:id/messages", async (c) => {
   const puts = body.attachments ?? [];
   if (puts.length > MAX_ATTACHMENTS_PER_MESSAGE)
     throw HttpApiError.badRequest(`一条消息最多携带 ${MAX_ATTACHMENTS_PER_MESSAGE} 个附件`);
-  const origin = new URL(c.req.url).origin;
+  const origin = publicOrigin(c);
   const attachments: MessageAttachment[] = [];
   for (const a of puts) {
     if (typeof a.r2Key !== "string" || !a.r2Key.startsWith("att"))

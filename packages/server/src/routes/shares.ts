@@ -17,7 +17,7 @@ import { createBearerAuth, requireUserId } from "../lib/auth";
 import { db as dbOf } from "../lib/db";
 import { HttpApiError } from "../lib/errors";
 import { newId } from "../lib/ids";
-import { type AppCtx, parseJson } from "../lib/response";
+import { type AppCtx, parseJson, publicOrigin } from "../lib/response";
 import { requireUserById } from "../lib/users";
 import type { Env, HonoAppVariables } from "../types";
 
@@ -73,7 +73,7 @@ api.get("/:id", async (c) => {
     await requireMember(db, communityId, userId);
   }
   const author = await requireUserById(c.env.DB, row.authorId);
-  const origin = new URL(c.req.url).origin;
+  const origin = publicOrigin(c);
   return c.json({
     ...share,
     author,
@@ -143,7 +143,7 @@ api.post(
     const created = (await db.select().from(shares).where(eq(shares.id, shareId)).limit(1))[0];
     if (!created) throw HttpApiError.internal("share row not found");
     const author = await requireUserById(c.env.DB, userId);
-    const origin = new URL(c.req.url).origin;
+    const origin = publicOrigin(c);
     return c.json(
       {
         share: { ...rowToShare(created), author },

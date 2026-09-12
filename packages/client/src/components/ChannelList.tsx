@@ -36,7 +36,7 @@ export function ChannelList({
       >
         <span
           style={{
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: 650,
             color: palette.muted,
             overflow: "hidden",

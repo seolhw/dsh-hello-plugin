@@ -1679,6 +1679,54 @@ let presenceBound = false;
 function onPresenceSignal(): void {
   pushPresence();
 }
+
+/**
+ * 房间 presence 增量（DO 实时扇出）：
+ * - online / away 直接并入社区在线快照 —— 上线即时可见，不等 30s 轮询；
+ * - offline 改为去抖重拉：房间帧只能证明「离开了本房间」，用户可能仍在线于
+ *   同社区的其他频道，社区级名单以 REST 聚合结果为准（避免误判离线）。
+ */
+function applyPresenceUpdate(member: ChannelOnlineMember): void {
+  if (member.presence === "offline") {
+    if (presenceRefreshTimer !== null) return;
+    presenceRefreshTimer = window.setTimeout(() => {
+      presenceRefreshTimer = null;
+      void loadCommunityOnline();
+    }, 500);
+    return;
+  }
+  presenceFrameAt.set(member.userId, Date.now());
+  const current = state.view.communityOnlineMembers;
+  const known = current.some((m) => m.userId === member.userId);
+  const next = known
+    ? current.map((m) => (m.userId === member.userId ? member : m))
+    : [...current, member];
+  patchView({ communityOnlineMembers: next, communityOnlineCount: next.length });
+}
+
+let presenceRefreshTimer: number | null = null;
+
+/** 实时 presence 帧的到达时间（userId → ms），用于判断快照是否比本地状态更旧 */
+const presenceFrameAt = new Map<ID, number>();
+
+/**
+ * 用 REST 快照替换在线名单，但保留「本次请求发起之后」由实时帧更新的成员：
+ * 快照取的是请求发起那一刻的 DO 状态，可能还没包含刚建立连接的自己/他人，
+ * 直接覆盖会把已显示的在线状态打回旧值（表现为再等一轮 30s 轮询）。
+ */
+function mergePresenceSnapshot(
+  snapshot: ChannelOnlineMember[],
+  requestStartedAt: number,
+): ChannelOnlineMember[] {
+  const fresher = state.view.communityOnlineMembers.filter(
+    (m) => (presenceFrameAt.get(m.userId) ?? 0) > requestStartedAt,
+  );
+  if (fresher.length === 0) return snapshot;
+  const merged = new Map(snapshot.map((m) => [m.userId, m] as const));
+  for (const m of fresher) merged.set(m.userId, m);
+  return [...merged.values()];
+}
+
 function bindPresenceListeners(): void {
   if (presenceBound) return;
   presenceBound = true;
@@ -1743,6 +1791,11 @@ function handleServerFrame(frame: ServerFrame): void {
     patchView({ live: true });
     socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
     pushPresence();
+    return;
+  }
+  // 本房间在线状态变化（DO 扇出）：即时并入社区在线快照，免等 REST 轮询
+  if (frame.type === "evt.presence.update") {
+    if (frame.payload.channelId === roomId) applyPresenceUpdate(frame.payload.member);
     return;
   }
   // 社区权限配置变更：重拉社区详情与社区列表（频道可见性、按钮门槛、侧栏权限随之更新）
@@ -1906,17 +1959,19 @@ export async function closeThread(): Promise<void> {
 }
 
 /**
- * 拉取社区在线快照：人数写入 view（左侧 / 弹窗共用），成员列表返回给调用方。
- * 失败静默（保持上一次的人数），不影响聊天。
+ * 拉取社区在线快照：写入 view（右侧成员面板用这一份数据），并返回给调用方。
+ * 失败静默（保持上一次的名单），不影响聊天。
  */
 export async function loadCommunityOnline(): Promise<ChannelOnlineMember[]> {
   const server = serverOf();
   const communityId = state.view.communityId;
   if (!server || !communityId) return [];
+  const startedAt = Date.now();
   try {
     const res = await server.communityOnline(communityId);
-    patchView({ communityOnlineCount: res.count, communityOnlineMembers: res.members });
-    return res.members;
+    const members = mergePresenceSnapshot(res.members, startedAt);
+    patchView({ communityOnlineCount: members.length, communityOnlineMembers: members });
+    return members;
   } catch {
     return [];
   }

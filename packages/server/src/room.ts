@@ -131,6 +131,8 @@ export class ChannelActor extends DurableObject<Env> {
     server.serializeAttachment(session);
     this.sessions.set(server, session);
     await this.upsertPresence(session);
+    // 上线即时扇出：本人与其他在线成员无需等 REST 轮询就能看到「已在线」
+    this.fanoutPresence(session, session.presence);
 
     this.send(server, {
       type: "evt.hello",
@@ -216,6 +218,7 @@ export class ChannelActor extends DurableObject<Env> {
         session.presence = kind;
         ws.serializeAttachment(session);
         await this.upsertPresence(session);
+        this.fanoutPresence(session, kind);
         this.respondOk(ws, id, { kind: session.presence });
         return;
       }
@@ -348,11 +351,12 @@ export class ChannelActor extends DurableObject<Env> {
     this.sessions.delete(ws);
     if (!session) return;
 
-    // 同用户还有其他连接在线 => 保留 presence；否则从名单移除
+    // 同用户还有其他连接在线 => 保留 presence；否则从名单移除并扇出离线
     const stillOnline = [...this.sessions.values()].some((s) => s.userId === session.userId);
     if (!stillOnline) {
       this.ensurePresenceTable();
       this.ctx.storage.sql.exec("DELETE FROM presence WHERE user_id = ?", session.userId);
+      this.fanoutPresence(session, "offline");
     }
 
     // 频道里已无人连接：清空整个 DO 私有库，让实例随空闲被系统回收（不堆积）
@@ -367,6 +371,34 @@ export class ChannelActor extends DurableObject<Env> {
       ws.send(JSON.stringify(frame));
     } catch {
       // 发送失败（连接已坏）交给 close/error 事件收尾
+    }
+  }
+
+  /**
+   * 把某成员的在线状态变化扇出给本房间全部连接（含本人）。
+   * presence 是房间私有热状态：只在本实例内扇出，不做跨房间聚合
+   * ——社区级在线名单仍由 REST 聚合各房间快照（见 lib/realtime.ts）。
+   */
+  private fanoutPresence(session: Session, kind: Session["presence"]): void {
+    const now = Date.now();
+    const frame = {
+      type: "evt.presence.update",
+      ts: now,
+      payload: {
+        channelId: this.channelId,
+        member: {
+          userId: session.userId,
+          handle: session.handle,
+          displayName: session.displayName,
+          avatarUrl: session.avatarUrl,
+          presence: kind,
+          lastSeen: now,
+        },
+      },
+    } as unknown as ServerFrame;
+    for (const ws of [...this.sessions.keys()]) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      this.send(ws, frame);
     }
   }
 

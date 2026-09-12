@@ -53,9 +53,8 @@ function ProjectCard(): ReactElement {
   return (
     <div style={{ ...tipWrap, maxWidth: 280, gap: 4 }}>
       <span style={tipTitle}>DSH-Talk</span>
-      <span style={tipHint}>
-        把「社区」装进 DSH：在 DeepSeek Harness 里和同好聊天、提问求助、发通知， 社区内容与你的
-        Agent 工作区不再割裂。
+      <span style={{...tipHint, textAlign: "justify"}}>
+        把「社区」装进 DSH：在 DeepSeek Harness 里和同好聊天、提问求助、发通知。
       </span>
       <a
         href={PROJECT_REPO}
@@ -70,9 +69,8 @@ function ProjectCard(): ReactElement {
           whiteSpace: "nowrap",
         }}
       >
-        {PROJECT_REPO}
+        开源地址
       </a>
-      <span style={tipHint}>点击回到首页（未进入社区时的默认页）</span>
     </div>
   );
 }
@@ -233,7 +231,7 @@ export function CommunitiesRail({
           >
             <IconPlusOutline16 size={24} />
           </button>,
-          <RailTip title="加入、发现或创建社区" hint="用邀请码加入，或发现、创建新社区" />,
+          <RailTip title="加入、发现或创建社区" />,
         )}
       </div>
       <div style={railDivider} />

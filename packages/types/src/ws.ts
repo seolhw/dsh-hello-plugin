@@ -86,6 +86,22 @@ export type PresenceKind = "online" | "away" | "offline";
 export type ReqSetPresence = ClientReq<"presence.set", { kind: PresenceKind }>;
 export type RespSetPresence = ServerRespOk<{ kind: PresenceKind }>;
 
+/** S→C：本房间某成员的在线状态变化（presence.set / 连接建立 / 连接断开时扇出） */
+export type EvtPresenceUpdate = ServerEvt<
+  "evt.presence.update",
+  {
+    channelId: ID;
+    member: {
+      userId: ID;
+      handle: string;
+      displayName: string | null;
+      avatarUrl: string | null;
+      presence: PresenceKind;
+      lastSeen: TimestampMs;
+    };
+  }
+>;
+
 // ======= 服务端主动推送：频道消息事件 =======
 
 /** S→C：新消息（REST 写库成功后经 RPC 广播到这里扇出） */
@@ -157,6 +173,7 @@ export type ServerFrame =
   | RespSetPresence
   | ServerRespError
   | EvtHello
+  | EvtPresenceUpdate
   | EvtMessageNew
   | EvtMessageUpdated
   | EvtMessageDeleted

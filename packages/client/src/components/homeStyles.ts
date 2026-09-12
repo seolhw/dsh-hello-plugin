@@ -120,6 +120,27 @@ export const chatCol: CSSProperties = {
   minHeight: 0,
 };
 
+/** 聊天区右侧成员面板：固定宽度、位于文档流内（挤占聊天区，不浮在上面） */
+export const memberPanel: CSSProperties = {
+  width: 256,
+  flex: "0 0 auto",
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  background: palette.page,
+  borderLeft: `1px solid ${palette.border}`,
+};
+
+/** 成员面板的入场动画与成员行 hover（收起时整块从文档流移除） */
+export const memberPanelCss = `
+  .dsht-member-panel { animation: dsht-member-slide 160ms ease-out; }
+  @keyframes dsht-member-slide {
+    from { transform: translateX(16px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+  .dsht-member-row:hover { background: ${palette.hover}; }
+`;
+
 export const messagesWrap: CSSProperties = {
   flex: 1,
   overflowY: "auto",

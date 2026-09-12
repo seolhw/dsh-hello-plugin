@@ -13,7 +13,8 @@ import {
   listShareableSessions,
   type MessageItem,
   notify,
-  type ShareSessionRow,
+  type ShareSessionNode,
+  type ShareSessionTree,
   sendMessage,
   shareDownloadUrl,
   shareLocalSession,
@@ -22,27 +23,13 @@ import { formatBytes } from "./homeStyles";
 import { palette, pillStyle, smallText, timeLabel } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
-/** 工作区展示名：路径最后一段（对齐宿主左侧会话栏） */
-function workspaceLabel(cwd: string): string {
-  const parts = cwd.split(/[\\/]/).filter((part) => part.length > 0);
-  return parts[parts.length - 1] ?? cwd;
-}
-
-/** 会话树按工作区（cwd）分组：保持工作区在会话树里首次出现的顺序 */
-function groupSessionsByWorkspace(
-  rows: ShareSessionRow[],
-): { key: string; label: string; rows: ShareSessionRow[] }[] {
-  const groups = new Map<string, { key: string; label: string; rows: ShareSessionRow[] }>();
-  for (const row of rows) {
-    const key = row.cwd ?? "";
-    let group = groups.get(key);
-    if (!group) {
-      group = { key, label: key.length > 0 ? workspaceLabel(key) : "未知工作区", rows: [] };
-      groups.set(key, group);
-    }
-    group.rows.push(row);
+/** 会话行尾状态提示：交互阻断 > 运行中 > 已完成（对齐宿主左侧会话栏口径） */
+function sessionHint(row: ShareSessionNode): string {
+  if (row.pendingInteraction) return "待处理";
+  if (row.running) {
+    return row.runningSubagentCount > 0 ? `${row.runningSubagentCount} 个子代理` : "运行中";
   }
-  return [...groups.values()];
+  return row.completed ? "已完成" : "";
 }
 
 /** 分享 DSH 会话弹窗：选一个本机会话，打包上传并发送卡片到当前频道 */
@@ -61,17 +48,15 @@ export function ShareSnapshotModal({
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // DSH 会话分享：整个会话树（工作区 → 会话）+ 选中的会话
-  const [sessions, setSessions] = useState<ShareSessionRow[]>([]);
+  // DSH 会话分享：整棵会话树（工作区 → 会话，与宿主左侧会话栏同源）+ 选中的会话
+  const [tree, setTree] = useState<ShareSessionTree>({ groups: [], current: null });
   const [sessionId, setSessionId] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    const current = getCurrentDshSession();
-    setSessionId(current ?? "");
-    void listShareableSessions().then((list) => {
-      setSessions(list);
-      if (!current && list.length > 0) setSessionId(list[0]?.id ?? "");
+    void listShareableSessions().then((res) => {
+      setTree(res);
+      setSessionId(getCurrentDshSession() ?? res.current ?? res.groups[0]?.sessions[0]?.id ?? "");
     });
   }, [open]);
 
@@ -91,7 +76,7 @@ export function ShareSnapshotModal({
     onClose();
   }
 
-  const sessionGroups = groupSessionsByWorkspace(sessions);
+  const sessionGroups = tree.groups;
 
   return (
     <Modal
@@ -132,7 +117,7 @@ export function ShareSnapshotModal({
               sessionGroups.map((group) => (
                 <div key={group.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <span
-                    title={group.key.length > 0 ? group.key : undefined}
+                    title={group.cwd}
                     style={{
                       fontSize: 14,
                       fontWeight: 650,
@@ -142,7 +127,7 @@ export function ShareSnapshotModal({
                   >
                     {group.label}
                   </span>
-                  {group.rows.map((row) => (
+                  {group.sessions.map((row) => (
                     <button
                       key={row.id}
                       type="button"
@@ -150,13 +135,29 @@ export function ShareSnapshotModal({
                       title={row.id}
                       style={{
                         ...pillStyle(row.id === sessionId),
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
                         textAlign: "left",
                         overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
                       }}
                     >
-                      {row.title}
+                      <span
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {row.title}
+                      </span>
+                      {sessionHint(row).length > 0 ? (
+                        <span style={{ ...smallText, flex: "0 0 auto", fontSize: 12 }}>
+                          {sessionHint(row)}
+                        </span>
+                      ) : null}
                     </button>
                   ))}
                 </div>

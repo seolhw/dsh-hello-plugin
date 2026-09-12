@@ -1,14 +1,14 @@
 // ================================================================
-// 聊天相关弹窗：社区内消息搜索（命中可跳转定位）、当前频道在线成员。
+// 聊天相关弹窗：社区内消息搜索（命中可跳转定位）。
 // ================================================================
 
 import { Button, Input } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { ChannelOnlineMember, SearchMessageResult } from "@dsh-talk/types/api";
+import type { SearchMessageResult } from "@dsh-talk/types/api";
 import type { ReactElement, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { notify, revealMessage, searchCommunityMessages } from "../store";
-import { emptyMsg, liveDot } from "./homeStyles";
-import { Avatar, listCardName, palette, smallText, timeLabel } from "./styles";
+import { emptyMsg } from "./homeStyles";
+import { palette, smallText, timeLabel } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
 /** 高亮命中关键词（不区分大小写） */
@@ -212,99 +212,6 @@ export function SearchMessagesModal({
             ) : null}
           </div>
         ) : null}
-      </div>
-    </Modal>
-  );
-}
-
-// ---------------- 在线成员 ----------------
-
-const presenceColor: Record<ChannelOnlineMember["presence"], string> = {
-  online: palette.success,
-  away: palette.warn,
-  offline: palette.muted,
-};
-
-const presenceLabel: Record<ChannelOnlineMember["presence"], string> = {
-  online: "在线",
-  away: "离开",
-  offline: "离线",
-};
-
-/** 社区在线成员弹窗：读各房间 DO 的 presence 快照并去重（仅统计保持连接的会话） */
-export function OnlineMembersModal({
-  open,
-  onClose,
-  loading,
-  members,
-  online,
-  total,
-}: {
-  open: boolean;
-  onClose: () => void;
-  loading: boolean;
-  members: ChannelOnlineMember[];
-  /** 社区在线人数（= 去重后的 members 数，轮询值与左侧显示同源） */
-  online: number;
-  /** 社区成员总数 */
-  total: number;
-}): ReactElement {
-  const rank: Record<ChannelOnlineMember["presence"], number> = { online: 0, away: 1, offline: 2 };
-  const sorted = [...members].sort(
-    (a, b) => rank[a.presence] - rank[b.presence] || a.handle.localeCompare(b.handle),
-  );
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="在线成员"
-      closeLabel="关闭"
-      description="社区内当前保持连接的成员（跨频道去重）。"
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 300 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 2px" }}>
-          <span style={{ ...liveDot, background: online > 0 ? palette.success : palette.muted }} />
-          <span style={{ fontSize: 14, color: palette.text }}>
-            在线 {online} / 共 {total} 名成员
-          </span>
-        </span>
-        {loading ? (
-          <div style={{ ...smallText, padding: "14px 4px" }}>加载中…</div>
-        ) : sorted.length === 0 ? (
-          <div style={{ ...smallText, padding: "16px 4px", textAlign: "center" }}>
-            暂无成员在线。
-          </div>
-        ) : (
-          sorted.map((m) => (
-            <div
-              key={m.userId}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "7px 10px",
-                borderRadius: 10,
-                background: palette.inputBg,
-                border: `1px solid ${palette.border}`,
-              }}
-            >
-              <Avatar label={m.handle} src={m.avatarUrl} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={listCardName}>{m.displayName ?? m.handle}</div>
-                <div style={{ ...smallText, fontSize: 14 }}>@{m.handle}</div>
-              </div>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span
-                  style={{ ...liveDot, background: presenceColor[m.presence], flex: "0 0 auto" }}
-                />
-                <span style={{ fontSize: 14, color: palette.muted }}>
-                  {presenceLabel[m.presence]}
-                </span>
-              </span>
-            </div>
-          ))
-        )}
       </div>
     </Modal>
   );

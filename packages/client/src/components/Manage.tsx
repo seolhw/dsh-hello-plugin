@@ -1,5 +1,5 @@
 // ================================================================
-// 管理 UI：社区工具（成员/角色/邀请码/设置/退出）、频道创建/编辑/删除、
+// 管理 UI：社区工具（角色管理/新建频道/邀请/设置/退出）、频道创建/编辑/删除、
 // 频道权限覆盖（Discord 式：@everyone / 角色 / 成员 的 allow-deny 位）。
 // 权限判定统一走 store 的权限位（MANAGE_CHANNEL / MANAGE_ROLES / KICK_MEMBERS …），
 // 服务端才是最终裁决（层级、可授予权限等约束由 server 兜底）。
@@ -22,13 +22,11 @@ import {
   Menu,
   writeClipboard,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { CommunityBanItem } from "@dsh-talk/types/api";
 import {
   CHANNEL_OVERWRITE_PERMISSIONS,
   type Channel,
   type ChannelOverwrite,
   type CommunityRole,
-  DEFAULT_ADMIN_ROLE_NAME,
   EVERYONE_TARGET_ID,
   type ID,
   type OverwriteTargetType,
@@ -40,13 +38,8 @@ import {
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
-  adminRole,
-  adminRoles,
   askConfirm,
-  banUser,
-  canBanMembers,
   canInviteMembers,
-  canKickMembers,
   canManageCommunity,
   canManageRolePosition,
   canManageRoles,
@@ -57,17 +50,14 @@ import {
   deleteChannelOverwrite,
   deleteCommunity,
   deleteRole,
-  ensureAdminRole,
-  highestPositionOf,
   inviteMember,
   isMember,
   isModerator,
   isOwner,
-  kickMember,
   leaveCommunity,
-  listBannedUsers,
   listChannelOverwrites,
   listMembers,
+  type MemberLite,
   moveChannel,
   myHighestRolePosition,
   myPermissions,
@@ -75,8 +65,6 @@ import {
   reorderRoles,
   setChannelOverwrite,
   setMemberRoles,
-  transferOwner,
-  unbanUser,
   updateChannelById,
   updateCommunity,
   updateRole,
@@ -84,7 +72,6 @@ import {
   useTalkState,
 } from "../store";
 import {
-  Avatar,
   AvatarPicker,
   fieldBlock,
   fieldLabel,
@@ -94,7 +81,6 @@ import {
   pillGroup,
   pillStyle,
   smallText,
-  timeLabel,
 } from "./styles";
 import { TalkModal as Modal } from "./TalkModal";
 
@@ -159,16 +145,9 @@ function ActionTip({ title, hint }: { title: string; hint: string }): ReactEleme
   );
 }
 
-type CommunityDialog =
-  | null
-  | "members"
-  | "roles"
-  | "create-channel"
-  | "invite-user"
-  | "invite"
-  | "settings";
+type CommunityDialog = null | "roles" | "create-channel" | "invite-user" | "invite" | "settings";
 
-/** 频道列表顶部的社区管理菜单（成员 / 角色 / 新建频道 / 邀请 / 设置 / 退出） */
+/** 频道列表顶部的社区管理菜单（角色 / 新建频道 / 邀请 / 设置 / 退出；成员操作在聊天区右侧成员面板） */
 export function CommunityTools(): ReactElement | null {
   const talk = useTalkState();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -178,13 +157,10 @@ export function CommunityTools(): ReactElement | null {
   const canChannel = isModerator();
   const canInvite = canInviteMembers();
   const canCommunity = canManageCommunity();
-  // 成员管理里同时含角色分配 / 踢人 / 封禁 / 转让，任一可见即显示
-  const canMembers = canRoles || canKickMembers() || canBanMembers();
   const member = isMember();
   if (!communityId) return null;
 
   const menuItems: MenuEntry[] = [];
-  if (canMembers) menuItems.push({ id: "members", label: "成员管理", icon: <IconUserOutline16 /> });
   if (canRoles) menuItems.push({ id: "roles", label: "角色管理", icon: <IconUserOutline16 /> });
   if (canChannel)
     menuItems.push({ id: "create-channel", label: "新建频道", icon: <IconPlusOutline16 /> });
@@ -204,7 +180,6 @@ export function CommunityTools(): ReactElement | null {
         onSelect={(id) => {
           setMenuOpen(false);
           if (
-            id === "members" ||
             id === "roles" ||
             id === "create-channel" ||
             id === "invite-user" ||
@@ -237,7 +212,6 @@ export function CommunityTools(): ReactElement | null {
         items={menuItems}
         portal
       />
-      {dialog === "members" ? <MembersDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "roles" ? <RolesDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "create-channel" ? <ChannelDialog open onClose={() => setDialog(null)} /> : null}
       {dialog === "invite-user" ? <InviteUserDialog open onClose={() => setDialog(null)} /> : null}
@@ -508,361 +482,14 @@ function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-type MemberRow = { user: User; roleIds: ID[]; joinedAt: number };
-
-/** 成员管理（MANAGE_ROLES / KICK_MEMBERS / BAN_MEMBERS 各按钮分别判定） */
-function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }): ReactElement {
-  const talk = useTalkState();
-  const me = talk.me;
-  const community = talk.view.community;
-  const roles = community?.roles ?? [];
-  const [members, setMembers] = useState<MemberRow[]>([]);
-  const [bans, setBans] = useState<CommunityBanItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [assigning, setAssigning] = useState<MemberRow | null>(null);
-  const owner = isOwner();
-  const canRoles = canManageRoles();
-  const canKick = canKickMembers();
-  const canBan = canBanMembers();
-  const communityOnline = talk.view.communityOnlineCount;
-  // 「设为管理员」快捷入口：分配带 ADMINISTRATOR 位的角色（没有则先建「管理员」）。
-  // 已持有任一管理员角色的成员不再显示；目标角色层级必须严格低于自己（与分配弹窗同规则）。
-  const adminRoleList = adminRoles();
-  const adminRoleIds = new Set(adminRoleList.map((r) => r.id));
-  const quickTarget = adminRole();
-  const canQuickAdmin =
-    canRoles && (quickTarget === null || canManageRolePosition(quickTarget.position));
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    setLoading(true);
-    // 封禁名单需要 BAN_MEMBERS，无权限时不请求（否则整批请求会 403）
-    const bansTask = canBan ? listBannedUsers() : Promise.resolve<CommunityBanItem[]>([]);
-    void Promise.all([listMembers(), bansTask]).then(([ms, bs]) => {
-      if (cancelled) return;
-      setMembers(ms.map((m) => ({ user: m.user, roleIds: m.roleIds, joinedAt: m.joinedAt })));
-      setBans(bs);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, canBan]);
-
-  /** 把角色 id 映射成角色对象，按层级从高到低展示 */
-  function rolesOf(ids: ID[]): CommunityRole[] {
-    return roles.filter((r) => ids.includes(r.id)).sort((a, b) => b.position - a.position);
-  }
-
-  async function transfer(user: User): Promise<void> {
-    const ok = await askConfirm({
-      title: `转让社区所有权给 @${user.handle}`,
-      message: "转让后你将失去所有者权限，且只有新所有者能再转让回来。",
-      confirmLabel: "确认转让",
-      danger: true,
-    });
-    if (!ok) return;
-    await transferOwner(user.id);
-  }
-
-  /** 一键把成员设为管理员：分配带 ADMINISTRATOR 位的角色（没有则先建「管理员」） */
-  async function makeAdmin(row: MemberRow): Promise<void> {
-    const roleId = await ensureAdminRole();
-    if (roleId === null) return;
-    const next = row.roleIds.includes(roleId) ? row.roleIds : [...row.roleIds, roleId];
-    const ok = await setMemberRoles(row.user.id, next);
-    if (ok) {
-      setMembers((prev) =>
-        prev.map((m) => (m.user.id === row.user.id ? { ...m, roleIds: next } : m)),
-      );
-    }
-  }
-
-  async function kick(user: User): Promise<void> {
-    const ok = await askConfirm({
-      title: `移除 @${user.handle}`,
-      message: "把 TA 移出社区。之后 TA 仍可通过邀请码或邀请重新加入。",
-      confirmLabel: "移除成员",
-      danger: true,
-    });
-    if (!ok) return;
-    const done = await kickMember(user.id);
-    if (done) setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
-  }
-
-  async function ban(user: User): Promise<void> {
-    const ok = await askConfirm({
-      title: `封禁 @${user.handle}`,
-      message: "封禁会同时将其移出社区，且之后无法通过邀请码/邀请再加入（可在下方解封）。",
-      confirmLabel: "封禁成员",
-      danger: true,
-    });
-    if (!ok) return;
-    const done = await banUser(user.id);
-    if (done) {
-      setMembers((prev) => prev.filter((m) => m.user.id !== user.id));
-      void listBannedUsers().then(setBans);
-    }
-  }
-
-  async function unban(item: CommunityBanItem): Promise<void> {
-    const ok = await askConfirm({
-      title: `解封 @${item.user.handle}`,
-      message: "解封后 TA 可以重新加入社区，原有的成员身份不会自动恢复。",
-      confirmLabel: "解除封禁",
-    });
-    if (!ok) return;
-    const done = await unbanUser(item.userId);
-    if (done) setBans((prev) => prev.filter((b) => b.userId !== item.userId));
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="成员管理" closeLabel="关闭">
-      {/* 社区在线人数 / 成员总数（与左侧频道列表同源，30s 轮询） */}
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <span
-          style={{
-            width: 6,
-            height: 6,
-            flex: "0 0 auto",
-            borderRadius: "50%",
-            background: communityOnline > 0 ? palette.success : palette.muted,
-          }}
-        />
-        <span style={{ fontSize: 14, color: palette.text }}>
-          在线 {communityOnline} / 共 {community?.memberCount ?? 0} 名成员
-        </span>
-      </span>
-      {loading ? (
-        <div style={{ ...smallText, padding: "12px 4px" }}>加载成员…</div>
-      ) : members.length === 0 ? (
-        <div style={{ ...smallText, padding: "12px 4px" }}>还没有成员。</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {members.map((m) => {
-            const self = me !== null && m.user.id === me.id;
-            const targetIsOwner = m.user.id === community?.ownerId;
-            // 层级：只能管理层级严格低于自己、且非自己/owner 的成员
-            const manageable =
-              !self && !targetIsOwner && canManageRolePosition(highestPositionOf(m.roleIds));
-            const rowCanRoles = canRoles && manageable;
-            const rowCanKick = canKick && manageable;
-            const rowCanBan = canBan && manageable;
-            const rowCanManage = rowCanRoles || rowCanKick || rowCanBan;
-            const canTransfer = owner && !self && !targetIsOwner;
-            const held = rolesOf(m.roleIds);
-            return (
-              <div key={m.user.id} style={listCard}>
-                <Avatar label={m.user.handle} src={m.user.avatarUrl} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={listCardName}>
-                    {m.user.displayName ?? m.user.handle}
-                    {targetIsOwner ? (
-                      <span style={{ color: palette.muted, fontSize: 14 }}>（所有者）</span>
-                    ) : null}
-                    {self ? (
-                      <span style={{ color: palette.muted, fontSize: 14 }}>（我）</span>
-                    ) : null}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 4,
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                      marginTop: 2,
-                    }}
-                  >
-                    {held.length === 0 ? (
-                      <span style={{ ...smallText, fontSize: 14 }}>仅 @everyone</span>
-                    ) : (
-                      held.map((r) => (
-                        <span
-                          key={r.id}
-                          style={{
-                            fontSize: 14,
-                            lineHeight: "18px",
-                            color: roleColorOf(r),
-                            border: `1px solid ${palette.border}`,
-                            borderRadius: 999,
-                            padding: "0 8px",
-                          }}
-                        >
-                          {r.name}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </div>
-                {canTransfer ? (
-                  <HoverCard
-                    openDelayMs={300}
-                    content={
-                      <ActionTip
-                        title="转让所有权"
-                        hint={`把社区所有权交给 @${m.user.handle}。转让后你将失去所有者权限，且仅新所有者能再转让。`}
-                      />
-                    }
-                    anchor={
-                      <Button size="sm" variant="ghost" onClick={() => void transfer(m.user)}>
-                        转让
-                      </Button>
-                    }
-                  />
-                ) : null}
-                {rowCanManage ? (
-                  <span style={{ display: "flex", gap: 2 }}>
-                    {canQuickAdmin && !m.roleIds.some((id) => adminRoleIds.has(id)) ? (
-                      <HoverCard
-                        openDelayMs={300}
-                        content={
-                          <ActionTip
-                            title="设为管理员"
-                            hint={`给 @${m.user.handle} 分配${DEFAULT_ADMIN_ROLE_NAME}角色，TA 将立即获得管理社区、频道与成员的权限。`}
-                          />
-                        }
-                        anchor={
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => void makeAdmin(m)}
-                            aria-label={`设为管理员 ${m.user.handle}`}
-                          >
-                            设为管理员
-                          </Button>
-                        }
-                      />
-                    ) : null}
-                    {rowCanRoles ? (
-                      <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
-                        角色
-                      </Button>
-                    ) : null}
-                    {rowCanKick ? (
-                      <HoverCard
-                        openDelayMs={300}
-                        content={
-                          <ActionTip
-                            title="移除成员"
-                            hint={`把 @${m.user.handle} 移出社区。之后 TA 仍可通过邀请码或邀请重新加入。`}
-                          />
-                        }
-                        anchor={
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            icon={<IconTrashOutline16 />}
-                            onClick={() => void kick(m.user)}
-                            aria-label="移除成员"
-                          >
-                            移除
-                          </Button>
-                        }
-                      />
-                    ) : null}
-                    {rowCanBan ? (
-                      <HoverCard
-                        openDelayMs={300}
-                        content={
-                          <ActionTip
-                            title="封禁成员"
-                            hint={`把 @${m.user.handle} 移出社区，并且不允许 TA 再加入（可在下方「已封禁用户」中解封）。`}
-                          />
-                        }
-                        anchor={
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => void ban(m.user)}
-                            aria-label="封禁成员"
-                          >
-                            封禁
-                          </Button>
-                        }
-                      />
-                    ) : null}
-                  </span>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {bans.length > 0 ? (
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 6 }}>
-          <div
-            style={{
-              fontSize: 14,
-              fontWeight: 650,
-              color: palette.muted,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              padding: "2px 2px 0",
-            }}
-          >
-            已封禁用户（{bans.length}）
-          </div>
-          {bans.map((b) => (
-            <div key={b.userId} style={listCard}>
-              <Avatar label={b.user.handle} src={b.user.avatarUrl} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={listCardName}>
-                  @{b.user.handle}
-                  {b.reason ? (
-                    <span style={{ color: palette.muted, fontSize: 14 }}> · {b.reason}</span>
-                  ) : null}
-                </div>
-                <div style={{ ...smallText, fontSize: 14 }}>封禁于 {timeLabel(b.createdAt)}</div>
-              </div>
-              <HoverCard
-                openDelayMs={300}
-                content={
-                  <ActionTip
-                    title="解除封禁"
-                    hint={`解除对 @${b.user.handle} 的封禁，之后 TA 可以通过邀请码或邀请重新加入。`}
-                  />
-                }
-                anchor={
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => void unban(b)}
-                    aria-label={`解封 ${b.user.handle}`}
-                  >
-                    解封
-                  </Button>
-                }
-              />
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {assigning ? (
-        <MemberRolesDialog
-          member={assigning}
-          roles={roles}
-          onClose={() => setAssigning(null)}
-          onSaved={(roleIds) => {
-            setMembers((prev) =>
-              prev.map((m) => (m.user.id === assigning.user.id ? { ...m, roleIds } : m)),
-            );
-            setAssigning(null);
-          }}
-        />
-      ) : null}
-    </Modal>
-  );
-}
-
-/** 给成员分配角色（多选；@everyone 隐式作用于全体，不出现在这里） */
-function MemberRolesDialog({
+/** 给成员分配角色（多选；@everyone 隐式作用于全体，不出现在这里）。由右侧成员面板承载。 */
+export function MemberRolesDialog({
   member,
   roles,
   onClose,
   onSaved,
 }: {
-  member: MemberRow;
+  member: MemberLite;
   roles: CommunityRole[];
   onClose: () => void;
   onSaved: (roleIds: ID[]) => void;
@@ -882,7 +509,7 @@ function MemberRolesDialog({
 
   async function save(): Promise<void> {
     setBusy(true);
-    const ok = await setMemberRoles(member.user.id, selected);
+    const ok = await setMemberRoles(member.userId, selected);
     setBusy(false);
     if (ok) onSaved(selected);
   }
@@ -891,7 +518,7 @@ function MemberRolesDialog({
     <Modal
       open
       onClose={onClose}
-      title={`@${member.user.handle} 的角色`}
+      title={`@${member.handle} 的角色`}
       closeLabel="关闭"
       footer={
         <>

@@ -34,6 +34,7 @@ import {
   type ChannelOverwrite,
   type CommunityRole,
   DEFAULT_ADMIN_ROLE_NAME,
+  EVERYONE_TARGET_ID,
   type ID,
   MESSAGE_RETRACT_MS,
   type Message,
@@ -96,6 +97,8 @@ export interface ViewState {
   live: boolean;
   /** 社区在线人数（聚合各房间去重，由 loadCommunityOnline 定期刷新） */
   communityOnlineCount: number;
+  /** 社区在线成员快照（与 communityOnlineCount 同源，供右侧成员面板展示在线态） */
+  communityOnlineMembers: ChannelOnlineMember[];
   /** 当前正在引用的消息（回复目标；位于 composer 上方提示条） */
   replyingTo: MessageItem | null;
   /** 跳转高亮目标：消息加载后滚动定位并短暂高亮，随后清除 */
@@ -166,6 +169,7 @@ const INITIAL_VIEW: ViewState = {
   sending: false,
   live: false,
   communityOnlineCount: 0,
+  communityOnlineMembers: [],
   replyingTo: null,
   focusMessageId: null,
   members: [],
@@ -876,6 +880,7 @@ export async function openCommunity(communityId: string): Promise<void> {
     nextCursor: null,
     live: false,
     communityOnlineCount: 0,
+    communityOnlineMembers: [],
     replyingTo: null,
     focusMessageId: null,
   });
@@ -1910,7 +1915,7 @@ export async function loadCommunityOnline(): Promise<ChannelOnlineMember[]> {
   if (!server || !communityId) return [];
   try {
     const res = await server.communityOnline(communityId);
-    patchView({ communityOnlineCount: res.count });
+    patchView({ communityOnlineCount: res.count, communityOnlineMembers: res.members });
     return res.members;
   } catch {
     return [];
@@ -1942,10 +1947,12 @@ export async function loadOlderMessages(): Promise<void> {
   }
 }
 
-/** 从正文里抽取形如 `@handle` 的 token（前一个字符不是词字符，避免匹配邮箱 a@b） */
+/** 正文里的 @handle 列表（@everyone 是保留目标、不对应具体用户，不作为 handle 上送） */
 function mentionHandlesOf(text: string): string[] {
   const matches = text.match(/(?<![\p{L}\p{N}_])@([\p{L}\p{N}_]+)/gu) ?? [];
-  return matches.map((token) => token.replace(/^@/, ""));
+  return matches
+    .map((token) => token.replace(/^@/, ""))
+    .filter((handle) => `@${handle}` !== EVERYONE_TARGET_ID);
 }
 
 /** 组 createMessage 请求体：附件与 @mention 只在有值时带上（exactOptionalPropertyTypes） */
@@ -2121,16 +2128,39 @@ export function bindSessionOpener(fn: SessionOpener | null): void {
   openSessionFn = fn;
 }
 
-/** 可分享会话（会话树的一行）：展示名 + 所属工作区 */
-export interface ShareSessionRow {
+/** 可分享会话（会话树的一行）：与宿主左侧会话栏同源的展示与状态字段 */
+export interface ShareSessionNode {
   id: string;
   /** 展示名：宿主已折算为 durable title → 工程名 → 会话 id */
   title: string;
-  /** 会话所属工作区绝对路径；缺失时归入「未知工作区」 */
-  cwd?: string;
+  running: boolean;
+  completed: boolean;
+  /** 正在运行的子代理数（>0 时显示「N 个子代理运行中」） */
+  runningSubagentCount: number;
+  /** 相对时间的基准（epoch ms）；宿主不可用时缺省，缺省则不显示时间 */
+  updatedAt?: number;
+  /** 阻断该会话的用户交互：approval / plan-review / question */
+  pendingInteraction?: string;
 }
 
-type SessionTreeReader = () => ShareSessionRow[];
+/** 会话树的一个工作区分组；不属于任何工作区的会话归入 key 为空串的「未分组」 */
+export interface ShareWorkspaceGroup {
+  key: string;
+  /** 分组标题：工作区标题（未分组时为「未分组」） */
+  label: string;
+  /** 工作区绝对路径；未分组时缺省 */
+  cwd?: string;
+  sessions: ShareSessionNode[];
+}
+
+/** 会话树快照：分组顺序与分组内顺序都与宿主左侧会话栏一致 */
+export interface ShareSessionTree {
+  groups: ShareWorkspaceGroup[];
+  /** 宿主当前打开的会话 id */
+  current: string | null;
+}
+
+type SessionTreeReader = () => ShareSessionTree;
 
 let sessionTreeFn: SessionTreeReader | null = null;
 
@@ -2139,23 +2169,47 @@ export function bindSessionTree(fn: SessionTreeReader | null): void {
   sessionTreeFn = fn;
 }
 
+/** 路径最后一段（未分组回退用的工作区展示名，对齐宿主 workspaceLabel） */
+function pathBasename(path: string): string {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const separator = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return trimmed.slice(separator + 1) || path;
+}
+
 /**
- * 本机可分享的 DSH 会话：优先用宿主会话树（带标题、按工作区分组展示），
- * 宿主不可用时回退到 host 持久化列表（只有 id / cwd）。
+ * 本机可分享的会话树：优先用宿主会话栏同源的派生结果（工作区标题 / 运行状态 /
+ * 更新时间），宿主不可用时回退到 host 持久化列表（只有 id / cwd）。
  */
-export async function listShareableSessions(): Promise<ShareSessionRow[]> {
-  const tree = sessionTreeFn?.() ?? [];
-  if (tree.length > 0) return tree;
+export async function listShareableSessions(): Promise<ShareSessionTree> {
+  const tree = sessionTreeFn?.() ?? null;
+  if (tree && tree.groups.length > 0) return tree;
   try {
     const res = await hostSessions();
-    return res.sessions.map((s) => ({
-      id: s.id,
-      title: s.id,
-      ...(s.cwd ? { cwd: s.cwd } : {}),
-    }));
+    const groups = new Map<string, ShareWorkspaceGroup>();
+    for (const session of res.sessions) {
+      const key = session.cwd ?? "";
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          label: key.length > 0 ? pathBasename(key) : "未分组",
+          ...(key.length > 0 ? { cwd: key } : {}),
+          sessions: [],
+        };
+        groups.set(key, group);
+      }
+      group.sessions.push({
+        id: session.id,
+        title: session.id,
+        running: false,
+        completed: false,
+        runningSubagentCount: 0,
+      });
+    }
+    return { groups: [...groups.values()], current: getCurrentDshSession() };
   } catch (error) {
     notify(errorText(error));
-    return [];
+    return { groups: [], current: null };
   }
 }
 

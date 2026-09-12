@@ -14,7 +14,6 @@ import {
   IconShareOutline16,
   IconUserOutline16,
 } from "@deepseek-ai/dsh-client-ui-primitives";
-import type { ChannelOnlineMember } from "@dsh-talk/types/api";
 import { Permission } from "@dsh-talk/types/entities";
 import type { ChangeEvent, KeyboardEvent, ReactElement, UIEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -24,7 +23,6 @@ import {
   channelPermissions,
   clearMessageFocus,
   closeThread,
-  loadCommunityOnline,
   loadOlderMessages,
   type MemberLite,
   type MessageItem,
@@ -48,8 +46,9 @@ import {
   replyParts,
   textArea,
 } from "./homeStyles";
+import { MemberPanel } from "./MemberPanel";
 import { MessageRow, ReplyGlyph } from "./MessageRow";
-import { OnlineMembersModal, SearchMessagesModal } from "./SearchModals";
+import { SearchMessagesModal } from "./SearchModals";
 import { ShareSnapshotModal } from "./ShareModals";
 import { Avatar, palette, shadow, smallText } from "./styles";
 import { ThreadMembersModal, ThreadSettingsModal } from "./ThreadModals";
@@ -66,8 +65,6 @@ export function ChatPane({
   const channelId = talk.view.channelId;
   const community = talk.view.community;
   const channel = channelId ? (community?.channels.find((c) => c.id === channelId) ?? null) : null;
-  const communityOnline = talk.view.communityOnlineCount;
-  const memberCount = community?.memberCount ?? 0;
   const messageCount = talk.view.messages.length;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -78,9 +75,7 @@ export function ChatPane({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const MAX_ATTACH = 4;
   const [shareOpen, setShareOpen] = useState(false);
-  const [onlineOpen, setOnlineOpen] = useState(false);
-  const [onlineLoading, setOnlineLoading] = useState(false);
-  const [onlineMembers, setOnlineMembers] = useState<ChannelOnlineMember[]>([]);
+  const [membersOpen, setMembersOpen] = useState(false);
   // 输入框 / @ 提及自动补全 / 消息搜索
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerText, setComposerText] = useState("");
@@ -333,13 +328,24 @@ export function ChatPane({
     }
   }
 
-  async function openOnline(): Promise<void> {
-    setOnlineOpen(true);
-    setOnlineLoading(true);
-    // 社区口径：聚合社区各房间的在线成员（与左侧「在线 x/y」同源）
-    const list = await loadCommunityOnline();
-    setOnlineMembers(list);
-    setOnlineLoading(false);
+  /** 从右侧成员面板把 @handle 插入输入框（光标处已有 @token 时替换之） */
+  function insertMentionHandle(handle: string): void {
+    const el = composerRef.current;
+    const caret = el?.selectionStart ?? composerText.length;
+    const hit = mentionAtCaret(composerText, caret);
+    const start = hit ? hit.start : caret;
+    const next = `${composerText.slice(0, start)}@${handle} ${composerText.slice(caret)}`;
+    setComposerText(next);
+    setMentionActive(false);
+    setMentionQuery("");
+    mentionStartRef.current = -1;
+    const caretAfter = start + handle.length + 2;
+    if (el) {
+      window.requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(caretAfter, caretAfter);
+      });
+    }
   }
 
   const hasOlder = talk.view.nextCursor !== null;
@@ -496,18 +502,14 @@ export function ChatPane({
               flex: "0 0 auto",
             }}
           >
-            {talk.view.live ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<IconUserOutline16 />}
-                onClick={() => void openOnline()}
-                aria-label="在线成员"
-                title="社区在线成员"
-              >
-                {communityOnline}/{memberCount}
-              </Button>
-            ) : null}
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<IconUserOutline16 />}
+              onClick={() => setMembersOpen((v) => !v)}
+              aria-label="社区成员"
+              title="社区成员"
+            />
             <span
               style={{
                 display: "inline-flex",
@@ -844,6 +846,9 @@ export function ChatPane({
           </>
         )}
       </div>
+      {membersOpen ? (
+        <MemberPanel onMention={insertMentionHandle} onClose={() => setMembersOpen(false)} />
+      ) : null}
       <ShareSnapshotModal
         open={shareOpen}
         onClose={() => setShareOpen(false)}
@@ -865,14 +870,6 @@ export function ChatPane({
         </>
       ) : null}
       <SearchMessagesModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-      <OnlineMembersModal
-        open={onlineOpen}
-        onClose={() => setOnlineOpen(false)}
-        loading={onlineLoading}
-        members={onlineMembers}
-        online={communityOnline}
-        total={memberCount}
-      />
     </>
   );
 }

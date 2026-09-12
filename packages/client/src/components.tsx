@@ -114,7 +114,7 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
     return () => window.clearInterval(timer);
   }, [ready]);
 
-  // 社区在线人数：进入社区后拉一次，之后与站内信同节奏轮询（左侧与弹窗共用这一份数据）
+  // 社区在线态：进入社区后拉一次，之后与站内信同节奏轮询（右侧成员面板用这一份数据）
   const communityId = talk.view.communityId;
   useEffect(() => {
     if (!ready || communityId === null) return;

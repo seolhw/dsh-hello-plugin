@@ -157,6 +157,12 @@ const tokenA = await signup("chalice");
 const tokenB = await signup("chbob");
 const comm = await call("POST", "/api/communities", { name: "Channel DO Test", privacy: "public" }, tokenA);
 assert(comm.status === 201, "A 建社区");
+// 建社区时预置「管理员」角色：只带 ADMINISTRATOR 位（1 << 11），无需手动创建
+const rolesRes = await call("GET", `/api/communities/${comm.json.id}/roles`, undefined, tokenA);
+const adminRole = rolesRes.json?.items?.find((r) => r.name === "管理员");
+assert(adminRole !== undefined, "建社区时预置「管理员」角色");
+assert(adminRole?.permissions === 1 << 11, "预置管理员角色只带 ADMINISTRATOR 位");
+assert(adminRole?.isEveryone === false, "预置管理员角色不是 @everyone");
 const channelId = comm.json.channels.find((ch) => ch.name === "全员").id;
 await call("POST", `/api/communities/${comm.json.id}/join`, {}, tokenB);
 

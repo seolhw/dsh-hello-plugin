@@ -74,6 +74,7 @@ import {
   assertGrantablePermissions,
   assertMemberRolesEditable,
   assertOverwritePermissions,
+  createDefaultAdminRole,
   ensureEveryoneRole,
   getEveryoneRole,
   highestHeldPosition,
@@ -240,7 +241,7 @@ communitiesApi.get("/mine", async (c) => {
   return c.json(result);
 });
 
-// --- POST / —— 创建社区（含 @everyone 角色、默认频道、owner 成员、邀请码） ---
+// --- POST / —— 创建社区（含 @everyone + 预置管理员角色、默认频道、owner 成员、邀请码） ---
 communitiesApi.post("/", async (c) => {
   const db = dbOf(c);
   const userId = requireUserId(c);
@@ -290,6 +291,8 @@ communitiesApi.post("/", async (c) => {
   await db.insert(communityMembers).values({ communityId, userId, joinedAt: now });
   // @everyone 角色（默认 VIEW/SEND/CREATE_THREAD）
   const everyone = await ensureEveryoneRole(db, communityId, now);
+  // 预置「管理员」角色（仅 ADMINISTRATOR 位）：新手无需自己建，分配即成为管理员
+  await createDefaultAdminRole(db, communityId, now);
   // 默认频道：全员（文字讨论）+ 公告（所有人默认禁言，仅拥有 SEND_MESSAGES 的角色可发）
   const defaults = [
     { name: "全员", kind: "text" as const, position: 0 },

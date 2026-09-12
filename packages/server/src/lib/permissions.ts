@@ -4,6 +4,8 @@
 // 模型：
 //   - communities.ownerId 为 owner，恒定拥有全部权限（绕过一切判定，但转让/删社区之外仍需 owner）
 //   - 每个社区必有且仅有一个 @everyone 角色（isEveryone，隐式作用于全体成员，position 恒 0）
+//   - 建社区时预置一个「管理员」角色（仅 ADMINISTRATOR 位）：只是**预设**而非内置，
+//     可改名/可删除，也不会自动分配给任何人，需要 owner 手动分配
 //   - 成员可持有多个自定义角色（member_roles），基础权限 = 各角色 permissions 的并集
 //   - 角色带唯一 position（越大越靠上）；只能操作层级**严格低于**自己的角色/成员，
 //     也不能授予自己没有的权限位（见 assert* / planRoleReorder）
@@ -86,6 +88,33 @@ export async function ensureEveryoneRole(
     position: 0,
     permissions: DEFAULT_EVERYONE_PERMISSIONS,
     isEveryone: true,
+    createdAt: now,
+  };
+  await db.insert(communityRoles).values(row);
+  return row;
+}
+
+/** 预置管理员角色的名称（建社区时创建；改名后即不再是「默认管理员角色」） */
+export const DEFAULT_ADMIN_ROLE_NAME = "管理员";
+
+/**
+ * 建社区时预置管理员角色：permissions 只给 ADMINISTRATOR 位（解析时展开为全量
+ * 权限并忽略频道覆盖），position 固定 1（@everyone 恒 0）。
+ * 它只是预设：可改名、可删除，也不会自动分配给任何人。
+ */
+export async function createDefaultAdminRole(
+  db: Db,
+  communityId: string,
+  now: number,
+): Promise<CommunityRoleRow> {
+  const row: CommunityRoleRow = {
+    id: newId(),
+    communityId,
+    name: DEFAULT_ADMIN_ROLE_NAME,
+    color: null,
+    position: 1,
+    permissions: Permission.ADMINISTRATOR,
+    isEveryone: false,
     createdAt: now,
   };
   await db.insert(communityRoles).values(row);

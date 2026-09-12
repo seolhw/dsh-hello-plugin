@@ -66,6 +66,9 @@ export * from "./threads";
  *   PUT   /api/communities/:id/members/:userId/roles  SetMemberRolesRequest → SetMemberRolesResponse
  *   DELETE /api/communities/:id/members/:userId      —                 → RemoveMemberResponse
  *
+ *  社区在线（聚合各频道 + 活跃讨论组的 presence，按用户去重）
+ *   GET   /api/communities/:id/online         —                        → GetCommunityOnlineResponse
+ *
  *  封禁（成员被移出后阻止重新加入；BAN_MEMBERS）
  *   GET    /api/communities/:id/bans              —                            → ListCommunityBansResponse
  *   POST   /api/communities/:id/bans              BanCommunityMemberRequest    → BanCommunityMemberResponse

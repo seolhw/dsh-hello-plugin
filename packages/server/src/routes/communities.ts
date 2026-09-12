@@ -21,6 +21,7 @@ import type {
   CreateInviteRequest,
   CreateRoleRequest,
   DiscoverCommunitiesQuery,
+  GetCommunityOnlineResponse,
   GetMyCommunitiesResponse,
   ListMembersQuery,
   ReorderRolesRequest,
@@ -90,7 +91,11 @@ import {
   resolveChannelPermissions,
   resolveCommunityPermissions,
 } from "../lib/permissions";
-import { notifyCommunityAccessChanged, notifyRoomsAccessChanged } from "../lib/realtime";
+import {
+  loadCommunityOnline,
+  notifyCommunityAccessChanged,
+  notifyRoomsAccessChanged,
+} from "../lib/realtime";
 import {
   type AppCtx,
   emptyOk,
@@ -899,6 +904,29 @@ communitiesApi.get("/:id/members", async (c) => {
     roleIds: roleIdsByMember.get(e.member.userId) ?? [],
   }));
   return c.json({ items, total, offset, limit });
+});
+
+// --- GET /:id/online —— 社区在线成员（聚合各频道 + 活跃讨论组的 DO presence，按用户去重） ---
+communitiesApi.get("/:id/online", async (c) => {
+  const db = dbOf(c);
+  const userId = requireUserId(c);
+  const communityId = c.req.param("id");
+  await requireMember(db, communityId, userId);
+
+  // 只聚合「当前可能有人待着」的房间：全部频道 + 未归档讨论组（归档组无人发言不会有连接）
+  const [channelRows, threadRows] = await Promise.all([
+    db.select({ id: channels.id }).from(channels).where(eq(channels.communityId, communityId)),
+    db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.communityId, communityId), eq(threads.status, "active"))),
+  ]);
+  const members = await loadCommunityOnline(
+    c.env,
+    [...channelRows, ...threadRows].map((row) => row.id),
+  );
+  const body: GetCommunityOnlineResponse = { count: members.length, members };
+  return c.json(body);
 });
 
 // --- PUT /:id/members/:userId/roles —— 设置成员角色（MANAGE_ROLES，受层级限制） ---

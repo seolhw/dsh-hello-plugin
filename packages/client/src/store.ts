@@ -33,6 +33,7 @@ import type {
 import {
   type ChannelOverwrite,
   type CommunityRole,
+  DEFAULT_ADMIN_ROLE_NAME,
   type ID,
   MESSAGE_RETRACT_MS,
   type Message,
@@ -93,8 +94,8 @@ export interface ViewState {
   sending: boolean;
   /** 当前频道 WS 是否 live */
   live: boolean;
-  /** WS hello 报告的当前频道在线连接数（近似展示，打开面板时再精确拉取） */
-  onlineCount: number;
+  /** 社区在线人数（聚合各房间去重，由 loadCommunityOnline 定期刷新） */
+  communityOnlineCount: number;
   /** 当前正在引用的消息（回复目标；位于 composer 上方提示条） */
   replyingTo: MessageItem | null;
   /** 跳转高亮目标：消息加载后滚动定位并短暂高亮，随后清除 */
@@ -143,7 +144,7 @@ const INITIAL_VIEW: ViewState = {
   loadingOlder: false,
   sending: false,
   live: false,
-  onlineCount: 0,
+  communityOnlineCount: 0,
   replyingTo: null,
   focusMessageId: null,
   members: [],
@@ -815,7 +816,7 @@ export async function openCommunity(communityId: string): Promise<void> {
     messages: [],
     nextCursor: null,
     live: false,
-    onlineCount: 0,
+    communityOnlineCount: 0,
     replyingTo: null,
     focusMessageId: null,
   });
@@ -963,7 +964,6 @@ export async function reloadCommunityDetail(): Promise<void> {
         messages: [],
         nextCursor: null,
         live: false,
-        onlineCount: 0,
       });
     }
   } catch (error) {
@@ -1031,6 +1031,47 @@ export async function listMembers(): Promise<ListMembersResponse["items"]> {
   } catch (error) {
     notify(errorText(error));
     return [];
+  }
+}
+
+/** 当前社区里带 ADMINISTRATOR 位的自定义角色（层级从高到低） */
+export function adminRoles(): CommunityRole[] {
+  return (state.view.community?.roles ?? [])
+    .filter((r) => !r.isEveryone && (r.permissions & Permission.ADMINISTRATOR) !== 0)
+    .sort((a, b) => b.position - a.position);
+}
+
+/**
+ * 「设为管理员」会分配的角色：优先预置名「管理员」，其次层级最高的那个；
+ * 社区里还没有任何带 ADMINISTRATOR 位的角色时返回 null（由 ensureAdminRole 新建）。
+ */
+export function adminRole(): CommunityRole | null {
+  const admins = adminRoles();
+  return admins.find((r) => r.name === DEFAULT_ADMIN_ROLE_NAME) ?? admins[0] ?? null;
+}
+
+/**
+ * 取当前社区「管理员」角色 id；社区里没有带 ADMINISTRATOR 位的角色时，
+ * 按预置规格（名称 + 仅 ADMINISTRATOR 位）新建一个。仅供「设为管理员」快捷入口使用，
+ * 权限与层级仍由服务端裁决。
+ */
+export async function ensureAdminRole(): Promise<ID | null> {
+  const existing = adminRole();
+  if (existing !== null) return existing.id;
+  const server = serverOf();
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return null;
+  try {
+    await server.createRole(communityId, {
+      name: DEFAULT_ADMIN_ROLE_NAME,
+      permissions: Permission.ADMINISTRATOR,
+    });
+    notify(`已创建「${DEFAULT_ADMIN_ROLE_NAME}」角色`);
+    await reloadCommunityDetail();
+    return adminRole()?.id ?? null;
+  } catch (error) {
+    notify(errorText(error));
+    return null;
   }
 }
 
@@ -1635,7 +1676,7 @@ function connectChannel(roomId: string): void {
 function handleServerFrame(frame: ServerFrame): void {
   const roomId = roomIdOf();
   if (frame.type === "evt.hello") {
-    patchView({ live: true, onlineCount: frame.payload.onlineCount });
+    patchView({ live: true });
     socket?.startHeartbeat(frame.payload.heartbeatIntervalSec);
     pushPresence();
     return;
@@ -1714,7 +1755,6 @@ export async function selectChannel(channelId: string): Promise<void> {
     messagesLoading: true,
     loadingOlder: false,
     live: false,
-    onlineCount: 0,
     replyingTo: null,
     focusMessageId: null,
   });
@@ -1768,7 +1808,6 @@ export async function openThread(thread: { id: string; channelId: string }): Pro
     messagesLoading: true,
     loadingOlder: false,
     live: false,
-    onlineCount: 0,
     replyingTo: null,
     focusMessageId: null,
   });
@@ -1802,13 +1841,17 @@ export async function closeThread(): Promise<void> {
   if (channelId) await selectChannel(channelId);
 }
 
-/** 拉取当前房间在线成员（讨论组房间暂不做 REST 拉取，仅主频道可用） */
-export async function fetchChannelOnline(): Promise<ChannelOnlineMember[]> {
+/**
+ * 拉取社区在线快照：人数写入 view（左侧 / 弹窗共用），成员列表返回给调用方。
+ * 失败静默（保持上一次的人数），不影响聊天。
+ */
+export async function loadCommunityOnline(): Promise<ChannelOnlineMember[]> {
   const server = serverOf();
-  const channelId = state.view.channelId;
-  if (!server || !channelId || state.view.threadId) return [];
+  const communityId = state.view.communityId;
+  if (!server || !communityId) return [];
   try {
-    const res = await server.channelOnline(channelId);
+    const res = await server.communityOnline(communityId);
+    patchView({ communityOnlineCount: res.count });
     return res.members;
   } catch {
     return [];

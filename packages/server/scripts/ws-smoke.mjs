@@ -173,6 +173,15 @@ assert(hello.payload.channelId === channelId, "hello 携带 channelId");
 assert(hello.payload.user.handle.startsWith("chalice"), "hello 携带身份");
 assert(typeof hello.payload.onlineCount === "number", "hello 带在线数");
 
+// 社区在线接口：聚合社区各房间的在线名单并按用户去重（此刻只有 A 一条长连接）
+const onlineRes = await call("GET", `/api/communities/${comm.json.id}/online`, undefined, tokenA);
+assert(onlineRes.status === 200, "社区在线接口 200");
+assert(onlineRes.json?.count === 1, "社区在线人数 = 1（仅 A 保持连接）");
+assert(
+  onlineRes.json?.members?.[0]?.handle.startsWith("chalice"),
+  "社区在线成员里含 A",
+);
+
 // B 发 @chalice 消息 -> A 的频道 DO 扇出 evt.message.new 且 mentionMe=true
 const newP = waitFrame(ws, (f) => f.type === "evt.message.new");
 const post = await call(
@@ -398,6 +407,13 @@ assert(gone.status === 404, "分享随消息一并删除（404）");
 const outsider = await signup("chout");
 await expectWsRejected(outsider, channelId);
 console.log("ok: 非成员直连频道被拒");
+const outsiderOnline = await call(
+  "GET",
+  `/api/communities/${comm.json.id}/online`,
+  undefined,
+  outsider,
+);
+assert(outsiderOnline.status === 403, "非成员读社区在线被拒（403）");
 
 // —— 权限：公告频道只有 owner/admin 能发 ——
 const annId = comm.json.channels.find((ch) => ch.kind === "announcement")?.id;
@@ -416,6 +432,29 @@ const ownerAnnounce = await call(
   tokenA,
 );
 assert(ownerAnnounce.status === 201, "owner 发公告成功");
+
+// 把预置的「管理员」角色分配给 B -> ADMINISTRATOR 绕过 @everyone 的覆盖，B 也能发公告
+const memberList = await call("GET", `/api/communities/${comm.json.id}/members`, undefined, tokenA);
+const bob = memberList.json?.items?.find((m) => m.user.handle.startsWith("chbob"));
+assert(bob !== undefined, "成员列表里能找到 B");
+const assignAdmin = await call(
+  "PUT",
+  `/api/communities/${comm.json.id}/members/${bob.user.id}/roles`,
+  { roleIds: [adminRole.id] },
+  tokenA,
+);
+assert(assignAdmin.status === 200, "A 把「管理员」角色分配给 B");
+assert(
+  (assignAdmin.json?.roleIds ?? []).includes(adminRole.id),
+  "B 的角色里含预置管理员角色",
+);
+const adminAnnounce = await call(
+  "POST",
+  `/api/channels/${annId}/messages`,
+  { content: "admin announcement" },
+  tokenB,
+);
+assert(adminAnnounce.status === 201, "管理员 B 绕过 @everyone 覆盖、发公告成功");
 
 // —— 权限：只有 owner 能删除社区（级联清频道/消息/成员） ——
 const delByMember = await call("DELETE", `/api/communities/${comm.json.id}`, undefined, tokenB);

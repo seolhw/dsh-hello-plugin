@@ -15,6 +15,7 @@ import {
   activateTalk,
   deactivateTalk,
   dismissToast,
+  loadCommunityOnline,
   refresh,
   refreshInboxUnread,
   setCurrentDshSession,
@@ -111,6 +112,15 @@ export function TalkPage(props: { sessionId?: string }): ReactElement {
     const timer = window.setInterval(() => void refreshInboxUnread(), 30000);
     return () => window.clearInterval(timer);
   }, [ready]);
+
+  // 社区在线人数：进入社区后拉一次，之后与站内信同节奏轮询（左侧与弹窗共用这一份数据）
+  const communityId = talk.view.communityId;
+  useEffect(() => {
+    if (!ready || communityId === null) return;
+    void loadCommunityOnline();
+    const timer = window.setInterval(() => void loadCommunityOnline(), 30000);
+    return () => window.clearInterval(timer);
+  }, [ready, communityId]);
 
   let body: ReactElement;
   if (talk.phase === "error") {

@@ -11,6 +11,7 @@ import type {
   User,
 } from "../entities";
 import type { OffsetPaginated, OffsetPaginationQuery } from "./common";
+import type { ChannelOnlineMember } from "./messages";
 import type { ThreadSummary } from "./threads";
 
 // ===============================================================
@@ -215,6 +216,14 @@ export type SetMemberRolesResponse = CommunityMemberItem;
 
 /** DELETE /api/communities/:id/members/:userId —— 踢人（KICK_MEMBERS，不能踢 owner） */
 export type RemoveMemberResponse = { ok: true };
+
+// ------- 在线（社区级：聚合各频道 + 活跃讨论组，按用户去重） ------------------
+
+/** GET /api/communities/:id/online —— 社区当前在线成员（读各房间 DO 的 presence 快照） */
+export type GetCommunityOnlineResponse = {
+  count: number;
+  members: ChannelOnlineMember[];
+};
 
 // ------- 封禁（成员被移出后阻止重新加入；BAN_MEMBERS） --------------------
 

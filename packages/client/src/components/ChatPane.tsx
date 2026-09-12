@@ -24,7 +24,7 @@ import {
   channelPermissions,
   clearMessageFocus,
   closeThread,
-  fetchChannelOnline,
+  loadCommunityOnline,
   loadOlderMessages,
   type MemberLite,
   type MessageItem,
@@ -66,6 +66,8 @@ export function ChatPane({
   const channelId = talk.view.channelId;
   const community = talk.view.community;
   const channel = channelId ? (community?.channels.find((c) => c.id === channelId) ?? null) : null;
+  const communityOnline = talk.view.communityOnlineCount;
+  const memberCount = community?.memberCount ?? 0;
   const messageCount = talk.view.messages.length;
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -334,7 +336,8 @@ export function ChatPane({
   async function openOnline(): Promise<void> {
     setOnlineOpen(true);
     setOnlineLoading(true);
-    const list = await fetchChannelOnline();
+    // 社区口径：聚合社区各房间的在线成员（与左侧「在线 x/y」同源）
+    const list = await loadCommunityOnline();
     setOnlineMembers(list);
     setOnlineLoading(false);
   }
@@ -493,16 +496,16 @@ export function ChatPane({
               flex: "0 0 auto",
             }}
           >
-            {talk.view.live && !isThread ? (
+            {talk.view.live ? (
               <Button
                 size="sm"
                 variant="ghost"
                 icon={<IconUserOutline16 />}
                 onClick={() => void openOnline()}
                 aria-label="在线成员"
-                title="当前房间在线成员"
+                title="社区在线成员"
               >
-                {talk.view.onlineCount}
+                {communityOnline}/{memberCount}
               </Button>
             ) : null}
             <span
@@ -867,6 +870,8 @@ export function ChatPane({
         onClose={() => setOnlineOpen(false)}
         loading={onlineLoading}
         members={onlineMembers}
+        online={communityOnline}
+        total={memberCount}
       />
     </>
   );

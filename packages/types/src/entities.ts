@@ -134,6 +134,12 @@ export const ALL_PERMISSIONS: PermissionFlags =
 export const DEFAULT_EVERYONE_PERMISSIONS: PermissionFlags =
   Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES | Permission.CREATE_THREAD;
 
+/**
+ * 建社区时预置的「管理员」角色名（权限位只有 ADMINISTRATOR）。
+ * 只是预设：可改名、可删除、不会自动分配给任何人。
+ */
+export const DEFAULT_ADMIN_ROLE_NAME = "管理员";
+
 /** 权限位作用域：community = 只能挂在角色上；channel = 也可作为频道覆盖目标 */
 export type PermissionScope = "community" | "channel";
 

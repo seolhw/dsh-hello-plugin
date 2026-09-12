@@ -35,7 +35,7 @@ import type {
   DeleteRoleResponse,
   DiscoverCommunitiesQuery,
   DiscoverCommunitiesResponse,
-  GetChannelOnlineResponse,
+  GetCommunityOnlineResponse,
   GetCommunityResponse,
   GetMyCommunitiesResponse,
   GetReadStateResponse,
@@ -761,11 +761,11 @@ export class ServerClient {
     );
   }
 
-  /** GET /api/channels/:id/online —— 该频道当前在线成员（读 DO presence 快照） */
-  channelOnline(channelId: string): Promise<GetChannelOnlineResponse> {
-    return this.call<GetChannelOnlineResponse>(
+  /** GET /api/communities/:id/online —— 社区当前在线成员（聚合各房间后按用户去重） */
+  communityOnline(communityId: string): Promise<GetCommunityOnlineResponse> {
+    return this.call<GetCommunityOnlineResponse>(
       "GET",
-      `/api/channels/${channelId}/online`,
+      `/api/communities/${communityId}/online`,
       undefined,
       true,
     );

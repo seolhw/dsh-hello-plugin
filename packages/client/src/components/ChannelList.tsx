@@ -25,6 +25,7 @@ export function ChannelList({
   const talk = useTalkState();
   const community = talk.view.community;
   const activeChannel = talk.view.channelId;
+  const communityOnline = talk.view.communityOnlineCount;
   if (!community) return null;
   return (
     <div style={midCol}>
@@ -58,6 +59,21 @@ export function ChannelList({
           {community.name}
         </span>
         <CommunityTools />
+      </div>
+      {/* 社区人数：在线（聚合去重，30s 轮询）/ 成员总数 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 12px 6px" }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            flex: "0 0 auto",
+            borderRadius: "50%",
+            background: communityOnline > 0 ? palette.success : palette.muted,
+          }}
+        />
+        <span style={{ fontSize: 13, color: palette.muted }}>
+          在线 {communityOnline}/{community.memberCount}
+        </span>
       </div>
       <div style={{ ...railScroll, flex: 1, padding: "0 8px 8px" }}>
         <div style={sectionTitle}>频道</div>

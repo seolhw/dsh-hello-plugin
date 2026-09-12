@@ -25,6 +25,7 @@ import type { ChannelAccess } from "@dsh-talk/types/api";
 import {
   ALL_PERMISSIONS,
   CHANNEL_OVERWRITE_PERMISSIONS,
+  DEFAULT_ADMIN_ROLE_NAME,
   DEFAULT_EVERYONE_PERMISSIONS,
   Permission,
   type PermissionFlags,
@@ -93,9 +94,6 @@ export async function ensureEveryoneRole(
   await db.insert(communityRoles).values(row);
   return row;
 }
-
-/** 预置管理员角色的名称（建社区时创建；改名后即不再是「默认管理员角色」） */
-export const DEFAULT_ADMIN_ROLE_NAME = "管理员";
 
 /**
  * 建社区时预置管理员角色：permissions 只给 ADMINISTRATOR 位（解析时展开为全量

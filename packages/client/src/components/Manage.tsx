@@ -38,6 +38,8 @@ import {
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 import {
+  adminRole,
+  adminRoles,
   banUser,
   canBanMembers,
   canInviteMembers,
@@ -52,6 +54,7 @@ import {
   deleteChannelOverwrite,
   deleteCommunity,
   deleteRole,
+  ensureAdminRole,
   highestPositionOf,
   inviteMember,
   isMember,
@@ -235,7 +238,7 @@ function InviteDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </Button>
         </div>
         <span style={dialogHint}>
-          邀请码在创建社区时生成、固定不变，不会过期；请妥善保存，所有成员均可查看。
+          邀请码在创建社区时生成、固定不变，不会过期；
         </span>
       </div>
     </Modal>
@@ -475,6 +478,14 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const canRoles = canManageRoles();
   const canKick = canKickMembers();
   const canBan = canBanMembers();
+  const communityOnline = talk.view.communityOnlineCount;
+  // 「设为管理员」快捷入口：分配带 ADMINISTRATOR 位的角色（没有则先建「管理员」）。
+  // 已持有任一管理员角色的成员不再显示；目标角色层级必须严格低于自己（与分配弹窗同规则）。
+  const adminRoleList = adminRoles();
+  const adminRoleIds = new Set(adminRoleList.map((r) => r.id));
+  const quickTarget = adminRole();
+  const canQuickAdmin =
+    canRoles && (quickTarget === null || canManageRolePosition(quickTarget.position));
 
   useEffect(() => {
     if (!open) return;
@@ -501,6 +512,19 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
   async function transfer(user: User): Promise<void> {
     if (!window.confirm(`把社区所有权转让给 @${user.handle}？转让后你将失去所有者权限。`)) return;
     await transferOwner(user.id);
+  }
+
+  /** 一键把成员设为管理员：分配带 ADMINISTRATOR 位的角色（没有则先建「管理员」） */
+  async function makeAdmin(row: MemberRow): Promise<void> {
+    const roleId = await ensureAdminRole();
+    if (roleId === null) return;
+    const next = row.roleIds.includes(roleId) ? row.roleIds : [...row.roleIds, roleId];
+    const ok = await setMemberRoles(row.user.id, next);
+    if (ok) {
+      setMembers((prev) =>
+        prev.map((m) => (m.user.id === row.user.id ? { ...m, roleIds: next } : m)),
+      );
+    }
   }
 
   async function kick(user: User): Promise<void> {
@@ -532,6 +556,21 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
 
   return (
     <Modal open={open} onClose={onClose} title="成员管理" closeLabel="关闭">
+      {/* 社区在线人数 / 成员总数（与左侧频道列表同源，30s 轮询） */}
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            flex: "0 0 auto",
+            borderRadius: "50%",
+            background: communityOnline > 0 ? palette.success : palette.muted,
+          }}
+        />
+        <span style={{ fontSize: 14, color: palette.text }}>
+          在线 {communityOnline} / 共 {community?.memberCount ?? 0} 名成员
+        </span>
+      </span>
       {loading ? (
         <div style={{ ...smallText, padding: "12px 4px" }}>加载成员…</div>
       ) : members.length === 0 ? (
@@ -600,6 +639,16 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 ) : null}
                 {rowCanManage ? (
                   <span style={{ display: "flex", gap: 2 }}>
+                    {canQuickAdmin && !m.roleIds.some((id) => adminRoleIds.has(id)) ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void makeAdmin(m)}
+                        aria-label={`设为管理员 ${m.user.handle}`}
+                      >
+                        设为管理员
+                      </Button>
+                    ) : null}
                     {rowCanRoles ? (
                       <Button size="sm" variant="ghost" onClick={() => setAssigning(m)}>
                         角色

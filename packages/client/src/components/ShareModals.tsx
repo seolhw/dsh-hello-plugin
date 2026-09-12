@@ -136,7 +136,7 @@ export function ShareSnapshotModal({
                     style={{
                       fontSize: 14,
                       fontWeight: 650,
-                      color: palette.caption,
+                      color: palette.muted,
                       letterSpacing: "0.04em",
                     }}
                   >

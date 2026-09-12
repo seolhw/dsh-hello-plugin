@@ -174,7 +174,7 @@ function reactionChipStyle(mine: boolean): CSSProperties {
     cursor: "pointer",
     border: `1px solid ${mine ? palette.accent : palette.border}`,
     background: mine ? palette.hoverAccent : palette.inputBg,
-    color: mine ? palette.accent : palette.secondary,
+    color: mine ? palette.accent : palette.muted,
   };
 }
 
@@ -291,7 +291,7 @@ export function MessageRow({
               padding: "1px 0",
               margin: "0 0 2px",
               cursor: "pointer",
-              color: palette.caption,
+              color: palette.muted,
               fontSize: 14,
               textAlign: "left",
               overflow: "hidden",

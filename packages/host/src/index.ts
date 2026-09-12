@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk host（Node.js）
+// DSH-Talk host（Node.js）
 //  1. 注册 `talk` 配置命名空间（ctx.settings）：serverUrl / handle / token …
 //  2. 挂本地接口 GET|POST /api/talk/config，供浏览器端（client）同源调用
 //     语义与 @dsh-talk/types/rpc 的 TalkSettings 一致（GET 读 / POST patch）

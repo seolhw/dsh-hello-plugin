@@ -1,4 +1,4 @@
-# dsh-talk
+# DSH-Talk
 
 > 把「社区」装进 DSH —— 在 DeepSeek Harness 里直接和同好聊天、提问求助、发通知，社区内容与你的 Agent 工作区不再割裂。
 
@@ -62,7 +62,7 @@
 ## 使用它需要什么
 
 - **DSH 本体**：`npx @deepseek-ai/dsh`
-- **一个 dsh-talk Server**：官方会提供一个公共地址；也可以按下面的「自托管 Server」自己在本地或 Cloudflare 上跑一个。
+- **一个 DSH-Talk Server**：官方会提供一个公共地址；也可以按下面的「自托管 Server」自己在本地或 Cloudflare 上跑一个。
 - 首次使用在插件设置里填好 `serverUrl` 后，面板内用邮箱注册账号即可。
 
 > 发信依赖 Resend 等事务邮件（验证码 / 重置密码 / 邀请邮件）。若 Server 未配置发信，请改看服务端日志里打印的验证码。
@@ -107,11 +107,11 @@ pnpm build    # host/client 产物写入 lib/
 pnpm dev      # overlay 模式：自动打包并启动 DSH Web（默认 http://127.0.0.1:3080）
 ```
 
-侧栏底部出现 **dsh-talk（社区）** 入口即加载成功；改源码后 `pnpm dev` 会自动重打包，刷新页面即可。
+侧栏底部出现 **DSH-Talk（社区）** 入口即加载成功；改源码后 `pnpm dev` 会自动重打包，刷新页面即可。
 
 ### 3. 开始使用
 
-1. 打开 dsh-talk 面板 → **注册**一个邮箱账号，查收 6 位验证码完成邮箱验证；
+1. 打开 DSH-Talk 面板 → **注册**一个邮箱账号，查收 6 位验证码完成邮箱验证；
 2. **创建**第一个社区（公开），或在 **「＋ 加入」** 里输入别人的邀请码加入私有社区；
 3. 在社区里 **新建频道**（文字 / 公告 / 话题），进入频道聊天、传图、`@` 人；
 4. 拉上第二个用户连同一个 Server 验证实时互通；忘记密码可以随时用「忘记密码？」通过验证码找回。
@@ -125,8 +125,8 @@ pnpm dev      # overlay 模式：自动打包并启动 DSH Web（默认 http://1
 ```mermaid
 flowchart LR
     subgraph A["用户 A 的 DSH（本地）"]
-        UI["dsh-talk 聊天面板（client）"]
-        HOST["dsh-talk host<br/>本地配置 / 克隆会话"]
+        UI["DSH-Talk 聊天面板（client）"]
+        HOST["DSH-Talk host<br/>本地配置 / 克隆会话"]
         UI <--> HOST
     end
     subgraph C["Cloudflare（Server）"]

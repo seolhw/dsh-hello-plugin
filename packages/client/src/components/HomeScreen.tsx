@@ -55,12 +55,12 @@ export function HomeScreen(): ReactElement {
                 marginTop: 2,
               }}
             >
-              欢迎使用 dsh-talk 社区
+              欢迎使用 DSH-Talk 社区
             </div>
             <span style={{ ...smallText, fontSize: 14, lineHeight: 1.7 }}>
               从左侧选择一个社区开始聊天，
               <br />
-              点左栏「＋」发现公开社区、用邀请码加入，或创建一个新社区。
+              点左栏「＋」发现公开社区、用邀请码加入，或创建新社区。
               <br />
               请不要输入如 密码、银行卡、APIKEY 等敏感信息。
             </span>

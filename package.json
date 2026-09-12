@@ -2,7 +2,7 @@
   "name": "dsh-talk",
   "version": "0.0.1",
   "packageManager": "pnpm@12.3.4",
-  "description": "dsh-talk",
+  "description": "DSH-Talk",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
   "files": [

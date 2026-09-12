@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk 弹窗包装：沿用宿主 primitives 的 Modal 外观，但把遮罩与居中范围
+// DSH-Talk 弹窗包装：沿用宿主 primitives 的 Modal 外观，但把遮罩与居中范围
 // 限制在「社区」页签内容区内（不包含左侧 DSH 工作区）。
 //
 // 原因：primitives 的 Modal 通过 createPortal 挂到 document.body，其 root 为

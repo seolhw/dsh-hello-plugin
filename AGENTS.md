@@ -2,7 +2,7 @@
 
 ## 项目结构与模块划分
 
-本仓库是 dsh-talk 插件及其 Cloudflare 后端的 pnpm TypeScript 工作区。
+本仓库是 DSH-Talk 插件及其 Cloudflare 后端的 pnpm TypeScript 工作区。
 
 - `packages/types/src/`：共享实体、REST 接口契约、WebSocket 协议和 Host 本地接口类型；通过各层的 `index.ts` 导出公共类型。
 - `packages/host/src/`：注册 Host 侧配置与本地接口。

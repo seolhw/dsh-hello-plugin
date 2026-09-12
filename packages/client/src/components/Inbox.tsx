@@ -76,7 +76,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
         <div
           style={{
             fontSize: 14,
-            color: palette.secondary,
+            color: palette.muted,
             lineHeight: 1.5,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
@@ -110,7 +110,7 @@ function InboxRow({ item }: { item: InboxItem }): ReactElement {
       >
         {item.kind === "invite" ? (
           invite === null ? (
-            <span style={{ ...smallText, fontSize: 14, color: palette.muted }}>邀请已失效</span>
+            <span style={{ ...smallText, fontSize: 14 }}>邀请已失效</span>
           ) : invite.status === "pending" ? (
             <>
               <Button

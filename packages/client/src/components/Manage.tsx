@@ -127,7 +127,7 @@ const permissionSummary = (bits: PermissionFlags): string => {
 /** 弹窗说明文字 */
 const dialogHint: CSSProperties = {
   fontSize: 14,
-  color: palette.caption,
+  color: palette.muted,
   lineHeight: 1.6,
 };
 
@@ -640,7 +640,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
             style={{
               fontSize: 14,
               fontWeight: 650,
-              color: palette.caption,
+              color: palette.muted,
               letterSpacing: "0.06em",
               textTransform: "uppercase",
               padding: "2px 2px 0",
@@ -655,7 +655,7 @@ function MembersDialog({ open, onClose }: { open: boolean; onClose: () => void }
                 <div style={listCardName}>
                   @{b.user.handle}
                   {b.reason ? (
-                    <span style={{ color: palette.caption, fontSize: 14 }}> · {b.reason}</span>
+                    <span style={{ color: palette.muted, fontSize: 14 }}> · {b.reason}</span>
                   ) : null}
                 </div>
                 <div style={{ ...smallText, fontSize: 14 }}>封禁于 {timeLabel(b.createdAt)}</div>

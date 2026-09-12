@@ -173,7 +173,7 @@ export function SearchMessagesModal({
                     style={{
                       marginLeft: "auto",
                       fontSize: 14,
-                      color: palette.caption,
+                      color: palette.muted,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -187,7 +187,7 @@ export function SearchMessagesModal({
                     marginTop: 3,
                     fontSize: 14,
                     lineHeight: 1.5,
-                    color: palette.secondary,
+                    color: palette.muted,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -286,7 +286,7 @@ export function OnlineMembersModal({
                 <span
                   style={{ ...liveDot, background: presenceColor[m.presence], flex: "0 0 auto" }}
                 />
-                <span style={{ fontSize: 14, color: palette.secondary }}>
+                <span style={{ fontSize: 14, color: palette.muted }}>
                   {presenceLabel[m.presence]}
                 </span>
               </span>

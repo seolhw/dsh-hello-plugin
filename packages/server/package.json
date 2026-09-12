@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@12.3.4",
-  "description": "dsh-talk Cloudflare Server: Hono Worker + D1 + R2 + Durable Object",
+  "description": "DSH-Talk Cloudflare Server: Hono Worker + D1 + R2 + Durable Object",
   "type": "module",
   "scripts": {
     "predev": "node ./scripts/sync-dev-vars.mjs",

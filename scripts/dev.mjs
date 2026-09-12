@@ -1,5 +1,5 @@
 /**
- * dsh-talk 开发看门狗：pnpm dev 的唯一入口。
+ * DSH-Talk 开发看门狗：pnpm dev 的唯一入口。
  *
  * 同时负责两件事：
  *  1. 以 watch 模式跑 tsdown（源码变更 → 自动重打包 lib/）；

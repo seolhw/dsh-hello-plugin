@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk client UI store（极简 listener store + React hook）
+// DSH-Talk client UI store（极简 listener store + React hook）
 // 流程：打开面板 → host 取配置 → 有 token 则 get-session + 我的社区。
 // 主屏：社区列表 ↔ 社区详情（频道） ↔ 频道消息（REST 加载 + WS 实时）。
 // 认证：邮箱/用户名登录、注册。

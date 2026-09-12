@@ -78,7 +78,7 @@ export async function createCommunityInvite(args: {
     communityId: community.id,
     kind: "invite",
     title: `${actor.handle} 邀请你加入「${community.name}」`,
-    body: `${actor.handle} 邀请你加入 dsh-talk 社区「${community.name}」。`,
+    body: `${actor.handle} 邀请你加入 DSH-Talk 社区「${community.name}」。`,
     data: JSON.stringify(data),
     isRead: false,
     createdAt: now,

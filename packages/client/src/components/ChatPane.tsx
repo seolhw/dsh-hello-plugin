@@ -394,7 +394,7 @@ export function ChatPane({
                 : (channel?.name ?? "")}
             </div>
             {isThread ? (
-              <div style={{ ...smallText, fontSize: 14, color: palette.caption }}>
+              <div style={{ ...smallText, fontSize: 14 }}>
                 {isForumChannel ? "话题" : "讨论组"}
                 {currentThread?.status === "archived" ? "（已归档）" : ""} · 位于 #
                 {channel?.name ?? ""}
@@ -523,7 +523,7 @@ export function ChatPane({
                   boxShadow: talk.view.live ? `0 0 5px ${palette.success}` : undefined,
                 }}
               />
-              <span style={{ fontSize: 14, color: palette.secondary }}>
+              <span style={{ fontSize: 14, color: palette.muted }}>
                 {talk.view.live ? "实时" : "重连中…"}
               </span>
             </span>
@@ -659,7 +659,7 @@ export function ChatPane({
                             flex: 1,
                             minWidth: 0,
                             fontSize: 14,
-                            color: palette.secondary,
+                            color: palette.muted,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
@@ -782,7 +782,7 @@ export function ChatPane({
                               >
                                 {member.displayName ?? member.handle}
                               </span>
-                              <span style={{ fontSize: 14, color: palette.caption }}>
+                              <span style={{ fontSize: 14, color: palette.muted }}>
                                 @{member.handle}
                               </span>
                             </button>

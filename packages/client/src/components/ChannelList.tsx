@@ -157,7 +157,7 @@ function ThreadListRow({ thread, channelId }: { thread: ThreadSummary; channelId
       >
         <span
           style={{
-            color: opened ? palette.accent : palette.caption,
+            color: opened ? palette.accent : palette.muted,
             display: "inline-flex",
             flex: "0 0 auto",
           }}
@@ -169,7 +169,7 @@ function ThreadListRow({ thread, channelId }: { thread: ThreadSummary; channelId
             flex: 1,
             minWidth: 0,
             fontSize: 14,
-            color: thread.status === "archived" ? palette.muted : palette.secondary,
+            color: thread.status === "archived" ? palette.muted : palette.muted,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -236,7 +236,7 @@ export function ChannelThreadsOf({ channelId }: { channelId: string }): ReactEle
             background: "transparent",
             padding: "3px 8px",
             fontSize: 14,
-            color: palette.caption,
+            color: palette.muted,
             cursor: "pointer",
             textAlign: "left",
           }}

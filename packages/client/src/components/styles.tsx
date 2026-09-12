@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk 页面共享样式：全部使用 DeepSeek 宿主注入的 --dsw-* token，
+// DSH-Talk 页面共享样式：全部使用 DeepSeek 宿主注入的 --dsw-* token，
 // 随系统亮/暗主题自动切换（宿主把 "system" 解析成实际 colorScheme 后，
 // 通过 body 内联变量 + body[data-ds-dark-theme] 下发）。插件侧禁止硬编码色值。
 // 参考：dsh-client-ui-theme 的 design-platform.css token 命名。
@@ -9,39 +9,31 @@ import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 
-/** 语义色 token（明暗随宿主翻转）。按键名保留旧 palette 兼容存量引用 */
+/** 语义色 token（明暗随宿主翻转）。组件只引用这里的键，不得写字面色值 */
 export const palette = {
   // 表面
   page: "var(--dsw-alias-bg-base)",
   panel: "var(--dsw-alias-bg-layer-1)",
   layer2: "var(--dsw-alias-bg-layer-2)",
-  layer3: "var(--dsw-alias-bg-layer-3)",
   rail: "var(--dsw-specific-sidebar-fill)",
   elevated: "var(--dsw-alias-bg-overlay)",
-  mask: "var(--dsw-alias-bg-mask-1)",
-  skeleton: "var(--dsw-alias-bg-skeleton)",
   // 边框
   border: "var(--dsw-alias-border-l1)",
-  border2: "var(--dsw-alias-border-l2)",
-  border3: "var(--dsw-alias-border-l3)",
-  border4: "var(--dsw-alias-border-l4)",
-  // 文字（灰度三档走 --dsht-label-* 变量层：暗色主题下宿主 token 偏暗，
-  // 由 components.tsx 的 DARK_TEXT_CSS 在插件内提亮；未定义时回退宿主 token）
+  // 文字：只有正文与辅助两档。所有说明、提示、时间戳、占位统一用 muted，
+  // 不再按“次要程度”细分（同类场景必须落到同一个色）。
+  // muted 走 --dsht-label-* 变量层：暗色主题下宿主 token 偏暗，
+  // 由 components.tsx 的 DARK_TEXT_CSS 在插件内提亮；未定义时回退宿主 token。
   text: "var(--dsw-alias-label-primary)",
-  secondary: "var(--dsht-label-secondary, var(--dsw-alias-label-secondary))",
   muted: "var(--dsht-label-tertiary, var(--dsw-alias-label-tertiary))",
-  caption: "var(--dsht-label-caption, var(--dsw-alias-label-caption))",
   // 品牌 / 状态
   accent: "var(--dsw-alias-state-business-primary)",
   danger: "var(--dsw-alias-state-error-primary)",
   dangerSoft: "var(--dsw-alias-state-error-secondary)",
   success: "var(--dsw-alias-state-success-primary)",
   warn: "var(--dsw-alias-state-warn-primary)",
-  warnLabel: "var(--dsw-alias-state-warn-label)",
   // 交互
   inputBg: "var(--dsw-alias-interactive-bg-hover-solid)",
   hover: "var(--dsw-alias-interactive-bg-hover)",
-  active: "var(--dsw-alias-interactive-bg-active)",
   // 徽标：提及用品牌色，普通未读用文字弱化层
   badge: "var(--dsw-alias-state-error-primary)",
   hoverAccent: "var(--dsw-alias-interactive-bg-hover-accent)",
@@ -174,7 +166,7 @@ export function BrandLogo({ size = 34, title }: { size?: number; title?: string 
   return (
     <span
       role="img"
-      aria-label={title ?? "dsh-talk"}
+      aria-label={title ?? "DSH-Talk"}
       title={title}
       style={{
         width: size,

@@ -40,7 +40,7 @@ export const railAction: CSSProperties = {
   borderRadius: 12,
   border: "none",
   background: "transparent",
-  color: palette.secondary,
+  color: palette.muted,
   cursor: "pointer",
   flex: "0 0 auto",
 };
@@ -164,11 +164,11 @@ export const msgChip: CSSProperties = {
  * 平时整行无底色，hover 淡显；操作条默认隐藏，hover / 键盘聚焦到行内时显示。
  */
 export const messageRowCss = `
-  .dsht-msg-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
-  .dsht-msg-row.is-mentioned { background: var(--dsw-alias-state-business-tertiary); }
+  .dsht-msg-row:hover { background: ${palette.hover}; }
+  .dsht-msg-row.is-mentioned { background: ${palette.mentionBg}; }
   .dsht-msg-row.is-focus { animation: dsht-focus-fade 1.8s ease-out forwards; }
   @keyframes dsht-focus-fade {
-    from { background-color: var(--dsw-alias-state-business-tertiary); }
+    from { background-color: ${palette.mentionBg}; }
     to { background-color: transparent; }
   }
   .dsht-msg-row .dsht-msg-actions { opacity: 0; pointer-events: none; }
@@ -264,7 +264,7 @@ export const emptyCard: CSSProperties = {
 export const sectionTitle: CSSProperties = {
   fontSize: 14,
   fontWeight: 650,
-  color: palette.caption,
+  color: palette.muted,
   letterSpacing: "0.06em",
   textTransform: "uppercase",
   padding: "4px 8px 2px",

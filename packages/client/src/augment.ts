@@ -11,7 +11,7 @@ import type {
 } from "@deepseek-ai/dsh-client-ui-sidebar/client";
 
 /**
- * dsh-talk 注册进官方会话页签环（`conversation.view`）时的槽位声明。
+ * DSH-Talk 注册进官方会话页签环（`conversation.view`）时的槽位声明。
  * 官方 rc.6 契约（@deepseek-ai/dsh-client-ui-conversation/client）：
  *   kind: 'list'; scope: 'session'；owner 为空（宿主不注入内容）；
  *   页签文字取自注册 options.label，正文整页由注册组件自绘。

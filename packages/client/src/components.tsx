@@ -1,5 +1,5 @@
 // ================================================================
-// dsh-talk client UI：会话「社区」页签页（整页，非弹窗）
+// DSH-Talk client UI：会话「社区」页签页（整页，非弹窗）
 // 认证态 → AuthScreen；已登录 → HomeScreen（社区/频道/消息 + 实时）
 // 顶层不再自绘浮层外壳 —— 视觉 chrome（会话标题/页签/操作行）由
 // DSH 宿主头部承担，本组件只负责整页内容与身份门禁。
@@ -31,7 +31,7 @@ function Centered({ children }: { children: ReactElement }): ReactElement {
 }
 
 function LoadingView(): ReactElement {
-  return <div style={{ color: palette.muted, fontSize: 14 }}>正在连接 dsh-talk Server…</div>;
+  return <div style={{ color: palette.muted, fontSize: 14 }}>正在连接 DSH-Talk Server…</div>;
 }
 
 function ErrorView(): ReactElement {
@@ -59,15 +59,12 @@ const PAGE_HOST_CSS = `
 /**
  * 暗色主题下的灰度文字提亮（宿主 token 在深色底上偏暗，小字难以辨认）：
  * 宿主主题由 `body[data-ds-dark-theme]` 切换，这里只覆盖本插件自己的
- * --dsht-label-* 变量层（palette.secondary/muted/caption 引用它们），
- * 不动宿主 token，因此不会影响 DSH 其他界面。
- * 三档各提亮一档（200/300/400）并保持层级：secondary > muted > caption。
+ * --dsht-label-* 变量层（palette.muted 引用它），不动宿主 token，
+ * 因此不会影响 DSH 其他界面。插件只保留一档辅助灰，暗色下提亮到 bluish-300。
  */
 const DARK_TEXT_CSS = `
 body[data-ds-dark-theme] {
-  --dsht-label-secondary: var(--dsw-static-neutral-bluish-200);
   --dsht-label-tertiary: var(--dsw-static-neutral-bluish-300);
-  --dsht-label-caption: var(--dsw-static-neutral-bluish-400);
 }
 `;
 

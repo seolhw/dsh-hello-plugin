@@ -34,7 +34,7 @@ const card: CSSProperties = {
   gap: 16,
 };
 
-const fieldHint: CSSProperties = { fontSize: 14, color: palette.caption };
+const fieldHint: CSSProperties = { fontSize: 14, color: palette.muted };
 
 const errorBanner: CSSProperties = {
   display: "flex",
@@ -61,7 +61,7 @@ const linkButton: CSSProperties = {
 
 const linkButtonDisabled: CSSProperties = {
   ...linkButton,
-  color: palette.caption,
+  color: palette.muted,
   cursor: "default",
 };
 
@@ -74,7 +74,7 @@ function errorMessage(err: unknown): string {
 function BrandHeader({ title, subtitle }: { title: string; subtitle: string }): ReactElement {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <BrandLogo size={42} title="dsh-talk 社区" />
+      <BrandLogo size={42} title="DSH-Talk 社区" />
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <div style={{ fontSize: 16, fontWeight: 650, lineHeight: 1.2 }}>{title}</div>
         <div style={{ ...fieldHint, fontSize: 14 }}>{subtitle}</div>
@@ -244,7 +244,7 @@ function ForgotPasswordCard({
 
       {stage === "done" ? (
         <>
-          <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
+          <div style={{ fontSize: 14, color: palette.muted, lineHeight: 1.6 }}>
             密码已重置成功，请使用新密码重新登录。
           </div>
           <Button variant="primary" size="md" style={{ width: "100%" }} onClick={onDone}>
@@ -258,7 +258,7 @@ function ForgotPasswordCard({
         >
           {stage === "request" ? (
             <>
-              <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
+              <div style={{ fontSize: 14, color: palette.muted, lineHeight: 1.6 }}>
                 输入注册邮箱，我们会向它发送一封 6 位验证码邮件。
               </div>
               <Field label="邮箱" htmlFor="talk-reset-email">
@@ -276,7 +276,7 @@ function ForgotPasswordCard({
             </>
           ) : (
             <>
-              <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.6 }}>
+              <div style={{ fontSize: 14, color: palette.muted, lineHeight: 1.6 }}>
                 验证码已发送至 <strong style={{ color: palette.text }}>{email}</strong>，5
                 分钟内有效；若未收到，请检查垃圾邮件；若该邮箱未注册则不会收到邮件。
               </div>
@@ -444,7 +444,7 @@ export function AuthScreen(): ReactElement {
           subtitle={verifyFromLogin ? "该账号尚未验证，验证后即可登录" : "输入验证码完成注册"}
         />
 
-        <div style={{ fontSize: 14, color: palette.secondary, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 14, color: palette.muted, lineHeight: 1.5 }}>
           {verifyFromLogin ? (
             <>
               该邮箱尚未验证，暂时无法登录。验证码已重新发送至{" "}
@@ -517,7 +517,7 @@ export function AuthScreen(): ReactElement {
 
   return (
     <div style={card}>
-      <BrandHeader title="dsh-talk 社区" subtitle="登录后参与社区讨论" />
+      <BrandHeader title="DSH-Talk 社区" subtitle="登录后参与社区讨论" />
 
       <Segmented<Mode>
         value={mode}
@@ -594,7 +594,7 @@ export function AuthScreen(): ReactElement {
         {error ? <ErrorBanner message={error} /> : null}
 
         {talk.busy && !busy ? (
-          <div style={{ ...fieldHint, color: palette.secondary }}>正在连接 Server…</div>
+          <div style={{ ...fieldHint, color: palette.muted }}>正在连接 Server…</div>
         ) : null}
 
         <Button

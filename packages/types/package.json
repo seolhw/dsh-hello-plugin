@@ -1,7 +1,7 @@
 {
   "name": "@dsh-talk/types",
   "version": "0.0.1",
-  "description": "Shared type definitions for dsh-talk (entities, Server REST API, WebSocket protocol, host RPC)",
+  "description": "Shared type definitions for DSH-Talk (entities, Server REST API, WebSocket protocol, host RPC)",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

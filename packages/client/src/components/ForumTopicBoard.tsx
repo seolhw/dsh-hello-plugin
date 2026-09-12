@@ -121,7 +121,7 @@ function ForumTopicRow({
               </span>
             ) : null}
           </span>
-          <span style={{ ...smallText, fontSize: 14, color: palette.caption }}>
+          <span style={{ ...smallText, fontSize: 14 }}>
             {author} 发起
             {thread.starterSnippet ? (
               <>
@@ -240,7 +240,7 @@ export function ForumTopicBoard({
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "10px 16px 14px" }}>
       <div style={metaBar}>
-        <span style={{ ...smallText, fontSize: 14, color: palette.caption }}>
+        <span style={{ ...smallText, fontSize: 14 }}>
           {active.length + archived.length} 条话题 · 点进话题查看与回复
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -279,7 +279,7 @@ export function ForumTopicBoard({
               padding: "4px 2px",
               fontSize: 14,
               fontWeight: 600,
-              color: palette.caption,
+              color: palette.muted,
               cursor: "pointer",
             }}
           >

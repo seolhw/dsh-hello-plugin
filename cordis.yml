@@ -1,7 +1,7 @@
-# 本地开发 overlay：把 dsh-talk 装进 boot 树。
+# 本地开发 overlay：把 DSH-Talk 装进 boot 树。
 #
 # name 指向仓库根打包产物（lib/index.mjs）。cordis 的 client-modules 会按该
-# row 解析出的模块向上找「最近的 package.json」= 仓库根 dsh-talk 包；它声明了
+# row 解析出的模块向上找「最近的 package.json」= 仓库根 DSH-Talk 包；它声明了
 # dsh.client + exports["./client"]（./lib/client.js），web shell 因此发现浏览器
 # 半边；host 半边即 lib/index.mjs（与 packages/host/src 同源）。
 #

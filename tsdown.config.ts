@@ -1,5 +1,5 @@
 /**
- * dsh-talk 双面（dual-face）打包配置：
+ * DSH-Talk 双面（dual-face）打包配置：
  *  - Node.js host（packages/host/src/index.ts）→ lib/index.mjs + index.cjs + d.ts
  *  - 浏览器 client（packages/client/src/index.ts）→ lib/client.js
  *    client 产物以 window.__ModuleLoader__.load({id, factory}) 交给 DSH 的

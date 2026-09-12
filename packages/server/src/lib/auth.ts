@@ -78,7 +78,7 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
     : { allowedHosts: [...AUTH_ALLOWED_HOSTS] };
 
   return {
-    appName: "dsh-talk",
+    appName: "DSH-Talk",
     baseURL,
     secret,
     database: env.DB,

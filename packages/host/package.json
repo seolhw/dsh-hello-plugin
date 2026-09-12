@@ -1,7 +1,7 @@
 {
   "name": "@dsh-talk/host",
   "version": "0.0.1",
-  "description": "dsh-talk Node.js（host）半边：注册 talk 配置 + 本地 /api/talk/config。源码由根包 dsh-talk 的 tsdown 打进 lib/index.*",
+  "description": "DSH-Talk Node.js（host）半边：注册 talk 配置 + 本地 /api/talk/config。源码由根包 DSH-Talk 的 tsdown 打进 lib/index.*",
   "private": true,
   "type": "module",
   "exports": {

@@ -33,7 +33,7 @@ const tipWrap: CSSProperties = {
 
 const tipTitle: CSSProperties = { fontSize: 16, fontWeight: 600, color: palette.text };
 
-const tipHint: CSSProperties = { fontSize: 14, lineHeight: 1.5, color: palette.caption };
+const tipHint: CSSProperties = { fontSize: 14, lineHeight: 1.5, color: palette.muted };
 
 /** 窄列图标的 hover 说明卡：标题 + 可选副标题 */
 function RailTip({ title, hint }: { title: string; hint?: string }): ReactElement {
@@ -52,7 +52,7 @@ const PROJECT_REPO = "https://github.com/seolhw/dsh-talk";
 function ProjectCard(): ReactElement {
   return (
     <div style={{ ...tipWrap, maxWidth: 280, gap: 4 }}>
-      <span style={tipTitle}>dsh-talk</span>
+      <span style={tipTitle}>DSH-Talk</span>
       <span style={tipHint}>
         把「社区」装进 DSH：在 DeepSeek Harness 里和同好聊天、提问求助、发通知， 社区内容与你的
         Agent 工作区不再割裂。
@@ -122,7 +122,7 @@ function CommunityMetaCard({ community }: { community: Community }): ReactElemen
             marginTop: 6,
             fontSize: 14,
             lineHeight: 1.6,
-            color: palette.secondary,
+            color: palette.muted,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
             display: "-webkit-box",

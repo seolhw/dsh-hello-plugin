@@ -310,14 +310,7 @@ communitiesApi.post("/", async (c) => {
     };
     await db.insert(channels).values(row);
     if (d.kind === "announcement") {
-      await db.insert(channelOverwrites).values({
-        channelId,
-        targetType: "everyone",
-        targetId: EVERYONE_TARGET_ID,
-        allow: 0,
-        deny: Permission.SEND_MESSAGES | Permission.CREATE_THREAD,
-        updatedAt: now,
-      });
+      await grantAnnouncementReadOnly(db, channelId, now);
     }
     createdChannels.push(channelAccess(row, ALL_PERMISSIONS));
   }
@@ -590,6 +583,57 @@ communitiesApi.delete("/:id", async (c) => {
   return emptyOk(c);
 });
 
+// 公告频道默认只读：给 @everyone 叠加 SEND_MESSAGES | CREATE_THREAD 的 deny
+// （owner 与 ADMINISTRATOR 绕过频道覆盖，因此仍可发布；被授权 SEND_MESSAGES 的角色也可发）
+const ANNOUNCEMENT_READONLY_DENY = Permission.SEND_MESSAGES | Permission.CREATE_THREAD;
+
+/** 让公告频道对 @everyone 只读（保留既有 allow 与其它 deny 位） */
+async function grantAnnouncementReadOnly(
+  db: ReturnType<typeof dbOf>,
+  channelId: string,
+  now: number,
+): Promise<void> {
+  await db
+    .insert(channelOverwrites)
+    .values({
+      channelId,
+      targetType: "everyone",
+      targetId: EVERYONE_TARGET_ID,
+      allow: 0,
+      deny: ANNOUNCEMENT_READONLY_DENY,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        channelOverwrites.channelId,
+        channelOverwrites.targetType,
+        channelOverwrites.targetId,
+      ],
+      set: { deny: sql`${channelOverwrites.deny} | ${ANNOUNCEMENT_READONLY_DENY}`, updatedAt: now },
+    });
+}
+
+/** 取消公告频道的 @everyone 只读（只摘掉自动叠加的 deny 位；空覆盖则删行） */
+async function revokeAnnouncementReadOnly(
+  db: ReturnType<typeof dbOf>,
+  channelId: string,
+  now: number,
+): Promise<void> {
+  const where = and(
+    eq(channelOverwrites.channelId, channelId),
+    eq(channelOverwrites.targetType, "everyone"),
+    eq(channelOverwrites.targetId, EVERYONE_TARGET_ID),
+  );
+  const row = (await db.select().from(channelOverwrites).where(where).limit(1))[0];
+  if (!row) return;
+  const deny = row.deny & ~ANNOUNCEMENT_READONLY_DENY;
+  if (deny === 0 && row.allow === 0) {
+    await db.delete(channelOverwrites).where(where);
+    return;
+  }
+  await db.update(channelOverwrites).set({ deny, updatedAt: now }).where(where);
+}
+
 // ================================================================
 // 频道（创建挂在社区下 /:id/channels）
 // ================================================================
@@ -632,6 +676,8 @@ communitiesApi.post("/:id/channels", async (c) => {
     updatedAt: now,
   };
   await db.insert(channels).values(row);
+  // 公告频道建好即为只读：补写 @everyone 覆盖，避免普通成员可发
+  if (row.kind === "announcement") await grantAnnouncementReadOnly(db, id, now);
   const permissions = await resolveChannelPermissions(db, row, userId);
   return c.json(channelAccess(row, permissions), 201);
 });
@@ -1118,11 +1164,19 @@ channelsApi.patch("/:id", async (c) => {
   if (body.position !== undefined) patch.position = body.position;
   if (body.kind !== undefined) patch.kind = body.kind;
   if (Object.keys(patch).length === 0) throw HttpApiError.badRequest("empty patch");
-  patch.updatedAt = Date.now();
+  const now = Date.now();
+  patch.updatedAt = now;
   await db
     .update(channels)
     .set(patch as never)
     .where(eq(channels.id, row.id));
+  // 在普通频道与公告频道之间切换时，同步 @everyone 只读覆盖
+  const nextKind = patch.kind ?? row.kind;
+  if (nextKind === "announcement" && row.kind !== "announcement") {
+    await grantAnnouncementReadOnly(db, row.id, now);
+  } else if (row.kind === "announcement" && nextKind !== "announcement") {
+    await revokeAnnouncementReadOnly(db, row.id, now);
+  }
   const updated = await mustRow(
     db.select().from(channels).where(eq(channels.id, row.id)).limit(1),
     "channel",

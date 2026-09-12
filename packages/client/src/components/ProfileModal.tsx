@@ -208,6 +208,7 @@ export function ProfileModal({
                 id="talk-profile-username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
+                maxLength={16}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -225,7 +226,7 @@ export function ProfileModal({
               </Button>
             </div>
             <span style={{ ...smallText, fontSize: 11.5 }}>
-              仅限大小写字母和数字，至少 4 个字符，每周只能修改一次。
+              仅限大小写字母和数字，4-16 个字符，每周只能修改一次。
             </span>
           </div>
           <div style={infoRow}>

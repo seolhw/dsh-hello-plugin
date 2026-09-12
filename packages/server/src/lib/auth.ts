@@ -111,7 +111,7 @@ function buildAuthOptions(env: Env): BetterAuthOptions {
       },
     },
     plugins: [
-      // 用户名只允许大小写字母和数字；长度 4..30（与前端提示一致）
+      // 用户名只允许大小写字母和数字；长度 4..16（与前端提示一致）
       username({
         minUsernameLength: USERNAME_MIN_LENGTH,
         maxUsernameLength: USERNAME_MAX_LENGTH,

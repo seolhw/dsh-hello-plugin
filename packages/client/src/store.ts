@@ -418,6 +418,10 @@ export async function updateUserUsername(username: string): Promise<boolean> {
     notify("用户名至少需要 4 个字符");
     return false;
   }
+  if (trimmed.length > 16) {
+    notify("用户名最多 16 个字符");
+    return false;
+  }
   if (trimmed.toLowerCase() === (state.me?.handle ?? "").toLowerCase()) {
     notify("用户名没有变化");
     return false;

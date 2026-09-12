@@ -38,10 +38,10 @@ export function toEntityUser(row: AuthUserRow): User {
 const USER_COLUMNS = "id, name, email, image, username, createdAt";
 
 // ---- 用户名规则（与 username 插件配置、客户端预检保持一致）----
-// 只能使用大小写字母和数字；长度 4..30；每周只能改一次；全局唯一。
+// 只能使用大小写字母和数字；长度 4..16；每周只能改一次；全局唯一。
 export const USERNAME_PATTERN = /^[A-Za-z0-9]+$/;
 export const USERNAME_MIN_LENGTH = 4;
-export const USERNAME_MAX_LENGTH = 30;
+export const USERNAME_MAX_LENGTH = 16;
 const USERNAME_CHANGE_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
@@ -106,24 +106,24 @@ function randomTag(length: number): string {
 
 /**
  * 从邮箱 @ 前缀派生一个合法且唯一的用户名；若前缀已被占用则追加随机后缀。
- * 与用户名规则一致：小写 + 仅允许 [a-z0-9]，长度固定在 4..30
- * （与 username 插件的 minUsernameLength=4, maxUsernameLength=30 对齐），
+ * 与用户名规则一致：小写 + 仅允许 [a-z0-9]，长度固定在 4..16
+ * （与 username 插件的 minUsernameLength=4, maxUsernameLength=16 对齐），
  * 保证在 databaseHooks 中写入的用户名符合编辑用户名时的校验规则。
  */
 export async function uniqueUsernameForEmail(db: D1Database, email: string): Promise<string> {
   const prefix = email.split("@")[0] ?? "user";
-  // 仅保留小写字母和数字，截到 24 位（为随机后缀留空间，合计 ≤30）
-  let base = prefix.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "user";
+  // 仅保留小写字母和数字，截到 12 位（为随机后缀留空间，合计 ≤16）
+  let base = prefix.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "user";
 
   // 邮箱前缀过短：补齐到 ≥4，避免产生低于最小长度的用户名
   if (base.length < 4) {
-    base = `${base}${randomTag(4 - base.length + 1)}`.slice(0, 24);
+    base = `${base}${randomTag(4 - base.length + 1)}`.slice(0, 12);
   }
 
   let candidate = base;
   for (let attempt = 0; attempt < 50; attempt += 1) {
     if (attempt > 0) {
-      candidate = `${base}${randomTag(4)}`.slice(0, 30);
+      candidate = `${base}${randomTag(4)}`.slice(0, 16);
     }
     const existing = await db
       .prepare(`SELECT id FROM "user" WHERE username = ?`)
@@ -131,7 +131,7 @@ export async function uniqueUsernameForEmail(db: D1Database, email: string): Pro
       .first();
     if (!existing) return candidate;
   }
-  return `${base}${crypto.randomUUID().replace(/[^a-z0-9]/g, "").slice(0, 8)}`.slice(0, 30);
+  return `${base}${crypto.randomUUID().replace(/[^a-z0-9]/g, "").slice(0, 8)}`.slice(0, 16);
 }
 
 /** 单查一个认证用户；不存在返回 null */

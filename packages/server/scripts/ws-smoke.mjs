@@ -57,7 +57,7 @@ async function signup(name) {
     name,
     email: `${name}${ts}@example.com`,
     password: "Password1234",
-    username: `${name}${ts}`,
+    username: `${name}${ts.toString(36)}`,
   });
   console.log(`signup ${name} -> ${res.status}`, JSON.stringify(res.json)?.slice(0, 120));
   return res.json?.token;

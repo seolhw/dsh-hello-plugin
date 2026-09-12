@@ -199,6 +199,7 @@ export class ChannelActor extends DurableObject<Env> {
           return;
         }
         session.presence = kind;
+        ws.serializeAttachment(session);
         await this.upsertPresence(session);
         this.respondOk(ws, id, { kind: session.presence });
         return;
@@ -249,12 +250,31 @@ export class ChannelActor extends DurableObject<Env> {
     }
   }
 
-  /** 当前频道在线成员快照（读本 DO 私有 SQLite，不跨网络、不影响业务 D1） */
+  /**
+   * 当前频道在线成员快照。
+   * 以「仍保持连接的会话」为准（按用户去重），presence 表只用来补 last_seen。
+   * 断连用户遗留的 presence 行不算数，保证与 hello 的 onlineCount 口径一致。
+   */
   async online(): Promise<{ count: number; members: PresenceRow[] }> {
     this.ensurePresenceTable();
-    const members = this.ctx.storage.sql
-      .exec<PresenceRow>("SELECT * FROM presence ORDER BY last_seen DESC")
-      .toArray();
+    const lastSeenByUser = new Map(
+      this.ctx.storage.sql
+        .exec<PresenceRow>("SELECT user_id, last_seen FROM presence")
+        .toArray()
+        .map((r) => [r.user_id, r.last_seen] as const),
+    );
+    const byUser = new Map<string, PresenceRow>();
+    for (const session of this.sessions.values()) {
+      byUser.set(session.userId, {
+        user_id: session.userId,
+        handle: session.handle,
+        display_name: session.displayName,
+        avatar_url: session.avatarUrl,
+        kind: session.presence,
+        last_seen: lastSeenByUser.get(session.userId) ?? Date.now(),
+      });
+    }
+    const members = [...byUser.values()].sort((a, b) => b.last_seen - a.last_seen);
     return { count: members.length, members };
   }
 
@@ -272,7 +292,10 @@ export class ChannelActor extends DurableObject<Env> {
   }
 
   private async unregister(ws: WebSocket): Promise<void> {
-    const session = this.sessions.get(ws);
+    // 休眠唤醒后构造函数重建 sessions 时，正在关闭的 socket 可能已不在 getWebSockets() 里；
+    // 此时从 attachment 兜底取回会话，否则会漏删 presence 行、留下“幽灵在线”。
+    const session =
+      this.sessions.get(ws) ?? (ws.deserializeAttachment() as Session | null) ?? undefined;
     this.sessions.delete(ws);
     if (!session) return;
 

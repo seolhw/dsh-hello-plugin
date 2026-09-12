@@ -53,7 +53,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",

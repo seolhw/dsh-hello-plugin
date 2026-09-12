@@ -83,7 +83,7 @@ function CommunityMetaCard({ community }: { community: Community }): ReactElemen
     <div style={tipWrap}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <Avatar
-          color="#fff"
+          color={palette.communityAvatarBg}
           label={community.name}
           src={community.iconUrl}
           size={32}
@@ -255,7 +255,7 @@ export function CommunitiesRail({
               {withTip(
                 <span style={railAvatar}>
                   <Avatar
-                    color="#fff"
+                    color={palette.communityAvatarBg}
                     label={c.name}
                     src={c.iconUrl}
                     size={44}

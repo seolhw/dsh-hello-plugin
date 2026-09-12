@@ -6,7 +6,7 @@
 import type { Community } from "@dsh-talk/types/entities";
 import type { CSSProperties } from "react";
 import type { MessageItem } from "../store";
-import { palette } from "./styles";
+import { palette, shadow } from "./styles";
 
 // ---------------- 布局样式 ----------------
 
@@ -87,7 +87,7 @@ export const railBubble: CSSProperties = {
   padding: "0 3px",
   borderRadius: 999,
   background: palette.badge,
-  color: "#fff",
+  color: palette.onColor,
   fontSize: 14,
   fontWeight: 700,
   lineHeight: "18px",
@@ -156,7 +156,7 @@ export const msgChip: CSSProperties = {
   borderRadius: 8,
   background: palette.elevated,
   border: `1px solid ${palette.border}`,
-  boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+  boxShadow: shadow.chip,
 };
 
 /**
@@ -286,7 +286,7 @@ export const privacyBadge: CSSProperties = {
 // 分段式激活态（对齐 AuthScreen 的 Segmented 控件）
 export const activeTile: CSSProperties = {
   background: palette.elevated,
-  boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+  boxShadow: shadow.soft,
   border: `1px solid ${palette.border}`,
 };
 

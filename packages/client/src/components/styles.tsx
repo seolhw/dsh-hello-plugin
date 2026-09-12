@@ -45,6 +45,29 @@ export const palette = {
   // 徽标：提及用品牌色，普通未读用文字弱化层
   badge: "var(--dsw-alias-state-error-primary)",
   hoverAccent: "var(--dsw-alias-interactive-bg-hover-accent)",
+  // 彩色/深色块上的文字与图标（未读气泡、头像字母、@ 自己的反白）：各主题下恒定用白
+  onColor: "#ffffff",
+  /** 品牌色淡底：@提及高亮、被提及消息的底色 */
+  mentionBg: "var(--dsw-alias-state-business-tertiary)",
+  /** 搜索命中关键词的底色（比 mentionBg 更实一档的半透明品牌色） */
+  highlightBg: "var(--dsw-alias-interactive-bg-hover-accent)",
+  /** 头像无图时的默认底色渐变 */
+  avatarFallback:
+    "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
+  /** 社区头像的圆形底色（白色圆底 + 内缩 logo，亮暗主题都用白） */
+  communityAvatarBg: "#ffffff",
+} as const;
+
+/** 阴影：集中定义，避免 rgba 黑散落在各组件里 */
+export const shadow = {
+  /** 小元素 / 列表卡片 */
+  soft: "0 1px 2px rgba(0,0,0,0.06)",
+  /** 消息 hover 操作条 */
+  chip: "0 2px 6px rgba(0,0,0,0.1)",
+  /** @ 补全下拉 */
+  menu: "0 4px 16px rgba(0,0,0,0.14)",
+  /** 表情面板等浮层 */
+  popup: "0 6px 20px rgba(0,0,0,0.18)",
 } as const;
 
 /** 页签内容页根容器：占满宿主中栏（高度由外层 flex 约束） */
@@ -101,7 +124,7 @@ export function pillStyle(active: boolean): CSSProperties {
     fontWeight: 600,
     color: palette.text,
     background: palette.elevated,
-    boxShadow: "0 1px 2px rgba(0,0,0,0.06)",
+    boxShadow: shadow.soft,
   };
 }
 
@@ -244,10 +267,8 @@ export function Avatar({
         justifyContent: "center",
         borderRadius: "50%",
         overflow: "hidden",
-        background:
-          color ??
-          "linear-gradient(135deg, var(--dsw-static-deepseek-500), var(--dsw-static-deepseek-400))",
-        color: "#fff",
+        background: color ?? palette.avatarFallback,
+        color: palette.onColor,
         fontSize: avatarLabelSize(size),
         fontWeight: 600,
         userSelect: "none",

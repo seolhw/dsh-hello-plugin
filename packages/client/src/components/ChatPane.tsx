@@ -51,7 +51,7 @@ import {
 import { MessageRow, ReplyGlyph } from "./MessageRow";
 import { OnlineMembersModal, SearchMessagesModal } from "./SearchModals";
 import { ShareSnapshotModal } from "./ShareModals";
-import { Avatar, palette, smallText } from "./styles";
+import { Avatar, palette, shadow, smallText } from "./styles";
 import { ThreadMembersModal, ThreadSettingsModal } from "./ThreadModals";
 
 export function ChatPane({
@@ -724,7 +724,7 @@ export function ChatPane({
                           padding: 4,
                           maxHeight: 220,
                           overflowY: "auto",
-                          boxShadow: "0 4px 16px rgba(0,0,0,0.14)",
+                          boxShadow: shadow.menu,
                         }}
                       >
                         {talk.view.membersLoading ? (

@@ -7,7 +7,7 @@
 import { Button } from "@deepseek-ai/dsh-client-ui-primitives";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
-import { palette, slimScrollbar } from "./styles";
+import { palette, shadow, slimScrollbar } from "./styles";
 
 /** 手绘笑脸 glyph：表情按钮用（图标库没有对应图标） */
 export function SmileGlyph({ size = 16 }: { size?: number }): ReactElement {
@@ -311,7 +311,7 @@ const panel: CSSProperties = {
   background: palette.elevated,
   border: `1px solid ${palette.border}`,
   borderRadius: 10,
-  boxShadow: "0 6px 20px rgba(0,0,0,0.18)",
+  boxShadow: shadow.popup,
   display: "flex",
   flexDirection: "column",
   overflow: "hidden",

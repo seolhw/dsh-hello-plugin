@@ -47,8 +47,8 @@ function renderMentions(text: string, selfHandle: string): ReactNode[] {
       <span
         key={`mention-${index}`}
         style={{
-          color: isSelf ? "#ffffff" : palette.accent,
-          background: isSelf ? palette.accent : "rgba(91,140,255,0.12)",
+          color: isSelf ? palette.onColor : palette.accent,
+          background: isSelf ? palette.accent : palette.mentionBg,
           borderRadius: 4,
           padding: isSelf ? "0 3px" : "0 2px",
           fontWeight: 500,

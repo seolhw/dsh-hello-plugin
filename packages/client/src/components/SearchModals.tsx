@@ -28,7 +28,7 @@ function highlightMatch(text: string, keyword: string): ReactNode {
     nodes.push(
       <span
         key={`${at}-${kw}`}
-        style={{ background: "rgba(91,140,255,0.22)", borderRadius: 3, padding: "0 1px" }}
+        style={{ background: palette.highlightBg, borderRadius: 3, padding: "0 1px" }}
       >
         {text.slice(at, at + kw.length)}
       </span>,

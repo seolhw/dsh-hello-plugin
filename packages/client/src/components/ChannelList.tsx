@@ -190,7 +190,7 @@ function ThreadListRow({ thread, channelId }: { thread: ThreadSummary; channelId
               fontWeight: 700,
               lineHeight: "18px",
               textAlign: "center",
-              color: "#fff",
+              color: palette.onColor,
               background: mention > 0 ? palette.accent : palette.badge,
             }}
           >
